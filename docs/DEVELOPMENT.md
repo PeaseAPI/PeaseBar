@@ -158,6 +158,8 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T97 | **半截图标两类根因（用户截图实锤，推翻 T93 剥切法）**：①图标+数字复合条——knockout 抠像把图标内部镂空也当背景抠掉，split_leading_glyph 找「透明缝」会切进图标身体（钉钉翅膀/QQ铃/搜狗S/Qoder羽毛/LaunchOS 全中招）；②AX frame 宽 < 真实绘制宽（时钟 frame 36pt 实画「22:31」约 70pt、控制中心同理）——方形比例但裁窗口装不下，右沿必半截。取证法：把 capture_icons 最终显示图逐张落盘拼 grid 目视（tmp/p6a_final_grid.png 实锤 7 项）。修法：放弃剥切，宽条（trim 后 w>h×1.4）与贴边条（touches_side_edge：抠像后墨迹贴首/末列）一律拒收走 App 图标兜底——**宁误杀宽纯图标（剪刀/微信）也不出半截**；真机 Q71 复核 18 张显示图零半截 | capture.py 删 split_leading_glyph/GAP_MIN_PX，新增 touches_side_edge；单测 TestSideEdge+TestWideReject（105→107） |
 | T98 | **面板卡顿根因=主线程同步重活**：show() 里盘点（AX 全量，最坏秒级）+全屏截图+numpy 抠图 25 张全跑在主线程 → 「点一下卡半天」；连点时事件排队叠加每份全量重建 → 「多次点击卡死」。修法：采集/渲染拆分——_collect() 纯数据（无 AppKit UI，可子线程），show() 用上一次快照立即渲染，后台线程重采（_collecting 防重入，同一时刻最多一份）采完 performSelectorOnMainThread 回来就地更新；启动 prewarm() 让首点也有快照；位图靠代际缓存命中不重截 | panel.py _collect/_render/_start_background_refresh/prewarm/refresh_now；真机 S1 0.001–0.026s、S2 六连击不卡死 |
 | T99 | **PyObjC 选择子对号坑（T41 变体）**：NSObject 子类里新增单参且名不以 `_` 结尾的方法（`_render(self, snap)`），若运行时已存在同名 0 参选择子（此处 `_render`），建类即 BadPrototypeError，启动装配全挂且 stdout 看不到（崩在日志重定向前，只能事后看 ~/Library/Logs/PeaseBar.log 的 traceback）。多参方法（_make_cell 5 参/_position_panel 1 参但选择子带冒号匹配）不炸，故旧代码一直没事——新名字撞不撞已有选择子全看运气，**一律显式 @objc.python_method 才稳**；部署后第一步看启动日志再跑探针 | panel.py _render 加 @objc.python_method；探针首跑全 FAIL 反被成为实锤通道 |
+| T100 | **设置窗对标 Thaw 的保留面工程**：侧栏图标化/布局页横向图标条/静态页卡片化三大变中，可寻性判据一个不能动——页签 AXButton+AXTitle 精确+page- 标识、格子 PushOnPushOff→AXCheckBox+AXIdentifier=配置键+AXHelp 含「当前：」、窗口标题前缀「PeaseBar 设置 · 页名」。变的是几何（格子进 AXScrollArea 子树、宽度随图伸缩），不变的是接线；探针判据随之从「几何包含」改「子树归属」（横向溢出格子的坐标本就超出可见条宽） | settings.py _build_sidebar/_build_section_bar/_mk_card；真机 U1–U7 全 PASS+回归 14 条 |
+| T101 | **PyObjC 属性 setter 不能猜**：NSScrollView 的 bordered 属性没有 setBorder_（ObjC 侧是 isBordered/setBorderType:），猜出来的 setter 在运行到那行才 AttributeError；若异常落在快捷键 action 里会被 AppKit 吞进系统日志，现场只见「窗口打不开」。用 setBorderType_(0)（NSNoBorder）；拿不准先 dir(obj) grep | settings.py _build_section_bar；首轮回探全 FAIL 即此因，启动日志抓栈定位 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -293,6 +295,18 @@ PeaseBar/
 - [x] P7c 过程中发现并修掉 T99（PyObjC 选择子对号坑，启动装配全挂）；回归 S7（Q73 口径）
       + S8（t_p2b P45–P47、t_p4 P81/P82/P86 共 12 条）全 PASS；S9 环境还原 CONFIG_SAME；
       计划 tmp/test-plan-phase7.md，探针 tmp/t_p7.py；单测 107 项不变
+
+### Phase 8 设置窗口对标 Thaw（用户 2026-11-22 再反馈：「设置页面也差太多」）
+- [x] P8a 侧栏（T100）：220pt + SF Symbol 图标 + 分组小标题（模块/管理）+ 32pt 行；
+      页签仍 AXButton+AXTitle 精确+page- 标识（T63 口径不变，Q72 缩进回归 PASS）
+- [x] P8b 布局页：三区改「区标题行（左区名+右排序钮）+ Thaw 同款横向单行图标条」
+      （NSScrollView 胶囊容器，格子宽随真实裁图宽高比伸缩 26–72pt，超宽横向滚动）；
+      格子全部判据（AXCheckBox/AXIdentifier/AXHelp/右键菜单/键盘）原样保留，回归 14 条全绿
+- [x] P8c 静态页 GroupBox 卡片化：通用/快捷键/疑难解答/关于逐行卡片（左标题+副说明、右控件），
+      launch-at-login/control-icon-picker 标识与页签名文本判据不动
+- [x] P8d 窗口 150+610→220+640（宽 860）；STATIC_H 300→340；过程中修掉 T101；
+      计划 tmp/test-plan-phase8.md，探针 tmp/t_p8.py（U1–U7 全 PASS）；单测 107 项不变
+- [ ] 微调项：图标条胶囊底色对比度比 Thaw 略弱（0.22 alpha 仍偏暗）；拖拽跨区未做（留下一轮）
 
 ## 9. 续作指引（重启后从这里开始）
 
@@ -450,6 +464,12 @@ PeaseBar/
   移右键菜单；过程中修掉 T99（PyObjC 选择子对号坑，启动装配全挂）；回归 Q73 口径+12 条全绿，
   单测 107 不变，环境还原 CONFIG_SAME；部署仍走 T96（双权限未洗）。
   **待办：发布 1.0.1 需回 T86 完整重打包+重授权；右键菜单「展开收纳区」需真鼠标人工复核一次。**
+- **2026-11-22（Phase 8：设置窗口对标 Thaw）**：用户批评「设置页面也差太多」，真机截 Thaw
+  四页+AX dump 后重做（计划 tmp/test-plan-phase8.md，探针 tmp/t_p8.py，U1–U7 全 PASS）：
+  侧栏 220pt+SF Symbol 图标+分组小标题；布局页三区改 Thaw 同款横向单行图标条（胶囊容器，
+  格子宽随真实裁图宽高比伸缩）；静态页 GroupBox 卡片化；窗口宽 860。全部编辑链/键盘/
+  标识判据原样保留（T100），回归 14 条全绿；过程修掉 T101（setBorder_ 不存在）；单测 107 不变；
+  环保证据区分真漂移与 order 物化残影（U7 PASS）；部署仍走 T96。
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；

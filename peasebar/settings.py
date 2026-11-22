@@ -17,8 +17,13 @@
 （T41：action 进去了、菜单却没出现在屏幕上），而按钮路径 100% 可控可测；
 右键菜单改用 `setMenu:`（T27：NSView 带菜单时系统自己弹），不再手写跟踪循环。
 
-拖拽跨区（Thaw 的 LayoutBar 本体）暂缺：那是另一套 NSDraggingDestination 工程，
-且与 Phase 3「把顺序写回真实菜单栏」的拖拽同源，等那边一起做。
+拖拽跨区暂缺：布局页 Phase 8 起已改成 Thaw 同款横向图标条（胶囊滚动容器），
+但条内拖动换区是另一套 NSDraggingDestination 工程，与 Phase 3「把顺序写回真实
+菜单栏」的拖拽同源，等那边一起做；现在键盘 ⌥ 方向键 / 底部按钮 / 右键菜单三条路都全。
+
+Phase 8（对标 Thaw Settings 窗）：侧栏加宽到 220pt 带 SF Symbol 图标与分组小标题；
+布局页每区改成「区标题行（左区名 + 右排序钮）+ 横向单行图标条」，格子宽度随真实
+裁图的宽高比伸缩；静态页设置项逐行 GroupBox 卡片化（左标题+副说明、右控件）。
 
 另含维持性设置：面板自动收回秒数（F5，通用页）、图标位图重抓与权限入口（疑难解答页）。
 """
@@ -31,6 +36,7 @@ from AppKit import (
     NSEventModifierFlagCommand,
     NSEventModifierFlagOption,
     NSFont,
+    NSImage,
     NSImageOnly,
     NSImageScaleProportionallyDown,
     NSLineBreakByTruncatingTail,
@@ -40,6 +46,7 @@ from AppKit import (
     NSPasteboard,
     NSProcessInfo,
     NSPopUpButton,
+    NSScrollView,
     NSSwitch,
     NSText,
     NSTextField,
@@ -70,10 +77,11 @@ from peasebar import capture, inventory, sections
 # 方向键的 keyCode（AppKit 的 NS*ArrowFunctionKey 取值，写数字谁也看不懂）
 KEY_LEFT, KEY_RIGHT, KEY_DOWN, KEY_UP = 123, 124, 125, 126
 
-SIDEBAR_W = 150
-CONTENT_W = 610
+# Phase 8 对标 Thaw：侧栏 220pt（图标+文字+分组小标题），内容区加宽
+SIDEBAR_W = 220
+CONTENT_W = 640
 WIN_WIDTH = SIDEBAR_W + CONTENT_W
-STATIC_H = 300
+STATIC_H = 340
 TILE_W, TILE_H = 44, 38
 TILE_GAP = 4
 EDGE = 16
@@ -81,6 +89,8 @@ ROW_H = 24
 SECTION_H = 20
 HEADER_H = 34
 GAP = 12
+# 布局页横向图标条高度（对标 Thaw 的 AXScrollArea 高 48，含胶囊上下留白）
+BAR_H = 46
 # 布局页底部固定行数：选中提示 + 移区按钮 + 顺序按钮 + 重置行
 BOTTOM_ROWS = 4
 # 撤销栈深度（一次编辑只存两个小列表，50 步足够找回手滑，也不会吃掉多少内存）
@@ -102,6 +112,14 @@ PAGES = (("layout", "布局", "图标分区与顺序"),
          ("shortcuts", "快捷键", "全局快捷键"),
          ("troubleshoot", "疑难解答", "权限、图标抓取与诊断"),
          ("about", "关于", "版本与源码"))
+
+# 侧栏 SF Symbol 图标（对标 Thaw：纯文字页签太素）；系统取不到符号时优雅降级为纯文字
+_PAGE_ICONS = {"layout": "square.grid.2x2", "general": "gearshape",
+               "shortcuts": "keyboard", "troubleshoot": "wrench.and.screwdriver",
+               "about": "info.circle"}
+# 侧栏分组小标题（对标 Thaw 的 MODULES/MANAGE）
+_SIDEBAR_GROUPS = (("模块", ("layout", "general", "shortcuts")),
+                   ("管理", ("troubleshoot", "about")))
 
 LOG_PATH = os.path.expanduser("~/Library/Logs/PeaseBar.log")
 REPO_URL = "https://github.com/PeaseAPI/PeaseBar"
@@ -133,6 +151,14 @@ class GridView(NSView):
         ctrl = getattr(self, "settings_ctrl", None)
         if ctrl is None or not ctrl.handleKey_(event):
             objc.super(GridView, self).keyDown_(event)
+
+
+class FlippedView(NSView):
+    """图标条的内容视图：左上原点。AppKit 默认 y 朝上，横排要从底部倒数，
+    翻过来排「从左到右 + 上下居中」最直白。"""
+
+    def isFlipped(self):
+        return True
 
 
 class SettingsController(NSObject):
@@ -238,17 +264,14 @@ class SettingsController(NSObject):
         self._save_timeout()
 
     def _page_height(self, page, buckets):
-        """各页内容高度：布局页随分桶行数变，静态页定高。"""
+        """各页内容高度：布局页随分区数变（每区只有一行图标条），静态页定高。"""
         if page != "layout":
             return STATIC_H
-        cols = max(1, int((CONTENT_W - 2 * EDGE) // (TILE_W + TILE_GAP)))
         h = EDGE + HEADER_H
         for sec in _SECTION_ORDER:
-            n = len(buckets[sec])
-            if not n:
+            if not buckets[sec]:
                 continue
-            rows = (n + cols - 1) // cols
-            h += SECTION_H + rows * (TILE_H + TILE_GAP) + GAP
+            h += SECTION_H + BAR_H + GAP
         h += (BOTTOM_ROWS + len(self._hints())) * (ROW_H + 8) + EDGE
         return int(h)
 
@@ -293,36 +316,54 @@ class SettingsController(NSObject):
         self._sync_selection()
 
     def _build_sidebar(self, container, height, page):
-        """左侧页签列：纯按钮 + 选中垫底（Thaw NavigationSplitView 的同款观感）。"""
+        """左侧页签列（Phase 8 对标 Thaw）：220pt 宽、SF Symbol 图标、
+        分组小标题、32pt 行高 + 选中圆角垫底。"""
         side = NSVisualEffectView.alloc().initWithFrame_(NSMakeRect(0, 0, SIDEBAR_W, height))
         side.setMaterial_(NSVisualEffectMaterialSidebar)
         side.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
         side.setState_(1)
         container.addSubview_(side)
-        y = height - 12 - 30
-        for key, name, _sub in PAGES:
-            # 左缩进 14pt：文本贴边不好看（用户反馈），macOS 侧栏惯例约 16pt，
-            # 选中垫底与文本同起点，视觉上是整块内缩
-            btn = NSButton.alloc().initWithFrame_(NSMakeRect(14, y, SIDEBAR_W - 28, 28))
-            btn.setTitle_(name)
-            btn.setBordered_(False)
-            btn.setAlignment_(3)  # 左对齐（默认居中会像按钮组不像页签列）
-            btn.setFont_(NSFont.boldSystemFontOfSize_(13) if key == page
-                         else NSFont.systemFontOfSize_(13))
-            # 故意不用 PushOnPushOff：那会把页签报成 AXCheckBox（T63），既挡住
-            # 「按 AXButton 找页签」的取证，又和图标格子撞判据；选中态靠加粗+垫底表达
-            btn.setWantsLayer_(True)
-            btn.layer().setCornerRadius_(6.0)
-            bg = (Quartz.CGColorCreateGenericRGB(1.0, 1.0, 1.0, 0.16) if key == page
-                  else Quartz.CGColorCreateGenericRGB(0.0, 0.0, 0.0, 0.0))
-            btn.layer().setBackgroundColor_(bg)
-            btn.setTarget_(self)
-            btn.setAction_("onPickPage:")
-            btn.setRepresentedObject_(key)
-            # 取证靠标识认页，不靠标题猜（标题日后可能本地化）
-            btn.setAccessibilityIdentifier_("page-" + key)
-            side.addSubview_(btn)
-            y -= 32
+        names = {k: name for k, name, _sub in PAGES}
+        y = height - 14
+        for group, keys in _SIDEBAR_GROUPS:
+            cap = NSTextField.labelWithString_(group)
+            cap.setFont_(NSFont.systemFontOfSize_(11))
+            cap.setTextColor_(NSColor.tertiaryLabelColor())
+            cap.setFrame_(NSMakeRect(16, y - 16, SIDEBAR_W - 32, 14))
+            side.addSubview_(cap)
+            y -= 22
+            for key in keys:
+                # 左缩进 14pt（Q72 判据 ≥12）；行高 32pt 与 Thaw 侧栏一致
+                btn = NSButton.alloc().initWithFrame_(NSMakeRect(14, y - 32, SIDEBAR_W - 28, 32))
+                btn.setTitle_(names[key])
+                btn.setBordered_(False)
+                btn.setAlignment_(3)  # 左对齐（默认居中会像按钮组不像页签列）
+                btn.setFont_(NSFont.boldSystemFontOfSize_(13) if key == page
+                             else NSFont.systemFontOfSize_(13))
+                # 故意不用 PushOnPushOff：那会把页签报成 AXCheckBox（T63），既挡住
+                # 「按 AXButton 找页签」的取证，又和图标格子撞判据；选中态靠加粗+垫底表达
+                btn.setWantsLayer_(True)
+                btn.layer().setCornerRadius_(6.0)
+                bg = (Quartz.CGColorCreateGenericRGB(1.0, 1.0, 1.0, 0.16) if key == page
+                      else Quartz.CGColorCreateGenericRGB(0.0, 0.0, 0.0, 0.0))
+                btn.layer().setBackgroundColor_(bg)
+                sym = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+                    _PAGE_ICONS[key], names[key])
+                if sym is not None:
+                    sym.setSize_(NSMakeSize(15, 15))
+                    btn.setImage_(sym)
+                    btn.setImagePosition_(6)  # NSImageLeading：图标在左、文字在右
+                    btn.setImageScaling_(NSImageScaleProportionallyDown)
+                    btn.setContentTintColor_(NSColor.labelColor() if key == page
+                                             else NSColor.secondaryLabelColor())
+                btn.setTarget_(self)
+                btn.setAction_("onPickPage:")
+                btn.setRepresentedObject_(key)
+                # 取证靠标识认页，不靠标题猜（标题日后可能本地化）
+                btn.setAccessibilityIdentifier_("page-" + key)
+                side.addSubview_(btn)
+                y -= 34
+            y -= 10
 
     def _build_static_page(self, page, height):
         """非布局页：页名 + 副标题 + 各页 builder 排内容。"""
@@ -346,7 +387,6 @@ class SettingsController(NSObject):
         # 页视图用 GridView：它是窗口的 firstResponder，方向键才能进到我们手里
         content = GridView.alloc().initWithFrame_(NSMakeRect(0, 0, CONTENT_W, height))
         content.settings_ctrl = self  # 方向键转发给控制器（不起 controller 这个名字，避开与 AppKit 同名属性撞车）
-        cols = max(1, int((CONTENT_W - 2 * EDGE) // (TILE_W + TILE_GAP)))
 
         title = NSTextField.labelWithString_(
             "菜单栏布局 · 单击选中，⌥←/→ 改顺序，⌥↑/↓ 换区")
@@ -378,12 +418,10 @@ class SettingsController(NSObject):
                 sb.setRepresentedObject_(sec)
                 content.addSubview_(sb)
             top -= SECTION_H
-            for idx, item in enumerate(group):
-                row, col = divmod(idx, cols)
-                x = EDGE + col * (TILE_W + TILE_GAP)
-                y = top - TILE_H - row * (TILE_H + TILE_GAP)
-                content.addSubview_(self._make_tile(item, sec, x, y))
-            top -= ((len(group) + cols - 1) // cols) * (TILE_H + TILE_GAP) + GAP
+            # Thaw 同款横向单行图标条（胶囊滚动容器，真实裁图宽度可变）
+            top -= BAR_H
+            self._build_section_bar(content, group, sec, top)
+            top -= GAP
 
         # ---------- 底部（自上而下）：提示行 / 选中提示 / 移区按钮 / 顺序按钮 / 重置 ----------
         # 权限提醒与重抓、超时都搬到对应页（疑难解答/通用），这页只留编辑相关
@@ -467,12 +505,55 @@ class SettingsController(NSObject):
         content.addSubview_(btn_reset)
         return content
 
-    def _make_tile(self, item, sec, x, y):
+    @objc.python_method
+    def _build_section_bar(self, content, group, sec, top):
+        """Thaw LayoutBar 同款横向图标条：圆角胶囊滚动容器 + 单行排布格子。
+
+        格子宽度随图标真实宽高比伸缩（菜单栏宽图标不再挤进正方形格子里留大片
+        空隙，Thaw 靠这个把间距做得舒服）；超出条宽走横向滚动，不弹滚动条。
+        """
+        bar_w = CONTENT_W - 2 * EDGE
+        pad = 6
+        tile_h = BAR_H - 12
+        widths = [self._bar_tile_width(sections.item_key(item), tile_h) for item in group]
+        doc_w = max(bar_w, sum(widths) + TILE_GAP * (len(widths) - 1) + 2 * pad)
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(EDGE, top, bar_w, BAR_H))
+        scroll.setWantsLayer_(True)
+        scroll.layer().setCornerRadius_(10.0)
+        # 胶囊底色比窗口背景亮一档（Thaw 的 LayoutBar 对比度；0.10/0.16 在深色下几乎看不出）
+        scroll.layer().setBackgroundColor_(Quartz.CGColorCreateGenericRGB(0.55, 0.55, 0.58, 0.22))
+        scroll.setBorderType_(0)  # NSNoBorder：胶囊圆角由 layer 画，系统边框是直角方框
+        scroll.setDrawsBackground_(False)  # 底色交给 layer 胶囊，系统白底会盖掉圆角
+        scroll.setHasVerticalScroller_(False)
+        scroll.setHasHorizontalScroller_(False)  # 项数不多，滚轮/触控板够用，不弹滚动条
+        scroll.setAutomaticallyAdjustsContentInsets_(False)
+        doc = FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, doc_w, BAR_H))
+        x = pad
+        for item, w in zip(group, widths):
+            doc.addSubview_(self._make_tile(item, sec, x, 6, w))
+            x += w + TILE_GAP
+        scroll.setDocumentView_(doc)
+        content.addSubview_(scroll)
+
+    @objc.python_method
+    def _bar_tile_width(self, key, tile_h):
+        """图标条格子宽度：按真实裁图像素的宽高比伸缩，钳在合理区间里；
+        没有位图（兜底 App 图标/系统符号）时用默认格宽。"""
+        img = self.images.get(key)
+        if img is None:
+            return TILE_W
+        size = img.size()
+        if size.height <= 0:
+            return TILE_W
+        return max(26, min(72, int(round(tile_h * (size.width / size.height))) + 6))
+
+    @objc.python_method
+    def _make_tile(self, item, sec, x, y, w=None):
         """一个图标格子：**只有图标**（截取像素缺失时用兜底图标，绝不显示名字）。
 
         单击 = 选中（按钮切换态高亮）；右键 = 系统自动弹 setMenu: 挂的移区菜单（T27）。
         """
-        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, TILE_W, TILE_H))
+        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, w or TILE_W, TILE_H))
         key = sections.item_key(item)
         img = self.images.get(key) or capture.fallback_image_for_item(item)
         if img is not None:
@@ -642,44 +723,68 @@ class SettingsController(NSObject):
 
     # ---------- 静态页 builder（通用/快捷键/疑难解答/关于） ----------
 
+    @objc.python_method
+    def _mk_card(self, view, top, h):
+        """Thaw GroupBox 同款卡片：圆角浅底分组，调用方把内容摆进卡片。
+
+        卡片是普通坐标（左下原点），内部布局按「标题左、控件右」约定；
+        卡片里全是静态文本/原控件，AX 角色与判据和平铺时一致，取证不用改。
+        """
+        card = NSView.alloc().initWithFrame_(
+            NSMakeRect(EDGE, top - h, CONTENT_W - 2 * EDGE, h))
+        card.setWantsLayer_(True)
+        card.layer().setCornerRadius_(8.0)
+        card.layer().setBackgroundColor_(Quartz.CGColorCreateGenericRGB(0.5, 0.5, 0.5, 0.10))
+        view.addSubview_(card)
+        return card
+
     def _page_general(self, view, top):
+        """通用页（Phase 8 对标 Thaw）：每项设置一张卡片行，左标题+副说明、右控件。"""
+        cw = CONTENT_W - 2 * EDGE
         y = top
-        # NSSwitch 画 macOS 原生拨动开关（Thaw 的 Toggle 同款观感），
-        # 标题另给静态文本：开关本体不带 title，取证签名落在文本上才稳
-        self.chk_launch = NSSwitch.alloc().initWithFrame_(
-            NSMakeRect(EDGE, y - ROW_H + 1, 60, ROW_H - 2))
+        # 开机自启：NSSwitch 画 macOS 原生拨动开关（Thaw Toggle 同款），
+        # 标题/状态行在左：开关本体不带 title，取证签名落在文本与标识上才稳
+        card = self._mk_card(view, y, 56)
+        lab = NSTextField.labelWithString_("登录时启动 PeaseBar")
+        lab.setFont_(NSFont.systemFontOfSize_(12))
+        lab.setFrame_(NSMakeRect(14, 32, 260, 18))
+        card.addSubview_(lab)
+        self.lbl_launch_status = NSTextField.labelWithString_("")
+        self.lbl_launch_status.setFont_(NSFont.systemFontOfSize_(11))
+        self.lbl_launch_status.setTextColor_(NSColor.secondaryLabelColor())
+        self.lbl_launch_status.setFrame_(NSMakeRect(14, 12, cw - 96, 16))
+        card.addSubview_(self.lbl_launch_status)
+        self.chk_launch = NSSwitch.alloc().initWithFrame_(NSMakeRect(cw - 74, 14, 60, 28))
         self.chk_launch.setTarget_(self)
         self.chk_launch.setAction_("onLaunchToggle:")
         self.chk_launch.setAccessibilityLabel_("登录时启动 PeaseBar")
         self.chk_launch.setAccessibilityIdentifier_("launch-at-login")
-        view.addSubview_(self.chk_launch)
-        lab = NSTextField.labelWithString_("登录时启动 PeaseBar")
-        lab.setFont_(NSFont.systemFontOfSize_(12))
-        lab.setFrame_(NSMakeRect(EDGE + 68, y - ROW_H, 260, ROW_H))
-        view.addSubview_(lab)
-        y -= ROW_H + 8
-        self.lbl_launch_status = self._mk_label(view, EDGE + 2, y - ROW_H, "", w=CONTENT_W - 2 * EDGE)
-        y -= ROW_H + 22
+        card.addSubview_(self.chk_launch)
+        y -= 66
+        # 面板自动收回：标题左，数字输入框右
+        card = self._mk_card(view, y, 44)
         lbl_to = NSTextField.labelWithString_("面板自动收回（秒，0=不超时）")
-        lbl_to.setFont_(NSFont.systemFontOfSize_(11))
-        lbl_to.setFrame_(NSMakeRect(EDGE, y - ROW_H, 220, ROW_H))
-        view.addSubview_(lbl_to)
+        lbl_to.setFont_(NSFont.systemFontOfSize_(12))
+        lbl_to.setFrame_(NSMakeRect(14, 13, 300, 18))
+        card.addSubview_(lbl_to)
         cfg = sections.load_config()
         self.field_timeout = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(EDGE + 224, y - ROW_H, 60, ROW_H))
+            NSMakeRect(cw - 114, 9, 64, 26))
         self.field_timeout.setStringValue_(str(int(cfg.get("panel_timeout", 8))))
         self.field_timeout.setEditable_(True)
         self.field_timeout.setTarget_(self)
         self.field_timeout.setAction_("onTimeoutChanged:")
-        view.addSubview_(self.field_timeout)
-        y -= ROW_H + 8
+        card.addSubview_(self.field_timeout)
+        y -= 54
+        # 菜单栏控制图标：标题左，下拉右（pullsDown=False：选中项显示在钮体内，
+        # 取证读 stringValue 即当前预设）
+        card = self._mk_card(view, y, 44)
         lbl_ic = NSTextField.labelWithString_("菜单栏控制图标")
-        lbl_ic.setFont_(NSFont.systemFontOfSize_(11))
-        lbl_ic.setFrame_(NSMakeRect(EDGE, y - ROW_H, 220, ROW_H))
-        view.addSubview_(lbl_ic)
-        # pullsDown=False：选中项显示在钮体内，取证读 stringValue 即当前预设
+        lbl_ic.setFont_(NSFont.systemFontOfSize_(12))
+        lbl_ic.setFrame_(NSMakeRect(14, 13, 300, 18))
+        card.addSubview_(lbl_ic)
         self.popup_icon = NSPopUpButton.alloc().initWithFrame_pullsDown_(
-            NSMakeRect(EDGE + 224, y - ROW_H - 2, 160, ROW_H + 4), False)
+            NSMakeRect(cw - 194, 7, 180, 30), False)
         for _sym, name in sections.CONTROL_ICONS:
             self.popup_icon.addItemWithTitle_(name)
         cur = next((i for i, (k, _) in enumerate(sections.CONTROL_ICONS)
@@ -688,20 +793,26 @@ class SettingsController(NSObject):
         self.popup_icon.setTarget_(self)
         self.popup_icon.setAction_("onControlIconChanged:")
         self.popup_icon.setAccessibilityIdentifier_("control-icon-picker")
-        view.addSubview_(self.popup_icon)
+        card.addSubview_(self.popup_icon)
         self._sync_launch_state()
 
     def _page_shortcuts(self, view, top):
-        y = self._mk_row(view, top, "⌥⌘B　开关救援面板", NSColor.labelColor())
-        y = self._mk_row(view, y, "⌥⌘S　打开设置窗口", NSColor.labelColor())
-        self._mk_row(view, y - 8, "快捷键注册即全局生效（需辅助功能权限）；"
-                               "自定义录制键排在后续版本，这里不放假按钮")
+        """快捷键页：每根键一张卡片行（文本保持「⌥⌘B　说明」一体，取证前缀判据不动）。"""
+        y = top
+        for text in ("⌥⌘B　开关救援面板", "⌥⌘S　打开设置窗口"):
+            card = self._mk_card(view, y, 44)
+            lab = NSTextField.labelWithString_(text)
+            lab.setFont_(NSFont.systemFontOfSize_(12))
+            lab.setFrame_(NSMakeRect(14, 13, CONTENT_W - 2 * EDGE - 28, 18))
+            card.addSubview_(lab)
+            y -= 54
+        self._mk_label(view, EDGE, y - ROW_H, "快捷键注册即全局生效（需辅助功能权限）；"
+                                      "自定义录制键排在后续版本，这里不放假按钮")
 
     def _page_troubleshoot(self, view, top):
         ax_ok = bool(AXIsProcessTrusted())
         rec_ok = bool(capture.has_screen_permission())
-        y = top
-        y = self._perm_row(view, y, "辅助功能（全局快捷键/读取图标）", ax_ok)
+        y = self._perm_row(view, top, "辅助功能（全局快捷键/读取图标）", ax_ok)
         y = self._perm_row(view, y, "屏幕录制（抓取图标真实像素）", rec_ok)
         x = EDGE
         if not ax_ok:
@@ -721,19 +832,37 @@ class SettingsController(NSObject):
                    f"{self.stats['fallback']} 张")
         self._mk_row(view, y, summary)
 
-    def _perm_row(self, view, y, name, ok):
-        lab = NSTextField.labelWithString_(f"{name}：{'✓ 已授权' if ok else '✗ 未授权'}")
+    def _perm_row(self, view, top, name, ok):
+        """权限卡片行（Thaw 同款）：左项目名、右彩色状态文本。"""
+        cw = CONTENT_W - 2 * EDGE
+        card = self._mk_card(view, top, 44)
+        lab = NSTextField.labelWithString_(name)
         lab.setFont_(NSFont.systemFontOfSize_(12))
-        lab.setTextColor_(NSColor.labelColor() if ok else NSColor.systemRedColor())
-        lab.setFrame_(NSMakeRect(EDGE, y - ROW_H, CONTENT_W - 2 * EDGE, ROW_H))
-        view.addSubview_(lab)
-        return y - ROW_H - 6
+        lab.setFrame_(NSMakeRect(14, 13, cw - 140, 18))
+        card.addSubview_(lab)
+        st = NSTextField.labelWithString_("✓ 已授权" if ok else "✗ 未授权")
+        st.setFont_(NSFont.systemFontOfSize_(12))
+        st.setTextColor_(NSColor.labelColor() if ok else NSColor.systemRedColor())
+        st.setAlignment_(2)  # 右对齐
+        st.setFrame_(NSMakeRect(cw - 120, 13, 106, 18))
+        card.addSubview_(st)
+        return top - 54
 
     def _page_about(self, view, top):
+        """关于页：版本+一句话介绍一张卡片，按钮在卡片下（取证靠「版本 x.y.z」文本）。"""
         from peasebar import __version__
-        y = self._mk_row(view, top, f"版本 {__version__}", NSColor.labelColor())
-        y = self._mk_row(view, y, "把被刘海遮挡、被系统收纳的菜单栏图标找回来，并一键触发。",
-                      NSColor.labelColor())
+        cw = CONTENT_W - 2 * EDGE
+        card = self._mk_card(view, top, 64)
+        v = NSTextField.labelWithString_(f"版本 {__version__}")
+        v.setFont_(NSFont.boldSystemFontOfSize_(13))
+        v.setFrame_(NSMakeRect(14, 38, 200, 18))
+        card.addSubview_(v)
+        d = NSTextField.labelWithString_("把被刘海遮挡、被系统收纳的菜单栏图标找回来，并一键触发。")
+        d.setFont_(NSFont.systemFontOfSize_(11))
+        d.setTextColor_(NSColor.secondaryLabelColor())
+        d.setFrame_(NSMakeRect(14, 14, cw - 28, 18))
+        card.addSubview_(d)
+        y = top - 74
         x = EDGE
         self._mk_btn(view, x, y - ROW_H, "复制版本信息", "onCopyVersion:", 130)
         x += 138
