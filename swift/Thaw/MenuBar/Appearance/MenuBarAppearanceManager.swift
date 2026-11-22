@@ -1,0 +1,397 @@
+//
+//  MenuBarAppearanceManager.swift
+//  Project: Thaw
+//
+//  Copyright (Thaw) © 2026 Toni Förster
+//  Licensed under the GNU GPLv3
+
+import AsyncAlgorithms
+import Cocoa
+import Combine
+import MenuBarModel
+import Observation
+
+/// Layers per-Space overrides over stored appearance settings and renders them in per-screen overlays.
+@MainActor
+@Observable
+final class MenuBarAppearanceManager {
+    @ObservationIgnored
+    private let diagLog = DiagLog(category: "MenuBarAppearanceManager")
+
+    /// Shared appearance settings persist in didSet; panels react separately through throttled effectiveConfiguration.
+    var configuration = Defaults.DefaultValue.menuBarAppearanceConfigurationV2 {
+        didSet {
+            // Switching a surface to accent color must update it before the next system accent change.
+            let synced = configuration.withAccentColor(Self.accentColor)
+            if synced != configuration {
+                configuration = synced
+                return
+            }
+            guard oldValue != configuration else { return }
+            persist(configuration, forKey: .menuBarAppearanceConfigurationV2, label: "menu bar appearance configuration")
+        }
+    }
+
+    /// The system accent color, in the color space the look is stored in.
+    static var accentColor: CGColor {
+        (NSColor.controlAccentColor.usingColorSpace(.sRGB) ?? .controlAccentColor).cgColor
+    }
+
+    /// Live editor preview replaces stored settings; nil when inactive.
+    var previewConfiguration: MenuBarAppearancePartialConfiguration? {
+        didSet {
+            reactToPreviewConfigurationChange()
+        }
+    }
+
+    /// Overrides keyed by the Space's persistent key. An all-digit key is a raw
+    /// Space ID from before the migration, still read until it is rewritten.
+    private(set) var spaceOverrides: [String: MenuBarAppearanceConfigurationV2] = [:] {
+        didSet {
+            guard oldValue != spaceOverrides else { return }
+            persist(spaceOverrides, forKey: .menuBarAppearanceSpaceOverrides, label: "per-Space appearance overrides")
+        }
+    }
+
+    /// didSet cannot throw; record encoding failures here so the editor warns about unsaved settings.
+    /// Nil when stored settings are current.
+    private(set) var lastPersistenceFailure: String?
+
+    /// The most recently observed active Space.
+    private(set) var activeSpaceID = SpaceInfo.activeSpace().spaceID
+
+    /// The active Space's key as the app sees it, in the settings process, which lists no Spaces itself.
+    private var mirroredSpaceKey: String?
+
+    /// Runs after the look was saved. The settings process hands the app the look here, since the app draws it.
+    @ObservationIgnored var onLookSaved: (() -> Void)?
+
+    /// Set while a look the other process saved is taken over, so it is not saved a second time.
+    @ObservationIgnored private var isAdoptingSavedLook = false
+
+    /// Render the active Space's override, falling back to shared settings.
+    /// Observation tracks all three inputs through this computed property.
+    var effectiveConfiguration: MenuBarAppearanceConfigurationV2 {
+        Self.effectiveConfiguration(
+            base: configuration,
+            overrides: spaceOverrides,
+            activeSpaceID: activeSpaceID,
+            activeSpaceKey: activeSpaceKey
+        )
+    }
+
+    @ObservationIgnored
+    private weak var appState: AppState?
+
+    @ObservationIgnored
+    private let encoder = JSONEncoder()
+
+    @ObservationIgnored
+    private let decoder = JSONDecoder()
+
+    /// Keeps the manager's Combine subscriptions alive.
+    @ObservationIgnored
+    private var cancellables = Set<AnyCancellable>()
+
+    /// _throttle is the pinned AsyncAlgorithms release's public throttle operator.
+    /// latest: true coalesces panel updates to the newest effectiveConfiguration.
+    @ObservationIgnored
+    private var panelRequirementsTask: Task<Void, Never>?
+
+    /// One overlay panel per managed screen, or empty when nothing needs painting.
+    private(set) var overlayPanels = Set<MenuBarOverlayPanel>()
+
+    /// Compare display frames to avoid rebuilding for brightness, HDR, colorspace, or relaunch notifications.
+    /// Unnecessary rebuilds blink the overlay and strand NSGlassEffectView composite appearances.
+    private var lastConfiguredScreenLayout: [CGDirectDisplayID: CGRect] = [:]
+
+    private static func currentScreenLayout() -> [CGDirectDisplayID: CGRect] {
+        Dictionary(NSScreen.managedScreens.map { ($0.displayID, $0.frame) }) { first, _ in first }
+    }
+
+    /// Inset from the menu bar's edges for inset appearances.
+    let menuBarInsetAmount: CGFloat = 3.5
+
+    /// Call once to restore settings and start observing.
+    func performSetup(
+        with appState: AppState,
+        displayInvalidations: some Publisher<Void, Never>,
+        displaySettlements: some Publisher<EnvironmentChange, Never>
+    ) {
+        self.appState = appState
+        loadInitialState()
+        configureCancellables(displayInvalidations: displayInvalidations, displaySettlements: displaySettlements)
+    }
+
+    /// Decode shared settings and overrides independently so one unreadable key does not block the other.
+    private func loadInitialState() {
+        if let data = Defaults.data(forKey: .menuBarAppearanceConfigurationV2) {
+            do {
+                configuration = try decoder.decode(MenuBarAppearanceConfigurationV2.self, from: data)
+            } catch {
+                diagLog.error("Error decoding menu bar appearance configuration: \(error)")
+            }
+        }
+        if let data = Defaults.data(forKey: .menuBarAppearanceSpaceOverrides) {
+            do {
+                spaceOverrides = try decoder.decode(
+                    [String: MenuBarAppearanceConfigurationV2].self,
+                    from: data
+                )
+            } catch {
+                diagLog.error("Error decoding per-Space appearance overrides: \(error)")
+            }
+        }
+    }
+
+    // MARK: Per-Space Overrides
+
+    /// Resolves the configuration for a Space. Pure so it is unit-testable.
+    static nonisolated func effectiveConfiguration(
+        base: MenuBarAppearanceConfigurationV2,
+        overrides: [String: MenuBarAppearanceConfigurationV2],
+        activeSpaceID: CGSSpaceID,
+        activeSpaceKey: String? = nil
+    ) -> MenuBarAppearanceConfigurationV2 {
+        activeSpaceKey.flatMap { overrides[$0] } ?? overrides[String(activeSpaceID)] ?? base
+    }
+
+    var activeSpaceHasOverride: Bool {
+        activeSpaceKey.flatMap { spaceOverrides[$0] } != nil || spaceOverrides[String(activeSpaceID)] != nil
+    }
+
+    /// Uses shared settings, not the current preview, for the Space override.
+    /// Stored under the persistent key once the Space has one, so it survives a logout.
+    func saveOverrideForActiveSpace() {
+        spaceOverrides = Self.overrides(spaceOverrides, setting: configuration, spaceID: activeSpaceID, key: activeSpaceKey)
+    }
+
+    func removeOverrideForActiveSpace() {
+        spaceOverrides = Self.overrides(spaceOverrides, setting: nil, spaceID: activeSpaceID, key: activeSpaceKey)
+    }
+
+    func removeAllSpaceOverrides() {
+        spaceOverrides = [:]
+    }
+
+    private func configureCancellables(
+        displayInvalidations: some Publisher<Void, Never>,
+        displaySettlements: some Publisher<EnvironmentChange, Never>
+    ) {
+        cancellables = [
+            observeScreenParameters(invalidations: displayInvalidations, settlements: displaySettlements),
+            observeAccentColor(),
+        ]
+        if let appState {
+            cancellables.insert(observeActiveSpace(appState.spaceChanges))
+        }
+
+        panelRequirementsTask?.cancel()
+        panelRequirementsTask = Task { [weak self] in
+            let changes = Observations { [weak self] in self?.effectiveConfiguration }
+            for await configuration in changes._throttle(for: .milliseconds(100), latest: true) {
+                guard let self, let configuration else { return }
+                updateOverlayPanels(for: configuration)
+                // Partner apps mirror the look; they fetch it again on this.
+                DistributedNotificationCenter.default().postNotificationName(
+                    SharedAppearance.didChangeNotification,
+                    object: nil,
+                    userInfo: nil,
+                    deliverImmediately: true
+                )
+            }
+        }
+    }
+
+    /// Records encoding failures in lastPersistenceFailure instead of throwing.
+    private func persist(_ value: some Encodable, forKey key: Defaults.Key, label: String) {
+        guard !isAdoptingSavedLook else { return }
+        do {
+            let data = try encoder.encode(value)
+            Defaults.set(data, forKey: key)
+            lastPersistenceFailure = nil
+            onLookSaved?()
+        } catch {
+            diagLog.error("Error encoding \(label): \(error)")
+            lastPersistenceFailure = error.localizedDescription
+        }
+    }
+
+    private func rebuildOverlayPanelsIfScreensMoved() {
+        // Unchanged geometry needs no rebuild, avoiding overlay blinks and composite-appearance leaks.
+        if !overlayPanels.isEmpty,
+           Self.currentScreenLayout() == lastConfiguredScreenLayout
+        {
+            return
+        }
+        closeOverlayPanels()
+        // The Space's own look, so a display change doesn't drop it.
+        configureOverlayPanels(with: effectiveConfiguration)
+    }
+
+    private func closeOverlayPanels() {
+        while let panel = overlayPanels.popFirst() {
+            panel.close()
+        }
+    }
+
+    /// Looks 100 ms after a burst, since an overlay left on the old geometry until the settle shows, and
+    /// again at each settle in case the early look caught the screens mid-change. Tests pass a scheduler they move by hand.
+    static func overlayRebuildSignal(
+        invalidations: some Publisher<Void, Never>,
+        settlements: some Publisher<EnvironmentChange, Never>,
+        scheduler: some Scheduler = DispatchQueue.main
+    ) -> AnyPublisher<Void, Never> {
+        invalidations
+            .debounce(for: .milliseconds(100), scheduler: scheduler)
+            .merge(with: settlements.map { _ in () })
+            .eraseToAnyPublisher()
+    }
+
+    private func observeScreenParameters(
+        invalidations: some Publisher<Void, Never>,
+        settlements: some Publisher<EnvironmentChange, Never>
+    ) -> AnyCancellable {
+        Self.overlayRebuildSignal(invalidations: invalidations, settlements: settlements)
+            .sink { [weak self] in self?.rebuildOverlayPanelsIfScreensMoved() }
+    }
+
+    /// Update accent-following surfaces when the system accent changes.
+    private func observeAccentColor() -> AnyCancellable {
+        NotificationCenter.default
+            .publisher(for: NSColor.systemColorsDidChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                configuration = configuration.withAccentColor(Self.accentColor)
+            }
+    }
+
+    /// Follows the window server's switch as it starts, so a per-Space look arrives with the Space.
+    private func observeActiveSpace(_ changes: SpaceChanges) -> AnyCancellable {
+        let task = changes.activeSpaceTask { [weak self] spaceID in
+            self?.activeSpaceID = spaceID
+        }
+        return AnyCancellable { task.cancel() }
+    }
+
+    private func updateOverlayPanels(for configuration: MenuBarAppearanceConfigurationV2) {
+        // Build panels lazily when effects first need them.
+        if overlayPanels.isEmpty {
+            configureOverlayPanels(with: configuration)
+        } else if !needsOverlayPanels(for: configuration) {
+            closeOverlayPanels()
+        }
+    }
+
+    /// A preview can need overlays even when stored settings do not.
+    private func reactToPreviewConfigurationChange() {
+        if let preview = previewConfiguration {
+            let needsPanels = preview.hasShadow
+                || preview.hasBorder
+                || configuration.shapeKind != .noShape
+                || preview.tintKind != .noTint
+                || preview.backgroundKind != .none
+            if overlayPanels.isEmpty, needsPanels {
+                configureOverlayPanels(with: configuration, force: true)
+            }
+        } else if !needsOverlayPanels(for: configuration) {
+            closeOverlayPanels()
+        }
+    }
+
+    /// These effects are not system-painted; without them the menu bar needs no overlay.
+    private func needsOverlayPanels(for configuration: MenuBarAppearanceConfigurationV2) -> Bool {
+        let current = configuration.current
+        return current.hasShadow
+            || current.hasBorder
+            || configuration.shapeKind != .noShape
+            || current.tintKind != .noTint
+            || configuration.current.backgroundKind != .none
+    }
+
+    /// Always rebuilds; when no effects are needed, clear the layout signature so future notifications retry.
+    /// - Parameter force: Build even when stored settings need no panels, as for a live preview.
+    private func configureOverlayPanels(
+        with configuration: MenuBarAppearanceConfigurationV2,
+        force: Bool = false
+    ) {
+        // Close existing panels to prevent memory leaks and duplicate windows
+        closeOverlayPanels()
+
+        guard
+            let appState, force || needsOverlayPanels(for: configuration)
+        else {
+            lastConfiguredScreenLayout = [:]
+            return
+        }
+
+        overlayPanels = Set(NSScreen.managedScreens.map { screen in
+            let panel = MenuBarOverlayPanel(appState: appState, owningScreen: screen)
+            panel.needsShow = true
+            return panel
+        })
+        lastConfiguredScreenLayout = Self.currentScreenLayout()
+    }
+}
+
+// MARK: - Per-Space Looks by Persistent Key
+
+extension MenuBarAppearanceManager {
+    /// The look the editor changes: the active Space's own look when it has
+    /// one, so an edit shows where it is made, otherwise the shared look.
+    var editedConfiguration: MenuBarAppearanceConfigurationV2 {
+        get { effectiveConfiguration }
+        set {
+            if activeSpaceHasOverride {
+                spaceOverrides = Self.overrides(spaceOverrides, setting: newValue, spaceID: activeSpaceID, key: activeSpaceKey)
+            } else {
+                configuration = newValue
+            }
+        }
+    }
+
+    /// The active Space's persistent key, nil until the window server lists it.
+    var activeSpaceKey: String? {
+        appState?.spaceDirectory.spaces.first { $0.spaceID == activeSpaceID }?.persistentKey ?? mirroredSpaceKey
+    }
+
+    /// The active Space as the app follows it, for the settings process, which follows none.
+    func mirrorActiveSpace(id: CGSSpaceID, key: String?) {
+        guard id != activeSpaceID || key != mirroredSpaceKey else { return }
+        activeSpaceID = id
+        mirroredSpaceKey = key
+    }
+
+    /// Takes over a look the other process saved, without saving it again. Only what differs is
+    /// assigned, so a look that is already showing doesn't redraw the menu bar.
+    func adopt(configuration saved: MenuBarAppearanceConfigurationV2, spaceOverrides savedOverrides: [String: MenuBarAppearanceConfigurationV2]) {
+        isAdoptingSavedLook = true
+        defer { isAdoptingSavedLook = false }
+        // The shared look follows the accent color here, so a saved one that lags behind is no change.
+        let shared = saved.withAccentColor(Self.accentColor)
+        if shared != configuration {
+            configuration = shared
+        }
+        if savedOverrides != spaceOverrides {
+            spaceOverrides = savedOverrides
+        }
+    }
+
+    /// overrides with the Space's entry set or removed, dropping its raw-ID entry once a key exists.
+    static nonisolated func overrides(
+        _ overrides: [String: MenuBarAppearanceConfigurationV2],
+        setting configuration: MenuBarAppearanceConfigurationV2?,
+        spaceID: CGSSpaceID,
+        key: String?
+    ) -> [String: MenuBarAppearanceConfigurationV2] {
+        var result = overrides
+        if let key {
+            result[String(spaceID)] = nil
+            result[key] = configuration
+        } else {
+            result[String(spaceID)] = configuration
+        }
+        return result
+    }
+}

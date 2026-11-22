@@ -1,0 +1,107 @@
+//
+//  GlyphCapturePolicy.swift
+//  Project: Thaw
+//
+//  Copyright (Thaw) © 2026 Toni Förster
+//  Licensed under the GNU GPLv3
+
+import CoreGraphics
+import MenuBarModel
+
+extension MenuBarItemImageCache {
+    // MARK: Glyph Trust And Preference
+
+    /// Minimum point width for a crop that is trusted as a real status-item glyph.
+    /// Narrower crops usually come from native overflow chevron bleed on macOS 27.
+    static nonisolated let minimumTrustedGlyphWidth: CGFloat = 15
+
+    /// Whether capture is a settled glyph worth keeping over a miss: not
+    /// blank, and wide enough not to be native overflow chevron bleed.
+    static nonisolated func isTrustedGlyph(_ capture: MenuBarItemGlyphCapture) -> Bool {
+        !capture.isEffectivelyBlank && capture.pointSize.width >= minimumTrustedGlyphWidth
+    }
+
+    /// Chooses between an existing cache entry and a newly captured candidate.
+    ///
+    /// Keeps a settled glyph over a blank or much narrower (chevron bleed) one, and takes the candidate when
+    /// it's at least as wide, or narrower only because the spacing around the same icon shrank (see
+    /// GlyphMarginChange). A live glyph can really lose its left ink, so only the reveal path rejects that.
+    ///
+    /// oldPictureIsStale says existing no longer matches its item's width, as when an icon stops showing
+    /// text. The width rule then has nothing left to protect, so any trusted glyph replaces it.
+    static nonisolated func preferredCachedImage(
+        existing: MenuBarItemGlyphCapture,
+        candidate: MenuBarItemGlyphCapture,
+        oldPictureIsStale: Bool = false
+    ) -> MenuBarItemGlyphCapture {
+        if existing.isEffectivelyBlank {
+            return candidate
+        }
+        if candidate.isEffectivelyBlank {
+            return existing
+        }
+        if candidate.pointSize.width < existing.pointSize.width * 0.75,
+           !(isTrustedGlyph(candidate) && (oldPictureIsStale || GlyphMarginChange.onlyMarginsShrank(from: existing, to: candidate)))
+        {
+            return existing
+        }
+        return candidate
+    }
+
+    /// Whether prewarm should recapture an item given its cached image state.
+    ///
+    /// A glyph loaded from disk counts as present. Each saved entry already
+    /// expires by its volatility class on load, and recapturing every saved
+    /// glyph meant that one missing item made the Thaw Bar reveal and capture
+    /// the whole section, one batch after another.
+    ///
+    /// retakesClipped also retakes a picture whose ink runs into its left or right edge, as Capture Hidden Items asks.
+    static nonisolated func prewarmNeedsCapture(
+        cachedImage: MenuBarItemGlyphCapture?,
+        wouldAttemptCapture: Bool,
+        retakesClipped: Bool = false
+    ) -> Bool {
+        guard wouldAttemptCapture else { return false }
+        guard let cachedImage, !cachedImage.isEffectivelyBlank else { return true }
+        // An earlier build's picture stands in until this build takes its own.
+        if cachedImage.isFromEarlierBuild {
+            return true
+        }
+        // Recover from a native overflow chevron («») stored as a successful crop.
+        if cachedImage.pointSize.width < Self.minimumTrustedGlyphWidth {
+            return true
+        }
+        return retakesClipped && (isClippedAtLeadingEdge(cachedImage) || isClippedAtTrailingEdge(cachedImage))
+    }
+
+    /// Whether an item is too narrow for a glyph, such as a status item whose
+    /// app has its icon turned off. Revealing it for a picture covers the bar
+    /// while waiting for an icon that never draws. A concealed item keeps its
+    /// width wherever it is parked, so the frame's position doesn't matter.
+    static nonisolated func isBlankItem(_ frame: CGRect) -> Bool {
+        frame.width > 0 && frame.width < MenuBarItemGeometry.phantomFramePeerMinimumWidth
+    }
+
+    /// Resolves the capture a consumer would draw for tag, and the key it is
+    /// filed under, without touching the access order.
+    ///
+    /// Falls back to a window-ID-insensitive match because disk-loaded and
+    /// idle-trimmed entries carry no window ID or an old one.
+    ///
+    /// Blank entries resolve to nothing, so every caller treats them as a miss.
+    static nonisolated func cachedCapture(
+        for tag: MenuBarItemTag,
+        in capturesByTag: [MenuBarItemTag: MenuBarItemGlyphCapture]
+    ) -> (tag: MenuBarItemTag, capture: MenuBarItemGlyphCapture)? {
+        if let capture = capturesByTag[tag], !capture.isEffectivelyBlank {
+            return (tag, capture)
+        }
+        guard !tag.isSystemItem,
+              let entry = capturesByTag.first(where: { $0.key.matchesIgnoringWindowID(tag) }),
+              !entry.value.isEffectivelyBlank
+        else {
+            return nil
+        }
+        return (entry.key, entry.value)
+    }
+}

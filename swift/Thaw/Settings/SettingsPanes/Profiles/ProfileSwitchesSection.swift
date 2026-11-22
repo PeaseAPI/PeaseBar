@@ -1,0 +1,157 @@
+//
+//  ProfileSwitchesSection.swift
+//  Project: Thaw
+//
+//  Copyright (Thaw) © 2026 Toni Förster
+//  Licensed under the GNU GPLv3
+
+import MenuBarModel
+import SwiftUI
+import ThawUI
+
+/// Everything that switches to one profile. A display or Space belongs to one profile at a time,
+/// so choosing it here takes it from any other.
+struct ProfileSwitchesSection: View {
+    @Environment(AppState.self) private var appState
+    @Bindable var profileManager: ProfileManager
+    let displaySettings: DisplaySettingsManager
+    let profile: ProfileMetadata
+    @Binding var errorMessage: String?
+    /// Set in the settings process, where the app saves the choices.
+    var remote: SettingsRemote? = .current
+
+    var body: some View {
+        ThawSection {
+            Text("What switches to this profile")
+        } content: {
+            if let hotkey = profileManager.profileHotkeys[profile.id] {
+                HotkeyRecorder(hotkey: hotkey) {
+                    Text("Keyboard shortcut")
+                        .settingsSearchAnchor("profiles.shortcuts")
+                }
+                // The recorder keeps its capture in State, so a new profile needs a new recorder.
+                .id(profile.id)
+            }
+            displayPicker
+            spaceRow
+            focusRow
+        } footer: {
+            Text("A Space takes priority over a display, and a Focus filter over both.")
+                .font(ThawType.footnote)
+                .foregroundStyle(ThawInk.supporting)
+        }
+        .settingsSearchAnchor("profiles.switching")
+    }
+
+    private func make(_ edit: ProfileListEdit) {
+        ProfilePageRunner.make(edit, on: profileManager, remote: remote, errorMessage: $errorMessage)
+    }
+
+    // MARK: Display
+
+    private var displayPicker: some View {
+        ThawPicker(selection: displayBinding) {
+            Text("None").tag("")
+            ForEach(knownDisplays) { display in
+                Text(Self.label(for: display)).tag(display.id)
+            }
+        } label: {
+            ThawRowLabel("On this display", detail: "Switches when the menu bar moves to it.")
+        }
+    }
+
+    var displayBinding: Binding<String> {
+        Binding {
+            profileManager.profiles.first { $0.id == profile.id }?.associatedDisplayUUID ?? ""
+        } set: { uuid in
+            let display = knownDisplays.first { $0.id == uuid }
+            make(.display(uuid: uuid.isEmpty ? nil : uuid, name: display?.name, profile: profile.id))
+        }
+    }
+
+    private var knownDisplays: [DisplaySettingsManager.DisplayInfo] {
+        Self.displayChoices(connected: displaySettings.connectedDisplays(), profiles: profileManager.profiles)
+    }
+
+    /// Connected displays, plus a disconnected one this profile or another
+    /// still names, so its choice stays visible.
+    static func displayChoices(
+        connected: [DisplaySettingsManager.DisplayInfo],
+        profiles: [ProfileMetadata]
+    ) -> [DisplaySettingsManager.DisplayInfo] {
+        var displays = connected
+        for profile in profiles {
+            guard let uuid = profile.associatedDisplayUUID, !displays.contains(where: { $0.id == uuid }) else { continue }
+            displays.append(DisplaySettingsManager.DisplayInfo(
+                id: uuid,
+                displayID: nil,
+                name: profile.associatedDisplayName ?? uuid,
+                hasNotch: false,
+                isConnected: false
+            ))
+        }
+        return displays
+    }
+
+    /// A display's name in the picker, with Notch or Disconnected after it.
+    static func label(for display: DisplaySettingsManager.DisplayInfo) -> String {
+        var parts = [display.name]
+        if display.hasNotch {
+            parts.append(String(localized: "Notch"))
+        }
+        if !display.isConnected {
+            parts.append(String(localized: "Disconnected"))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: Space
+
+    private var spaceRow: some View {
+        let spaces = appState.spaceDirectory.spaces
+        let groups = SpaceLabels.groups(
+            spaces,
+            displayNames: Dictionary(displaySettings.connectedDisplays().map { ($0.id, $0.name) }) { first, _ in first },
+            menuBarDisplay: Bridging.getActiveMenuBarDisplayUUID(),
+            ownerName: SpaceLabels.liveOwnerName
+        )
+        let mapped = profileManager.profiles.compactMap { profile in
+            profile.associatedSpaceKey.map { (key: $0, name: profile.associatedSpaceName) }
+        }
+        return SpaceChoicePicker(
+            groups: groups,
+            missing: SpaceLabels.missing(mapped: mapped, present: spaces),
+            selection: spaceBinding(groups: groups)
+        )
+        .onAppear { appState.spaceDirectory.refresh() }
+    }
+
+    func spaceBinding(groups: [SpaceDisplayGroup]) -> Binding<String> {
+        Binding {
+            profileManager.profiles.first { $0.id == profile.id }?.associatedSpaceKey ?? ""
+        } set: { key in
+            // A missing Space keeps the name stored with it.
+            let name = groups.lazy.flatMap(\.spaces).first { $0.id == key }?.label
+                ?? profileManager.profiles.first { $0.associatedSpaceKey == key }?.associatedSpaceName
+            make(.space(key: key.isEmpty ? nil : key, name: name, profile: profile.id))
+        }
+    }
+
+    // MARK: Focus
+
+    private var focusRow: some View {
+        LabeledContent {
+            Button("Open Focus Settings…") {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.Focus") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            .buttonStyle(.settingsGlass)
+        } label: {
+            ThawRowLabel(
+                "With a Focus",
+                detail: "Add \(Constants.displayName) as a Focus filter in System Settings \(Constants.menuArrow) Focus and pick this profile. When the Focus ends, the display's profile comes back."
+            )
+        }
+    }
+}

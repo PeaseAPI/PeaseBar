@@ -1,0 +1,135 @@
+//
+//  DiagnosticFilesSection.swift
+//  Project: Thaw
+//
+//  Copyright (Thaw) © 2026 Toni Förster
+//  Licensed under the GNU GPLv3
+
+import AppKit
+import Combine
+import MenuBarModel
+import SwiftUI
+import ThawUI
+import UniformTypeIdentifiers
+
+/// The files to attach to a bug report, as two rows like Repair's: the logs,
+/// and the item list with its capture samples.
+struct DiagnosticFilesSection: View {
+    var actions = Actions()
+    /// In the settings process, what the app says about its capture samples. Nil in the app.
+    var appReport: ToolsAppReport?
+
+    @State private var isExporting = false
+    @State private var errorMessage: String?
+    /// Read when the section appears and set again when a sample is written.
+    @State private var hasCaptureSamples = false
+
+    var body: some View {
+        ThawSection("Files for a bug report") {
+            LabeledContent {
+                HStack(spacing: ThawSpacing.base) {
+                    if isExporting {
+                        ProgressView().controlSize(.small)
+                    }
+                    ThawActionGroup {
+                        Button("Show in Finder") {
+                            actions.open(DiagnosticLogger.shared.logDirectory)
+                        }
+                        .accessibilityLabel("Show Log Files in Finder")
+                        Button("Export…", action: exportLogs)
+                            .disabled(isExporting)
+                            .accessibilityLabel("Export Logs")
+                    }
+                    .buttonStyle(.thawGrouped)
+                }
+            } label: {
+                ThawRowLabel("Logs", detail: "Export zips the logs and any capture samples into one file to attach.")
+            }
+            .settingsSearchAnchor("tools.exportLogs")
+
+            LabeledContent {
+                ThawActionGroup {
+                    Button("Save…", action: saveItemList)
+                        .accessibilityLabel("Save Item List")
+                    Button("Show Samples") {
+                        actions.open(appReport?.status.sampleDirectory ?? CaptureDiagnostics.sampleDirectory)
+                    }
+                    .disabled(!(appReport?.status.hasCaptureSamples ?? hasCaptureSamples))
+                    .accessibilityLabel("Show Capture Samples")
+                }
+                .buttonStyle(.thawGrouped)
+            } label: {
+                ThawRowLabel("Item list", detail: "Every menu bar item Thaw can see. Samples are the pictures it captured.")
+            }
+            .settingsSearchAnchor("tools.saveItemList")
+        }
+        .onAppear {
+            hasCaptureSamples = MaintenanceTools.hasCaptureSamples(in: CaptureDiagnostics.sampleDirectory)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: CaptureDiagnostics.didWriteSample)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            hasCaptureSamples = true
+        }
+        .alert(
+            "Couldn’t save the file",
+            isPresented: Binding(get: { errorMessage != nil }, set: {
+                if !$0 {
+                    errorMessage = nil
+                }
+            })
+        ) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func exportLogs() {
+        guard let destination = actions.chooseDestination("\(Constants.displayName) Diagnostics.zip", .zip) else {
+            return
+        }
+        isExporting = true
+        Task {
+            defer { isExporting = false }
+            do {
+                try await actions.exportDiagnostics(destination)
+                actions.reveal(destination)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func saveItemList() {
+        guard let destination = actions.chooseDestination("\(Constants.displayName) Items.json", .json) else {
+            return
+        }
+        Task {
+            do {
+                try await actions.saveItemList(destination)
+                actions.reveal(destination)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+}
+
+#if DEBUG
+    /// Buttons use stand-in actions, so no panel opens, Finder stays put and no log is copied.
+    /// The section still checks the real sample folder once, read only, to enable Show Samples.
+    #Preview("Diagnostic files") {
+        ThawForm {
+            DiagnosticFilesSection(actions: .init(
+                chooseDestination: { _, _ in nil },
+                open: { _ in /* Preview only. */ },
+                reveal: { _ in /* Preview only. */ },
+                exportDiagnostics: { _ in /* Preview only. */ },
+                saveItemList: { _ in /* Preview only. */ }
+            ))
+        }
+        .frame(width: 680, height: 300)
+    }
+#endif

@@ -1,0 +1,83 @@
+//
+//  SettingsLink.swift
+//  Project: Thaw
+//
+//  Copyright (Thaw) © 2026 Toni Förster
+//  Licensed under the GNU GPLv3
+
+import Foundation
+
+/// What the app and its settings process tell each other, one JSON object per line.
+nonisolated enum SettingsLinkMessage: Codable, Equatable, Sendable {
+    /// Bring the window forward on this pane, or on the pane it has.
+    case show(pane: String?)
+    /// The sender wrote settings, so the receiver reads them again.
+    case settingsChanged
+    /// The settings process can't show this pane, so the app shows it instead, in the same place.
+    case openInApp(pane: String, frame: CGRect? = nil)
+    /// The app's Settings window is up, so the settings process closes its own.
+    case shownInApp
+    /// The settings process moved to this pane, so the app opens on it next time.
+    case pageChanged(pane: String)
+    /// The updater's state, sent by the app, which runs the updater.
+    case updatesState(canCheck: Bool, lastCheck: Date?)
+    /// Check for updates now, in the app, which owns the updater's windows.
+    case checkForUpdates
+    /// Quit was chosen in the settings process, and quits the app too.
+    case quit
+    /// Live state only the app has, for a page in the settings process to show. The payload is
+    /// that topic's JSON. See SettingsAppFeature.
+    case status(topic: String, payload: Data)
+    /// Something the settings process has the app do, because what it acts on lives there. The
+    /// payload is that command's JSON.
+    case command(name: String, payload: Data)
+    /// The sender saved a store that is kept outside the defaults, so the receiver reads that one again.
+    case storeChanged(store: String)
+    /// Something the settings process asks the app and waits for. The answer comes back as a reply with the same id.
+    case request(id: UUID, name: String, payload: Data)
+    /// The app's answer to a request: its payload, or the words of the error it failed with.
+    case reply(id: UUID, payload: Data?, failure: String?)
+}
+
+nonisolated extension SettingsLinkMessage {
+    /// Nil for a line that isn't a message, such as stray output on the pipe.
+    init?(line: Data) {
+        guard let message = try? JSONDecoder().decode(Self.self, from: line) else { return nil }
+        self = message
+    }
+
+    /// The message as one line, newline included.
+    var line: Data {
+        // Encoding an enum of strings and dates can't fail.
+        var data = (try? JSONEncoder().encode(self)) ?? Data()
+        data.append(0x0A)
+        return data
+    }
+}
+
+/// The panes the settings process shows itself: they only store preferences, or get the rest over the link.
+/// The others need the running menu bar engine, which only the app has.
+nonisolated enum SettingsProcessRoute {
+    static let launchArgument = "--settings"
+
+    static let ownProcessPanes: Set<String> = ["General", "Visibility", "About", "Privacy", "Menu Bar Appearance", "Modules", "Widgets", "Scripts", "Displays", "Tools", "Thaw Bar", "Hotkeys", "Triggers", "Profiles"]
+
+    /// Windows rather than panes, so the process shows them in Simple Mode too. Welcome Again replays the
+    /// welcome from About; Permissions opens the window as Thaw does at launch.
+    static let whatsNew = "What's New"
+    static let permissions = "Permissions"
+    static let welcomeAgain = "Welcome Again"
+    static let windowTargets: Set<String> = [whatsNew, permissions, welcomeAgain]
+
+    static func runsInOwnProcess(pane: String, simpleMode: Bool, isEnabled: Bool) -> Bool {
+        isEnabled && (windowTargets.contains(pane) || !simpleMode && ownProcessPanes.contains(pane))
+    }
+
+    /// The pane named after the launch argument, if there is one.
+    static func launchPane(in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: launchArgument), arguments.indices.contains(index + 1) else {
+            return nil
+        }
+        return arguments[index + 1]
+    }
+}

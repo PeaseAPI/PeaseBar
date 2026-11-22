@@ -1,0 +1,2957 @@
+[
+ {
+  "text": "final class AppDelegate: NSObject, NSApplicationDelegate {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/App/AppDelegate.swift",
+    "line": 15
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 396 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/App/AppDelegate.swift",
+    "line": 534
+   },
+   "reason": "File should contain 400 lines or less: currently contains 534",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class AppState {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/App/AppState.swift",
+    "line": 22
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 509 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/App/AppState.swift",
+    "line": 784
+   },
+   "reason": "File should contain 400 lines or less: currently contains 784",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "        enum CodingKeys: String, CodingKey {",
+  "violation": {
+   "location": {
+    "character": 9,
+    "file": "Thaw/App/ControlStatePublisher.swift",
+    "line": 71
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "        typealias Output = NSEvent",
+  "violation": {
+   "location": {
+    "character": 9,
+    "file": "Thaw/Input/Events/EventMonitor.swift",
+    "line": 317
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "        typealias Failure = Never",
+  "violation": {
+   "location": {
+    "character": 9,
+    "file": "Thaw/Input/Events/EventMonitor.swift",
+    "line": 318
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "        private final class Sink {",
+  "violation": {
+   "location": {
+    "character": 23,
+    "file": "Thaw/Input/Events/EventMonitor.swift",
+    "line": 352
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final nonisolated class EventTap: @unchecked Sendable {",
+  "violation": {
+   "location": {
+    "character": 19,
+    "file": "Thaw/Input/Events/EventTap.swift",
+    "line": 23
+   },
+   "reason": "Class body should span 250 lines or less excluding comments and whitespace: currently spans 278 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Input/Events/EventTap.swift",
+    "line": 445
+   },
+   "reason": "File should contain 400 lines or less: currently contains 445",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func configureCancellables() {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Input/Events/HIDEventManager+Lifecycle.swift",
+    "line": 17
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 98 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func handleApplicationMenuClickThrough(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Input/Events/HIDEventManager+PointerGeometry.swift",
+    "line": 304
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 55 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func handleShowOnClick(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Input/Events/HIDEventManager+ShowOnClick.swift",
+    "line": 68
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 12",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func handleShowOnClick(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Input/Events/HIDEventManager+ShowOnClick.swift",
+    "line": 68
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 74 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Input/Events/HIDEventManager+ShowOnClick.swift",
+    "line": 417
+   },
+   "reason": "File should contain 400 lines or less: currently contains 417",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class HIDEventManager {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Input/Events/HIDEventManager.swift",
+    "line": 26
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 416 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Input/Events/HIDEventManager.swift",
+    "line": 764
+   },
+   "reason": "File should contain 400 lines or less: currently contains 764",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func perform(appState: AppState) {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Input/Hotkeys/HotkeyAction.swift",
+    "line": 54
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 19",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func perform(appState: AppState) {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Input/Hotkeys/HotkeyAction.swift",
+    "line": 54
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 69 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func commitRecapturePass(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache+Recapture.swift",
+    "line": 235
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 26",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func commitRecapturePass(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache+Recapture.swift",
+    "line": 235
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 131 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache+Recapture.swift",
+    "line": 928
+   },
+   "reason": "File should contain 400 lines or less: currently contains 928",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class MenuBarItemImageCache: @unchecked Sendable {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache.swift",
+    "line": 44
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 385 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func installObservers() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache.swift",
+    "line": 296
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 14",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func installObservers() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache.swift",
+    "line": 296
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 83 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func runLiveRefreshLoop() async {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache.swift",
+    "line": 513
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 15",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func runLiveRefreshLoop() async {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache.swift",
+    "line": 513
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 76 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCache.swift",
+    "line": 798
+   },
+   "reason": "File should contain 400 lines or less: currently contains 798",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCacheDiskStore.swift",
+    "line": 19
+   },
+   "reason": "Class body should span 250 lines or less excluding comments and whitespace: currently spans 259 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "        private nonisolated struct Entry: Equatable {",
+  "violation": {
+   "location": {
+    "character": 29,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCacheDiskStore.swift",
+    "line": 130
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private nonisolated func drainPendingSave(to url: URL, legacyURL: URL?) {",
+  "violation": {
+   "location": {
+    "character": 25,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCacheDiskStore.swift",
+    "line": 214
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 11",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private nonisolated func drainPendingSave(to url: URL, legacyURL: URL?) {",
+  "violation": {
+   "location": {
+    "character": 25,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCacheDiskStore.swift",
+    "line": 214
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 73 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Capture/MenuBarItemImageCacheDiskStore.swift",
+    "line": 421
+   },
+   "reason": "File should contain 400 lines or less: currently contains 421",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "nonisolated enum AXGeometryCatalog {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Interaction/AXGeometryCatalog.swift",
+    "line": 13
+   },
+   "reason": "Enum body should span 250 lines or less excluding comments and whitespace: currently spans 270 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "nonisolated enum MenuBarItemAXProvider {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Interaction/MenuBarItemAXProvider.swift",
+    "line": 26
+   },
+   "reason": "Enum body should span 350 lines or less excluding comments and whitespace: currently spans 1019 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    static func enumerateMenuBarItemsResilient(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Interaction/MenuBarItemAXProvider.swift",
+    "line": 203
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 15",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static func enumerateMenuBarItemsResilient(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "Thaw/Items/Interaction/MenuBarItemAXProvider.swift",
+    "line": 203
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 168 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private static func nativeOverflowObservationUncached(on display: CGDirectDisplayID) -> NativeOverflowObservation {",
+  "violation": {
+   "location": {
+    "character": 20,
+    "file": "Thaw/Items/Interaction/MenuBarItemAXProvider.swift",
+    "line": 971
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 72 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Interaction/MenuBarItemAXProvider.swift",
+    "line": 1403
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1403",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func uncheckedCacheItems(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Cache.swift",
+    "line": 134
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 14",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func uncheckedCacheItems(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Cache.swift",
+    "line": 134
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 96 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func cacheItemsOutsideLayoutEdit(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Cache.swift",
+    "line": 583
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 33",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func cacheItemsOutsideLayoutEdit(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Cache.swift",
+    "line": 583
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 222 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Cache.swift",
+    "line": 951
+   },
+   "reason": "File should contain 400 lines or less: currently contains 951",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func postClickEvents(item: MenuBarItem, mouseButton: CGMouseButton) async throws {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Clicking.swift",
+    "line": 62
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 76 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func click(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Clicking.swift",
+    "line": 250
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 11",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func click(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Clicking.swift",
+    "line": 250
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 72 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Clicking.swift",
+    "line": 419
+   },
+   "reason": "File should contain 400 lines or less: currently contains 419",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func clickConcealedItem(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+ConcealedClick.swift",
+    "line": 22
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 58 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func relocateNewLeftmostItems(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+ControlItemOrder.swift",
+    "line": 31
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 23",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func relocateNewLeftmostItems(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+ControlItemOrder.swift",
+    "line": 31
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 175 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func restoreStructuralControlOrder(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+ControlItemOrder.swift",
+    "line": 318
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 78 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func enforceControlItemOrder(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+ControlItemOrder.swift",
+    "line": 424
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 64 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+ControlItemOrder.swift",
+    "line": 510
+   },
+   "reason": "File should contain 400 lines or less: currently contains 510",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+EventHelpers.swift",
+    "line": 638
+   },
+   "reason": "File should contain 400 lines or less: currently contains 638",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func rebalanceOverflowIfNeeded(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+LayoutReset.swift",
+    "line": 100
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 27",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func rebalanceOverflowIfNeeded(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+LayoutReset.swift",
+    "line": 100
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 238 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func resetAssignments(to target: MenuBarSection.Name = .hidden) async throws -> Int {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+LayoutReset.swift",
+    "line": 433
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 56 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func restoreVisibleControlOrder(items: [MenuBarItem]) async -> Bool {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+LayoutReset.swift",
+    "line": 809
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 89 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+LayoutReset.swift",
+    "line": 913
+   },
+   "reason": "File should contain 400 lines or less: currently contains 913",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func moveWhileHoldingMutation(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 219
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 15",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func moveWhileHoldingMutation(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 219
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 124 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func scheduleStructuralNormalization(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 512
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 28",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func scheduleStructuralNormalization(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 512
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 122 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func synchronizeRevealedOrder(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 727
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 13",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func synchronizeRevealedOrder(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 727
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 110 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func reconcileSectionBoundaries(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 925
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 27",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func reconcileSectionBoundaries(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 925
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 187 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func seatItemsWhileHoldingMutation(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 1202
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 53 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func applySectionItemOrder(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 1472
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 31",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func applySectionItemOrder(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 1472
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 221 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func skipSectionOrderApply(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 1757
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 11",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func skipSectionOrderApply(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 1757
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 56 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func moveItemViaPreferredPositions(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 2077
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 16",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func moveItemViaPreferredPositions(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 2077
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 176 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+Moving.swift",
+    "line": 2333
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 2333",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func repairVisibleLayoutAfterRestrictionChange(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+RestrictionRepair.swift",
+    "line": 68
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 45",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func repairVisibleLayoutAfterRestrictionChange(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+RestrictionRepair.swift",
+    "line": 68
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 241 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Manager/MenuBarItemManager+RestrictionRepair.swift",
+    "line": 428
+   },
+   "reason": "File should contain 400 lines or less: currently contains 428",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class MenuBarItemManager {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Items/Manager/MenuBarItemManager.swift",
+    "line": 29
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 889 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func scheduleSectionOrderApply(for section: MenuBarSection.Name) {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager.swift",
+    "line": 643
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 12",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func scheduleSectionOrderApply(for section: MenuBarSection.Name) {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager.swift",
+    "line": 643
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 65 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func updateNewItemsPlacement(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager.swift",
+    "line": 1026
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 56 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func performSetup(with appState: AppState) async {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Items/Manager/MenuBarItemManager.swift",
+    "line": 1245
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 67 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func configureObservers(itemGroupManager: MenuBarItemGroupManager, navigationState: AppNavigationState) {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager.swift",
+    "line": 1330
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 12",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func configureObservers(itemGroupManager: MenuBarItemGroupManager, navigationState: AppNavigationState) {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Manager/MenuBarItemManager.swift",
+    "line": 1330
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 108 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Manager/MenuBarItemManager.swift",
+    "line": 1583
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1583",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "final class MenuBarItemSpacingManager {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Items/Spacing/MenuBarItemSpacingManager.swift",
+    "line": 14
+   },
+   "reason": "Class body should span 250 lines or less excluding comments and whitespace: currently spans 338 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func applyOffsetLocked(offset: Int, forceRelaunch: Bool, relaunchApps: Bool) async throws -> ApplyOutcome {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Spacing/MenuBarItemSpacingManager.swift",
+    "line": 292
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 75 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func verifyAndFallbackRelaunch(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Items/Spacing/MenuBarItemSpacingManager.swift",
+    "line": 411
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 77 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Items/Spacing/MenuBarItemSpacingManager.swift",
+    "line": 537
+   },
+   "reason": "File should contain 400 lines or less: currently contains 537",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/MenuBar/Appearance/Configurations/MenuBarAppearanceConfigurationV2.swift",
+    "line": 462
+   },
+   "reason": "File should contain 400 lines or less: currently contains 462",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func applyControlItemOrder(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/MenuBar/Backends/ReadOnlyPositionStore.swift",
+    "line": 110
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 72 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "        private typealias AddTarget = @convention(c) (",
+  "violation": {
+   "location": {
+    "character": 17,
+    "file": "Thaw/MenuBar/ControlItem/ControlItem.swift",
+    "line": 308
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func observeSettings(appState: AppState) {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/MenuBar/ControlItem/ControlItem.swift",
+    "line": 767
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 17",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func observeSettings(appState: AppState) {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/MenuBar/ControlItem/ControlItem.swift",
+    "line": 767
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 72 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    @objc private func performPrimaryAction() {",
+  "violation": {
+   "location": {
+    "character": 19,
+    "file": "Thaw/MenuBar/ControlItem/ControlItem.swift",
+    "line": 1378
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 51 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/MenuBar/ControlItem/ControlItem.swift",
+    "line": 1539
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1539",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "        enum Chevron {",
+  "violation": {
+   "location": {
+    "character": 9,
+    "file": "Thaw/MenuBar/ControlItem/ControlItemImage.swift",
+    "line": 103
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class ControlItemMenuController: NSObject {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/MenuBar/ControlItem/ControlItemMenu.swift",
+    "line": 17
+   },
+   "reason": "Class body should span 250 lines or less excluding comments and whitespace: currently spans 269 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class MenuBarManager {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/MenuBar/MenuBarManager.swift",
+    "line": 21
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 636 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func toggleSwap() -> Bool {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/MenuBar/MenuBarManager.swift",
+    "line": 607
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 11",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func toggleSwap() -> Bool {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/MenuBar/MenuBarManager.swift",
+    "line": 607
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 76 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/MenuBar/MenuBarManager.swift",
+    "line": 892
+   },
+   "reason": "File should contain 400 lines or less: currently contains 892",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class MenuBarSection {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/MenuBar/MenuBarSection.swift",
+    "line": 12
+   },
+   "reason": "Class body should span 250 lines or less excluding comments and whitespace: currently spans 272 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class RuntimeSectionContextAdapter: RuntimeSectionContext {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/MenuBar/RuntimeSectionContextAdapter.swift",
+    "line": 15
+   },
+   "reason": "Class body should span 250 lines or less excluding comments and whitespace: currently spans 263 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "struct MenuBarAppearanceEditor: View {",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/Appearance/Editor/MenuBarAppearanceEditor.swift",
+    "line": 12
+   },
+   "reason": "Struct body should span 250 lines or less excluding comments and whitespace: currently spans 287 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/Appearance/Editor/MenuBarAppearanceEditor.swift",
+    "line": 735
+   },
+   "reason": "File should contain 400 lines or less: currently contains 735",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class MenuBarOverlayPanel: NSPanel {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 129
+   },
+   "reason": "Class body should span 250 lines or less excluding comments and whitespace: currently spans 337 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "private final class MenuBarOverlayPanelContentView: NSView {",
+  "violation": {
+   "location": {
+    "character": 15,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 560
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 798 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func configureCancellables() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 723
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 19",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func configureCancellables() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 723
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 110 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func pathForSplitShape(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 1005
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 65 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func updateTintGlass() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 1263
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 62 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    override func draw(_: NSRect) {",
+  "violation": {
+   "location": {
+    "character": 14,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 1403
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 11",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    override func draw(_: NSRect) {",
+  "violation": {
+   "location": {
+    "character": 14,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 1403
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 89 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayPanel.swift",
+    "line": 1511
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1511",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    static func notchShapePath(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "Thaw/Panels/Appearance/MenuBarOverlayShapePaths.swift",
+    "line": 149
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 57 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class LayoutBarContainer: NSView {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarContainer.swift",
+    "line": 19
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 680 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func subscribeToModelUpdates() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarContainer.swift",
+    "line": 162
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 19",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func subscribeToModelUpdates() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarContainer.swift",
+    "line": 162
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 108 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func refreshArrangedViews(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarContainer.swift",
+    "line": 625
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 16",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func refreshArrangedViews(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarContainer.swift",
+    "line": 625
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 101 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarContainer.swift",
+    "line": 974
+   },
+   "reason": "File should contain 400 lines or less: currently contains 974",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class LayoutBarItemView: LayoutBarArrangedView {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarItemView.swift",
+    "line": 17
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 767 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func configureObservations() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarItemView.swift",
+    "line": 571
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 14",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func configureObservations() {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarItemView.swift",
+    "line": 571
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 75 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static func renderedTile(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarItemView.swift",
+    "line": 732
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 56 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarItemView.swift",
+    "line": 1022
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1022",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "enum LayoutBarKeyboard {",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarKeyboard.swift",
+    "line": 14
+   },
+   "reason": "Enum body should span 350 lines or less excluding comments and whitespace: currently spans 419 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    static func handleKeyDown(_ event: NSEvent, in view: LayoutBarItemView) -> Bool {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarKeyboard.swift",
+    "line": 25
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 17",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static func handleKeyDown(_ event: NSEvent, in view: LayoutBarItemView) -> Bool {",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarKeyboard.swift",
+    "line": 25
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 72 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarKeyboard.swift",
+    "line": 541
+   },
+   "reason": "File should contain 400 lines or less: currently contains 541",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class LayoutBarPaddingView: NSView {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarPaddingView.swift",
+    "line": 14
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 965 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func performLayoutDrop(_ sender: NSDraggingInfo) -> Bool {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarPaddingView.swift",
+    "line": 210
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 23",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func performLayoutDrop(_ sender: NSDraggingInfo) -> Bool {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarPaddingView.swift",
+    "line": 210
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 224 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func move(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarPaddingView.swift",
+    "line": 554
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 20",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func move(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarPaddingView.swift",
+    "line": 554
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 117 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func moveGroupSequentially(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarPaddingView.swift",
+    "line": 895
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 13",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func moveGroupSequentially(",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarPaddingView.swift",
+    "line": 895
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 96 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/LayoutBar/LayoutBarPaddingView.swift",
+    "line": 1322
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1322",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/SwapBar/SwapBarManager.swift",
+    "line": 428
+   },
+   "reason": "File should contain 400 lines or less: currently contains 428",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class ThawBarPanel: NSPanel {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Panels/ThawBar/ThawBar.swift",
+    "line": 12
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 430 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func floatingOrigin(for location: ThawBarLocation, on screen: NSScreen, appState: AppState) -> CGPoint {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/ThawBar/ThawBar.swift",
+    "line": 241
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 13",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func floatingOrigin(for location: ThawBarLocation, on screen: NSScreen, appState: AppState) -> CGPoint {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/ThawBar/ThawBar.swift",
+    "line": 241
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 63 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func show(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Panels/ThawBar/ThawBar.swift",
+    "line": 326
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 67 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/ThawBar/ThawBar.swift",
+    "line": 564
+   },
+   "reason": "File should contain 400 lines or less: currently contains 564",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static func resolve(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Panels/ThawBar/ThawBarAppearanceForeground.swift",
+    "line": 13
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 13",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func performSetup(with thawBarPanel: ThawBarPanel, appState: AppState, displaySettlements: some Publisher<EnvironmentChange, Never>) {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Panels/ThawBar/ThawBarColorManager.swift",
+    "line": 53
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 64 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "struct ThawBarContentView: View {",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/ThawBar/ThawBarContentView.swift",
+    "line": 22
+   },
+   "reason": "Struct body should span 350 lines or less excluding comments and whitespace: currently spans 374 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func content(items: [MenuBarItem]) -> some View {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/ThawBar/ThawBarContentView.swift",
+    "line": 316
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 11",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func content(items: [MenuBarItem]) -> some View {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Panels/ThawBar/ThawBarContentView.swift",
+    "line": 316
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 121 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Panels/ThawBar/ThawBarContentView.swift",
+    "line": 486
+   },
+   "reason": "File should contain 400 lines or less: currently contains 486",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class DisplaySettingsManager {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Settings/Models/Displays/DisplaySettingsManager.swift",
+    "line": 19
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 418 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Settings/Models/Displays/DisplaySettingsManager.swift",
+    "line": 659
+   },
+   "reason": "File should contain 400 lines or less: currently contains 659",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Settings/Models/Profiles/Profile.swift",
+    "line": 514
+   },
+   "reason": "File should contain 400 lines or less: currently contains 514",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "final class ProfileManager {",
+  "violation": {
+   "location": {
+    "character": 7,
+    "file": "Thaw/Settings/Models/Profiles/ProfileManager.swift",
+    "line": 18
+   },
+   "reason": "Class body should span 350 lines or less excluding comments and whitespace: currently spans 765 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    func applyProfile(_ profile: Profile, to appState: AppState, previousProfileID: UUID? = nil, relaunchesApps: Bool = true, spacingRelaunchApproved: Bool = false) {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "Thaw/Settings/Models/Profiles/ProfileManager.swift",
+    "line": 271
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 66 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Settings/Models/Profiles/ProfileManager.swift",
+    "line": 1036
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1036",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    private func spacingRow(for display: DisplaySettingsManager.DisplayInfo) -> some View {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Settings/SettingsPanes/Displays/DisplayPerDisplaySection.swift",
+    "line": 120
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 51 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func hotkeyRecorder(forAction action: HotkeyAction) -> some View {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Settings/SettingsPanes/HotkeysSettingsPane.swift",
+    "line": 82
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 14",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func folderStyleRow(_ group: MenuBarItemGroup) -> some View {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Settings/SettingsPanes/Layout/MenuBarLayoutGroupsSection.swift",
+    "line": 78
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 53 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Settings/SettingsPanes/Layout/MenuBarLayoutSettingsPane.swift",
+    "line": 496
+   },
+   "reason": "File should contain 400 lines or less: currently contains 496",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    private func changeSummary(_ diff: ProfileLayoutDiff) -> some View {",
+  "violation": {
+   "location": {
+    "character": 13,
+    "file": "Thaw/Settings/SettingsPanes/Profiles/ProfilePreviewView.swift",
+    "line": 123
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 60 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "struct ProfileSettingsPane: View {",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Settings/SettingsPanes/Profiles/ProfileSettingsPane.swift",
+    "line": 13
+   },
+   "reason": "Struct body should span 250 lines or less excluding comments and whitespace: currently spans 274 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Settings/SettingsView.swift",
+    "line": 424
+   },
+   "reason": "File should contain 400 lines or less: currently contains 424",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/System/Defaults.swift",
+    "line": 635
+   },
+   "reason": "File should contain 400 lines or less: currently contains 635",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "        struct Inner: Codable {",
+  "violation": {
+   "location": {
+    "character": 9,
+    "file": "Thaw/System/ItemEnumerationDump.swift",
+    "line": 37
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static func run() -> URL? {",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "Thaw/System/ItemEnumerationDump.swift",
+    "line": 68
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 95 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "enum SettingsURIHandler {",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/System/SettingsURIHandler.swift",
+    "line": 16
+   },
+   "reason": "Enum body should span 350 lines or less excluding comments and whitespace: currently spans 825 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "        enum Kind {",
+  "violation": {
+   "location": {
+    "character": 9,
+    "file": "Thaw/System/SettingsURIHandler.swift",
+    "line": 38
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/System/SettingsURIHandler.swift",
+    "line": 1096
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1096",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    nonisolated func separatedFromNearUniformBackground(",
+  "violation": {
+   "location": {
+    "character": 17,
+    "file": "Thaw/Utilities/CGImage+ImageProcessing.swift",
+    "line": 404
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 63 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static nonisolated func estimateEdgeRing(",
+  "violation": {
+   "location": {
+    "character": 24,
+    "file": "Thaw/Utilities/CGImage+ImageProcessing.swift",
+    "line": 945
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 62 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    nonisolated func isTransparent(alphaThreshold: CGFloat = 0) -> Bool {",
+  "violation": {
+   "location": {
+    "character": 17,
+    "file": "Thaw/Utilities/CGImage+ImageProcessing.swift",
+    "line": 1081
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 16",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    nonisolated func isTransparent(alphaThreshold: CGFloat = 0) -> Bool {",
+  "violation": {
+   "location": {
+    "character": 17,
+    "file": "Thaw/Utilities/CGImage+ImageProcessing.swift",
+    "line": 1081
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 56 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "Thaw/Utilities/CGImage+ImageProcessing.swift",
+    "line": 1309
+   },
+   "reason": "File should contain 1000 lines or less: currently contains 1309",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "    static func captureWindowsImageSCK(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/Bridging.swift",
+    "line": 839
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 77 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/Bridging.swift",
+    "line": 956
+   },
+   "reason": "File should contain 400 lines or less: currently contains 956",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    public static nonisolated func planLCSMoveSequence(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/LayoutMoveSequencePlanner.swift",
+    "line": 47
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 17",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    public static nonisolated func planLCSMoveSequence(",
+  "violation": {
+   "location": {
+    "character": 31,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/LayoutMoveSequencePlanner.swift",
+    "line": 47
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 61 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    public func perform(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/MenuBarDragGesture.swift",
+    "line": 66
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 58 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "public struct MenuBarItem: CustomStringConvertible, Sendable, Codable {",
+  "violation": {
+   "location": {
+    "character": 8,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/MenuBarItem.swift",
+    "line": 12
+   },
+   "reason": "Struct body should span 250 lines or less excluding comments and whitespace: currently spans 260 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/MenuBarItem.swift",
+    "line": 438
+   },
+   "reason": "File should contain 400 lines or less: currently contains 438",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    public static func gather(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/MenuBarItemGroupPolicy.swift",
+    "line": 100
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 13",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codable {",
+  "violation": {
+   "location": {
+    "character": 8,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/MenuBarItemTag.swift",
+    "line": 16
+   },
+   "reason": "Struct body should span 350 lines or less excluding comments and whitespace: currently spans 485 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "packages/MenuBarModel/Sources/MenuBarModel/MenuBarItemTag.swift",
+    "line": 954
+   },
+   "reason": "File should contain 400 lines or less: currently contains 954",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "struct MenuOpenMonitorDiscoveryTests {",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "packages/MenuBarModel/Tests/MenuBarModelTests/MenuOpenMonitorDiscoveryTests.swift",
+    "line": 23
+   },
+   "reason": "Struct body should span 250 lines or less excluding comments and whitespace: currently spans 285 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    public static func run(",
+  "violation": {
+   "location": {
+    "character": 19,
+    "file": "packages/ThawAutomation/Sources/AutomationCore/HookRunner.swift",
+    "line": 119
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 65 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func capture(key: Key, visibilityGeneration: UInt64, filter: sending SCContentFilter, configuration: sending SCStreamConfiguration) async throws -> CGImage {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "packages/ThawCapture/Sources/ThawCapture/DisplayStripCaptureSession.swift",
+    "line": 57
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 14",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    func capture(key: Key, visibilityGeneration: UInt64, filter: sending SCContentFilter, configuration: sending SCStreamConfiguration) async throws -> CGImage {",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "packages/ThawCapture/Sources/ThawCapture/DisplayStripCaptureSession.swift",
+    "line": 57
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 62 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static func captureMenuBarDisplayStripAsync(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "packages/ThawCapture/Sources/ThawCapture/ScreenCapture+Hosting.swift",
+    "line": 397
+   },
+   "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 91 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static func captureMenuBarHostingWindowAsync(",
+  "violation": {
+   "location": {
+    "character": 5,
+    "file": "packages/ThawCapture/Sources/ThawCapture/ScreenCapture+Hosting.swift",
+    "line": 512
+   },
+   "reason": "Function should have complexity 10 or less; currently complexity is 14",
+   "ruleDescription": "Complexity of function bodies should be limited.",
+   "ruleIdentifier": "cyclomatic_complexity",
+   "ruleName": "Cyclomatic Complexity",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "    static func captureMenuBarHostingWindowAsync(",
+  "violation": {
+   "location": {
+    "character": 12,
+    "file": "packages/ThawCapture/Sources/ThawCapture/ScreenCapture+Hosting.swift",
+    "line": 512
+   },
+   "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 114 lines",
+   "ruleDescription": "Function bodies should not span too many lines",
+   "ruleIdentifier": "function_body_length",
+   "ruleName": "Function Body Length",
+   "severity": "error"
+  }
+ },
+ {
+  "text": "}",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "packages/ThawCapture/Sources/ThawCapture/ScreenCapture+Hosting.swift",
+    "line": 663
+   },
+   "reason": "File should contain 400 lines or less: currently contains 663",
+   "ruleDescription": "Files should not span too many lines.",
+   "ruleIdentifier": "file_length",
+   "ruleName": "File Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "struct ThawCaptureTests {",
+  "violation": {
+   "location": {
+    "character": 1,
+    "file": "packages/ThawCapture/Tests/ThawCaptureTests/ThawCaptureTests.swift",
+    "line": 13
+   },
+   "reason": "Struct body should span 250 lines or less excluding comments and whitespace: currently spans 298 lines",
+   "ruleDescription": "Type bodies should not span too many lines",
+   "ruleIdentifier": "type_body_length",
+   "ruleName": "Type Body Length",
+   "severity": "warning"
+  }
+ },
+ {
+  "text": "        enum Direction: String { case sent = \"\u2192 SENT\", received = \"\u2190 GOT\" }",
+  "violation": {
+   "location": {
+    "character": 9,
+    "file": "packages/ThawCtl/Sources/ThawCtl/ThawCtlApp.swift",
+    "line": 39
+   },
+   "reason": "Types should be nested at most 1 level deep",
+   "ruleDescription": "Types should be nested at most 1 level deep, and functions should be nested at most 2 levels deep.",
+   "ruleIdentifier": "nesting",
+   "ruleName": "Nesting",
+   "severity": "warning"
+  }
+ }
+]

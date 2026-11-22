@@ -1,0 +1,171 @@
+//
+//  SearchIndex+Advanced.swift
+//  Project: Thaw
+//
+//  Copyright (Thaw) © 2026 Toni Förster
+//  Licensed under the GNU GPLv3
+
+import SwiftUI
+
+nonisolated extension SearchIndex {
+    // MARK: Advanced Settings
+
+    static let advancedEntries: [SearchEntry] = [
+        SearchEntry(
+            id: "lab.enableMenuBarItemDescenders",
+            title: "Show item details on hover",
+            descriptionText: String(localized: "Hangs a small readout below a menu bar item while the pointer rests on it."),
+            pane: .visibility,
+            section: "On hover",
+            keywords: ["hover", "details", "readout", "descender", "notch", "tooltip", "weather"],
+            property: .visibility("enableMenuBarItemDescenders")
+        ),
+        SearchEntry(
+            id: "lab.zenModeWhileRecording",
+            title: "Zen Mode while the camera or microphone is on",
+            descriptionText: String(localized: "Turns on Zen Mode while any app uses the camera or microphone, then turns it off when they go idle."),
+            pane: .visibility,
+            section: "Zen Mode",
+            keywords: ["presenter", "presentation", "recording", "screen", "capture", "zen", "collapse", "hide", "camera", "microphone", "call", "meeting", "clean"],
+            property: .visibility("zenModeWhileRecording")
+        ),
+        SearchEntry(
+            id: "layout.replaceControlCenterItems",
+            title: "Replace Control Center items",
+            descriptionText: String(localized: "Puts \(Constants.displayName) icons in place of Focus, AirDrop, Now Playing, Fast User Switching, Time Machine and the Input menu, so you can move or hide them."),
+            pane: .menuBarLayout,
+            section: "Apple’s items",
+            keywords: [
+                "focus", "do not disturb", "dnd", "moon", "airdrop", "now playing", "music", "user", "fast user switching",
+                "time machine", "backup", "input menu", "text input", "keyboard", "input source", "language",
+                "menu extra", "system item", "replace", "replacement", "stand-in",
+            ],
+            property: .layout("enableModuleStandIns")
+        ),
+        SearchEntry(
+            id: "lab.enableDesktopMenuHiding",
+            title: "Hide app menus on the desktop",
+            descriptionText: String(localized: "Covers the Finder's menu titles while the desktop is frontmost. The Apple menu stays."),
+            pane: .general,
+            section: "Menu bar behavior",
+            keywords: ["finder", "desktop", "menus", "menu titles", "hide", "app menus", "cover", "clean"],
+            property: .general("enableDesktopMenuHiding")
+        ),
+        SearchEntry(
+            id: "lab.enableControlItemPanel",
+            title: "Panel instead of the status menu",
+            descriptionText: String(localized: "Right-click \(Constants.displayName)’s icon to get a panel of controls instead of a menu of text."),
+            pane: .widgets,
+            section: "\(Constants.displayName)'s menu and icon",
+            keywords: ["panel", "status menu", "menu", "right-click", "icon", "controls", "sections", "zen", "profile", "swap"],
+            property: .widgets("enableControlItemPanel")
+        ),
+        SearchEntry(
+            id: "general.menuBarSearchPresentation",
+            title: "Search panel layout",
+            descriptionText: String(localized: "Choose whether the search panel lists your items before you type."),
+            pane: .visibility,
+            section: "Menu bar search",
+            keywords: [
+                "search", "panel", "layout", "style", "launcher", "spotlight", "floe",
+                "compact", "extended", "list", "collapse",
+            ],
+            property: .visibility("menuBarSearchPresentation")
+        ),
+        SearchEntry(
+            id: "general.showSearchShortcutBar",
+            title: "Show shortcut bar",
+            descriptionText: String(localized: "The bar under the results with Settings, Rename, Actions and their keyboard shortcuts. The shortcuts work either way."),
+            pane: .visibility,
+            section: "Menu bar search",
+            keywords: ["search", "panel", "shortcut", "bar", "bottom", "footer", "hints", "keys", "rename", "actions", "hide", "minimal"],
+            property: nil
+        ),
+        SearchEntry(
+            id: "general.rememberSearchQuery",
+            title: "Remember last search",
+            descriptionText: String(localized: "Open search with the text you last typed."),
+            pane: .visibility,
+            section: "Menu bar search",
+            keywords: ["search", "query", "remember", "last", "keep", "text", "restore"],
+            property: nil
+        ),
+        SearchEntry(
+            id: "general.showMenuBarTooltips",
+            title: "Show item names on hover",
+            descriptionText: String(localized: "Show a tooltip when hovering over menu bar items in the actual menu bar."),
+            pane: .visibility,
+            section: "On hover",
+            keywords: ["tooltip", "hover", "menu bar"],
+            property: .visibility("showMenuBarTooltips")
+        ),
+        SearchEntry(
+            id: "advanced.autoZenWhileSharingScreen",
+            title: "Zen Mode while sharing your screen",
+            descriptionText: String(localized: "Turns on Zen Mode while you share your screen or mirror a display."),
+            pane: .visibility,
+            section: "Zen Mode",
+            keywords: ["zen", "presenting", "present", "share", "sharing", "mirror", "screen", "projector", "meeting"],
+            property: .visibility("autoZenWhileSharingScreen")
+        ),
+        SearchEntry(
+            id: "automation.menuBarItemAlertReveals",
+            title: "Show an item when its icon changes",
+            descriptionText: String(localized: "Briefly shows a hidden item in the menu bar when its icon changes, so you see its alert."),
+            pane: .triggers,
+            section: "When an icon changes",
+            keywords: ["reveal", "alert", "icon", "change", "badge", "notification", "hidden", "temporarily"],
+            property: nil
+        ),
+        SearchEntry(
+            id: "advanced.enableMenuBarItemOverflow",
+            title: "Move items that don’t fit into Hidden",
+            descriptionText: String(localized: "When the menu bar is full, move the Visible items that don’t fit into Hidden and open them from the \(Constants.displayName) Bar."),
+            pane: .menuBarLayout,
+            section: "Overflow and previews",
+            keywords: ["overflow", "notch", "fit", "visible", "hidden", "advanced layout controls"],
+            property: .layout("enableMenuBarItemOverflow")
+        ),
+        SearchEntry(
+            id: "advanced.hideApplicationMenus",
+            title: "Hide app menus when showing items",
+            descriptionText: String(localized: "Make more room in the menu bar by hiding the current app menus if needed."),
+            pane: .general,
+            section: "Menu bar behavior",
+            keywords: ["app menus", "hide", "application", "menu bar"],
+            property: .general("hideApplicationMenus")
+        ),
+        SearchEntry(
+            id: "advanced.enableSecondaryContextMenu",
+            titleKey: "Right-click the menu bar for the \(Constants.displayName) menu",
+            titleText: "Right-click the menu bar for the \(Constants.displayName) menu",
+            descriptionText: String(localized: "Right-click an empty area of the menu bar to open a minimal version of \(Constants.displayName)'s menu. If macOS opens its own menu instead, hold Option as you right-click."),
+            pane: .general,
+            sectionKey: "Menu bar behavior",
+            sectionText: "Menu bar behavior",
+            keywords: ["context menu", "right click", "right-click", "secondary", "secondary context menu"],
+            property: .general("enableSecondaryContextMenu")
+        ),
+        SearchEntry(
+            id: "advanced.enableNativeAppHiding",
+            title: "Hiding method",
+            descriptionText: String(localized: "Native keeps Live Activities, the camera indicator and Apple’s own items on the menu bar. Standard hides any app’s items, and Clock, Control Center and Siri too."),
+            pane: .menuBarLayout,
+            section: "Hiding",
+            keywords: [
+                "live activities", "camera", "microphone", "indicator", "native", "standard", "everything", "hiding", "method",
+                "notification center", "clock", "control center", "siri",
+            ],
+            property: .layout("enableNativeAppHiding")
+        ),
+        SearchEntry(
+            id: "general.appLanguage",
+            title: "App language",
+            descriptionText: String(localized: "Use the app in a different language than the system."),
+            pane: .general,
+            section: "Language and theme",
+            keywords: ["language", "locale", "translation", "localization", "override"],
+            property: nil
+        ),
+    ]
+}

@@ -1,0 +1,69 @@
+//
+//  OffscreenRender.swift
+//  Project: Thaw
+//
+//  Copyright (Thaw) © 2026 Toni Förster
+//  Licensed under the GNU GPLv3
+
+import AppKit
+import SwiftUI
+import Testing
+
+/// A SwiftUI view hosted in a window that is never shown, so tests can lay it
+/// out, draw it into a bitmap and wait for its state changes to apply.
+@MainActor
+final class OffscreenRender<Content: View> {
+    let host: NSHostingView<Content>
+    private let window: NSWindow
+
+    init(_ view: Content, size: CGSize) {
+        host = NSHostingView(rootView: view)
+        window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        host.frame = CGRect(origin: .zero, size: size)
+        host.layoutSubtreeIfNeeded()
+    }
+
+    /// The view's pixels as they are drawn now.
+    func pixels() throws -> Data {
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let bytes = try #require(bitmap.bitmapData)
+        return Data(bytes: bytes, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+    }
+
+    /// Lets SwiftUI apply pending updates until condition holds, or until
+    /// timeout passes. Returns whether it held.
+    ///
+    /// SwiftUI says nothing when it has applied an update, so this checks
+    /// between run-loop turns. The default bound is far past any update, so a
+    /// busy machine slows a passing test rather than failing it. CI runs several
+    /// test processes at once and a passing page test has taken up to a minute
+    /// there, so the bound is two minutes.
+    @discardableResult
+    func settle(within timeout: Duration = .seconds(120), until condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            host.layoutSubtreeIfNeeded()
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    /// Draws the view between run-loop turns until its pixels satisfy condition.
+    /// Returns those pixels, so the caller needn't draw again, or nil at timeout.
+    func pixels(within timeout: Duration = .seconds(120), until condition: (Data) -> Bool) async -> Data? {
+        var matched: Data?
+        await settle(within: timeout) {
+            guard let drawn = try? self.pixels(), condition(drawn) else { return false }
+            matched = drawn
+            return true
+        }
+        return matched
+    }
+}
