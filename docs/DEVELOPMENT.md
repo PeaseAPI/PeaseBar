@@ -400,6 +400,15 @@ PeaseBar/
   t_p5 P91–P99 全绿（P47 需与 P46 成对跑属前置纪律非回归）；单测 105 项。本轮又踩实锤两老坑：
   探针必须用 tp5.tp 同一底座实例（p95_probe 同款）、重签洗双权限走 T87/T91 恢复流（新增
   grant_ax2 step2b：⌘⇧G+AX 写路径，免指纹）。**下一步：发布工（版本号定版+tag+zip+GitHub Release）。**
+- **2026-11-22（Phase 5 发布工收官 v1.0.0）**：版本号定版 1.0.0 并同源（唯一源
+  peasebar/__init__.py.__version__，setup.py plist 正则读它，不再写第二份）；正式包
+  （py2app 非 -A，T86 签名工序）+ zip 产物 46.9MB（releases/ 进 gitignore）；双权限恢复
+  时发现新变数：tccutil reset 后「+添加」会先弹「隐私与安全正在尝试修改系统设置」认证框
+  （T87 时代未遇，需用户触控 ID 一次后续跑 step1+step2b 即成）；录屏 T91 流重跑
+  （请求返回 False 但登记已成，再重启即「权限=有」）；发布前真机快验 P98/Q61/Q64 全 PASS。
+  tag v1.0.0 已推；GitHub Release：https://github.com/PeaseAPI/PeaseBar/releases/tag/v1.0.0
+  （无 gh CLI，git credential+API 脚本 tmp/gh_release.py，framework Python 要挂 certifi）。
+  **Phase 5 全部收官；无遗留待办。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
