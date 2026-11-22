@@ -66,8 +66,14 @@ def save_config(cfg, path=None):
 
 
 def item_key(item):
-    """配置键：bundleId|图标名。"""
-    return f"{item.owner_bundle_id}|{item.label}"
+    """配置键：bundleId|稳定名。
+
+    优先用 item.key_part（inventory 给的不是图标名而是 AXIdentifier / 应名，
+    因为图标名常常是温度/未读数这种会变的活文本，T55）；
+    没有则退回 label（纯逻辑单测里的鸭子类型项只有 owner_bundle_id/label）。
+    """
+    part = getattr(item, "key_part", "") or item.label
+    return f"{item.owner_bundle_id}|{part}"
 
 
 def section_of(cfg, key):

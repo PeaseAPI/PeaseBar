@@ -105,7 +105,7 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T14 | **第三方 AX 通道依赖菜单栏可见性**：全屏 App 隐藏菜单栏时，**所有**第三方进程 `AXExtrasMenuBar` 报 -25212（含可见图标）；MenuBarAgent 托管的系统图标树不受影响。激活非全屏 App 恢复菜单栏后立即恢复。且 -25212 无法区分「无状态项 / 被收纳 / 菜单栏隐藏」，盘点器不做精确判定 | 盘点/移动前先确认非全屏；后台守护（activationPolicy==2）直接跳过枚举 |
 | T15 | **open/LaunchServices 启动环境 locale 是 ASCII**：日志文件 `open()` 不显式指定编码时，写中文 print 抛 UnicodeEncodeError，且崩在 `app.run()` 之前——表象是 py2app "Launch error" 弹窗 + 状态项永不出现 + 终端跑同一脚本正常（环境差异） | app.py 日志落盘显式 `encoding="utf-8", errors="replace"`；排障看 `~/Library/Logs/PeaseBar.log` |
 | T16 | **bundle 需独立辅助功能授权**（授权终端不继承 open 启动的 .app）；权限组在新版系统设置「设备控制和数据访问」页；修改 TCC 开关必须 Touch ID/密码人类认证（无法绕过）；自动化流程：AX 定位 PeaseBar 行的 AXCheckBox → AXPress 可弹认证框（合成点击只能选中行） | bundle 授权后盘点/合成事件全部可用；重装/换 bundle 需重走授权 |
-| T17 | **状态项菜单无法被左键语义程序触发，右键合成点击是唯一有效路径**。实测五连败：AXPress（只激活 App 主窗口——QQ 左键语义=开主窗口）、合成左键（60/150/200ms 间隔）、down-only、System Events AppleScript click、HID 事件源；右键三事件（move→RightMouseDown→RightMouseUp）弹 QQ/微信状态菜单稳定成立 | panel.py onIconClick_ 用合成右键触发真实图标菜单；frame 为 CG 坐标与 CGEvent 同系直用 |
+| T17 | ~~状态项菜单无法被程序触发，右键合成是唯一有效路~~ —— **已被 T59/T60 推翻**：当时成立是因为图标还属于各家 App 自己；macOS 27.2.1 上图标全部由 MenuBarAgent 托管，合成点击不再能开任何菜单栏项目 | 触发改走 trigger.py 的 AXPress 阶梯（T61）；frame 仍为 CG 坐标与 CGEvent 同系 |
 | T18 | **NSPanel.hidesOnDeactivate 默认 YES**：App 失活时系统自动藏面板，但**不翻转 isVisible()、不触发 resignKey**——toggle 状态机错乱（CGWindowList/AX 已无此窗、App 内仍认为可见）。必须显式 `setHidesOnDeactivate_(False)` | panel.py 显式关闭；失焦收回改走全局监听（T19） |
 | T19 | **合成事件场景 App 激活是半吊子**：`frontmostApplication` 名义上切换了，但 `NSApp.isActive()=False`、面板 `isKeyWindow()` 永远 False（先 makeKey 后 activate / 先 activate 后 makeKey 都一样）→ resignKey 路线不可靠。改用 **NSEvent 全局鼠标按下监听**（不依赖 key 状态，合成/真实场景都有效）；注意 App 未激活时 global monitor **也会收到状态图标自身的点击**，必须忽略图标区域与面板内部，否则与 toggle 双火（刚开就被收回） | panel.py `_outsideClick_`：面板内/控制图标区域忽略，其余左键按下即收回 |
 | T20 | **NSWindow 没有 `setFrame:` 选择子**（PyObjC 无 `setFrame_`），只有 `setFrame:display:`；直接调 `setFrame_` 抛 AttributeError。且面板复用路径（关闭后再开，`setReleasedWhenClosed_(False)` 对象存活）才会走到这段——首建路径不触发，toggle 测试才暴露 | panel.py `_ensure_panel` 复用分支用 `setFrame_display_(rect, True)` |
@@ -116,6 +116,16 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T25 | **NSWorkspace.runningApplications 列表秒级滞后**：已死 pid 不移除、新 pid 不收录（实测 pkill+open 后 15s 仍只返回僵尸 pid）——做进程重启/双开交接验证会误判 | 测试脚本验证进程存活/交接一律用 `pgrep -f`（内核进程表，无缓存） |
 | T26 | **`open App.app` 对已运行应用被 LaunchServices 合并，不产生第二进程**（实测无任何哨兵/已有实例日志）——二次启动唤醒路径在普通 open 下永远走不到；真实用户从 Dock/Finder 再开同样被合并 | 双开测试用 `open -n` 强制新实例；哨兵价值在 CLI/崩溃僵尸场景 |
 | T27 | **NSView.menu（setMenu_）右键自动弹出且不干扰左键 action**；菜单项同样必须 setTarget_（T21），合成左键点菜单项有效（延续 T14 模式）；测试中点击落空会残留菜单吞掉下一轮右键（菜单 tracking 捕获所有鼠标事件），需 Escape 兜底 | panel.py `_cell_menu` 格子右键移分区 |
+| T28 | **macOS 27 状态项窗口不进 CGWindowList**（25 项全部匹配不到自己的窗口）——图标像素只能「截整条菜单栏条带 + 按 AX frame 裁剪」；屏幕录制权限同样按 bundle 记账（T16 同族） | capture.py 条带管线；无权限时走图标兜底链，绝不退化成显示名字 |
+| T41 | **合成 HID 点击不会投递到自家状态项**（别家图标当年正常，现见 T59 全线失效）：右键→「设置…」这条路弹不出菜单；另踩 **PyObjC 方法命名坑**：不以 `_` 结尾的带参方法（`_move(self,a,b)`）在建类时报 BadPrototypeError，启动即死且无日志 | 测试旁路 ⌥⌘S 直达设置；真实鼠标可用性待人工复核；内部带参方法定名 `applyMove_to_` |
+| T44/T45 | **NSImage 符号图只能用类方法** `imageWithSystemSymbolName_accessibilityDescription_`（`alloc().initWithSymbolName_` 不存在，静默返回 None → 格子空白）；蓝牙/AirDrop 只在**私有符号集**，走 `imageWithPrivateSystemSymbolName_...`（getattr 软调用） | capture.py `_symbol_image`；兜底链永远给图 |
+| T46 | **-25212 是 kAXErrorNoValue（「这个属性没值」），不是「被收纳」**：本机 92 个进程的 `AXExtrasMenuBar` 全部报 -25212（含自家状态项），只有 MenuBarAgent 报 0——旧盘点通道因此塌到 4 项。Thaw 同样用它区分「这个 App 没图标」 | 自有通道降为兜底；「被收纳」改由收纳按钮横坐标判定 |
+| T47/T48/T53 | **macOS 27 的真相：图标全部由 MenuBarAgent 托管在自己窗口里画**（照搬 Thaw `MenuBarAgentWindow`）：`MenuBarAgent → AXWindows → AXWindow(0,0,2056,39) → 每图标一个 AXGroup 槽位 → 槽位内是跳进程引用元素`；`AXUIElementGetPid(该元素)` 直接给出归属 App 的 pid——**读一个进程就看清整条菜单栏**（实测 0.05s）。两张面：一张内层 AXApplication（只给身份），一张内层 AXButton（可 AXPress、带真字形矩形）；系统模块则是 `AXGroup(AXHostingView) → AXMenuBarItem(AXMenuExtra)` | inventory.py `_slot_inspect`/`_collect_hosted_items`（按 (pid,x,w) 归并，同 pid 已有可点元素时丢空壳） |
+| T52/T54 | **托管按钮只 advertise `AXPress`**（无 AXShowMenu，系统模块除外）；AXPress 能真投递到自家状态项，但受话方 `NSApp.currentEvent` 为 **None**（MenuBarAgent 经 `addTarget:action:forControlEvents:` 转发语义主点击，不转发右键） | control_item.py `onStatusClick_`：无事件的 action 一律当主点击，否则面板/设置永远点不开 |
+| T55 | **图标 label 常常是「会变的活文本」**（TG Pro=温度、PeaseClash=刚复制的命令、QQ 标题=未读数）——拿它当配置键会使每次盘点都不是同一个图标；展开收纳区后旧位会残留「只有身份无可点元素」的重复项 | MenuItem 新增 `key_part`（反向域名形状的 AXIdentifier 优先，否则应名）+ `stashed`；同 App 双图标按横坐标加 `#rank`；实测两态均 25 项/24 项可 AX 点/无重复键 |
+| T59/T60 | **合成 HID 点击在 27.2.1 上彻底失效**（推翻 T17）：指针确实移到了 (1272,20)/(1399,20)，但左键/右键打到 OneDrive/微信/控制中心/时钟的槽位上，窗口一个没多（逐帧比窗口集合取证） | 触发不再依赖坐标合成；仅当拿不到 AX 元素时试一次旧路 |
+| T61 | **AXPress 逐图标效果图谱**（25 项全试）：ToDesk/EdgeShelf/Alcove/钉钉/PeaseClash/TG Pro/One Switch/TextInputMenuAgent → 弹原生菜单（layer 101）；微信/QQ/Synology → 弹 App 主窗口（左键语义）；控制中心/Wi‑Fi → 展开面板；**err=-25204（cannotComplete）照样弹菜单，err=0 也可能只做了不开窗的默认动作**——错误码不能当判据 | trigger.py：按「有没有新窗口」分级试 AXPress → AXShowMenu → 合成右键（同 Thaw ConcealedItemOpenMethod/LearnedOpenMethods 思路） |
+| T62/T63 | **设置格子用 PushOnPushOff 切换态（`setButtonType_(1)`）→ AX 报成 `AXCheckBox` 而不是 `AXButton`**；测试若按角色认格子会全盘找不到。另：上一用例留着的设置窗口会让 `cells()` 把两边格子混在一起（假 FAIL） | 取证脚本按**窗口作用域**取格子（panel_win/settings_win_el），角色不再参与判定 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -140,14 +150,18 @@ PeaseBar/
 │   ├── __main__.py      # 入口：单实例检查 → 权限检查 → 启动
 │   ├── app.py           # NSApplication 生命周期、Accessory 策略、模块装配
 │   ├── axutil.py        # AX 基础封装：copy/children/point/size/actions/press + CG↔AppKit
-│   ├── inventory.py     # F1 盘点引擎：MenuBarAgent + 各 App，轮询 + 变更回调
-│   ├── control_item.py  # F2 控制图标：NSStatusItem、左右键分发
-│   ├── panel.py         # F3 救援面板：三区网格（F4）、合成右键触发（T17）、格子右键移区（T27）、全局监听失焦收回（T19）、超时收回（F5）
+│   ├── inventory.py     # F1 盘点引擎：托管通道主用（MenuBarAgent 窗口 + GetPid）
+│   │                    #   + 自有通道兜底；标 notched/stashed/key_part（T46/T47/T55）
+│   ├── capture.py       # F3 图标位图：截条带→按 AX frame 裁剪→抠像→单色判定；
+│   │                    #   无屏幕录制权限时的图标兜底链（永远给图，不给名字）
+│   ├── trigger.py       # F3 触发执行端：按观察结果分级试 AXPress→AXShowMenu→合成右键（T59/T61）
+│   ├── control_item.py  # F2 控制图标：NSStatusItem、左右键分发（无 currentEvent 的 action 当主点击，T54）
+│   ├── panel.py         # F3 救援面板：三区网格（只显图标）、调 trigger 触发图标、
+│   │                    #   收纳区展开/收起按钮、全局监听失焦收回（T19）、超时收回（F5）
 │   ├── sections.py      # F4 三区模型：纯逻辑分桶 + config.json 原子读写（含 panel_timeout）
+│   ├── settings.py      # F14 设置窗口：分区编辑的唯一入口（单击选中+按钮/右键移区，T41）
 │   ├── mover.py         # F11 ⌘拖拽合成写入（Phase 3，实验通过后启用）
-│   ├── hotkeys.py       # F6 全局快捷键 ⌥⌘B（CGEventTap listen-only，T23；Carbon 在 PyObjC 不可用）
-│   ├── settings.py      # F9 配置读写
-│   └── ui/              # F14 设置窗口（Phase 4）
+│   └── hotkeys.py       # F6 全局快捷键 ⌥⌘B/⌥⌘S（CGEventTap listen-only，T23；Carbon 在 PyObjC 不可用）
 ├── docs/DEVELOPMENT.md  # 本文档
 ├── tmp/                 # 探测/测试脚本、截图、test-plan.md（gitignore，不提交）
 ├── tests/               # 纯逻辑单测（分区规划、遮挡判定，不依赖 GUI）
@@ -236,10 +250,18 @@ PeaseBar/
   ⑥ 超时收回 P27 3.0s 精确 PASS；⑦ tests/ 29 项纯逻辑单测全绿（拓出 rect_intersects 零宽误报并修复）。
   Phase 1 回归 T7–T12 全绿（分区改造未破坏左键/toggle/收纳区链路）。
   **下一步：Phase 3（mover.py ⌘拖拽顺序写入 + 编辑器；原生收纳联动 F12）。**
+- **2026-11-22（深夜）**：按用户定调两项：① **分区/顺序编辑全部搬进设置窗口**（面板只找回+触发，照 Thaw 分工）；
+  ② **UI 永远只显图标、不显名字**（名字进 tooltip；无屏幕录制权限时用兜底链：22 项 App 图标 + 3 项系统符号 + 0 项占位）。
+  为验收这两项撞上「菜单栏图标全部枚举不到」的环境级退化，深读 Thaw 后按 `MenuBarAgentWindow` 重写盘点引擎：
+  托管通道主用（**4 项 → 25 项，耗时 2s → 0.05s**，收起/展开两态一致），新事实 T28/T41/T44–T63 写入 §5。
+  其中两条推翻了旧结论：**-25212 不是「被收纳」**（T46）、**合成右键已全线失效，触发靠 AXPress 阶梯**（T59/T60/T61，新建 trigger.py）。
+  真机取证：P41/P44/P45/P46/P47/P48/P49/P52/P53/P54 全 PASS（新增 P53 收纳项 AX 触发、P54 AXPress 并关面板）。
+  **待办：屏幕录制权限未授予 bundle（像素图标路径未取证）；真实鼠标左键点控制图标需人工复核（T41）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
-  - 图标识别键 = bundleId+AXDescription，同一 App 双图标（如多个 Clash 实例）需在 F4 用 owner 序号消歧（Phase 2 处理）；
+  - 图标识别键 = bundleId + `key_part`（稳定 AXIdentifier/应名，同 App 双图标加 `#rank`）——换位会改序号，分区设置需能容忍（T55）；
+  - AXPress 是「主点击」不是「右键」，弹不开菜单的 App（只响应右键的）将来要靠 learned-method 记录逐图标记法（T61，Phase 3）。
   - PeaseBar 自身图标也会被自动收纳——F1 盘点与 F3 面板需处理「自举」（自己也在列表里，T13）。
 
 ## 11. 测试与取证规范

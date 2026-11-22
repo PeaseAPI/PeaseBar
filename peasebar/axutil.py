@@ -95,9 +95,44 @@ def element_role(el):
     return element_string(el, "AXRole")
 
 
+def element_pid(el):
+    """取元素归属进程 pid（AXUIElementGetPid）。
+
+    托管通道靠它认主人（Thaw AXPrimitives.pid(of:)）：MenuBarAgent 窗口里的槽位属于
+    agent，槽位内那个跨进程引用元素（AXApplication/AXButton）的 pid 才是真正拥有图标的 App。
+    """
+    try:
+        err, pid = AS.AXUIElementGetPid(el, None)
+    except Exception:
+        return None
+    return int(pid) if err == 0 else None
+
+
+def set_messaging_timeout(el, seconds=0.25):
+    """给元素设 AX 往返超时（Thaw defaultMessagingTimeout），卡死的 App 不拖慢整轮盘点。"""
+    try:
+        AS.AXUIElementSetMessagingTimeout(el, float(seconds))
+    except Exception:
+        pass
+    return el
+
+
 def perform_press(el):
     """对元素执行 AXPress 动作，返回是否成功。"""
     return AS.AXUIElementPerformAction(el, "AXPress") == 0
+
+
+def perform_action(el, action="AXPress"):
+    """执行指定 AX 动作，返回错误码（0=成功）。
+
+    实测（T54）：macOS 27 的托管按钮只 advertise AXPress（没有 AXShowMenu），
+    而对自家状态项 AXPress 时 action 会被送到、但 NSApp.currentEvent 为 None，
+    受话方必须把这种“无事件的 action”当主点击处理。
+    """
+    try:
+        return AS.AXUIElementPerformAction(el, action)
+    except Exception:
+        return -1
 
 
 def app_element_for_pid(pid):

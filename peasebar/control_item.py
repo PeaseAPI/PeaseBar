@@ -48,6 +48,7 @@ class ControlItem(NSObject):
         if self is None:
             return None
         self.on_left = on_left
+        self.on_settings = None  # 打开设置窗口的回调（app.py 接线，F14）
         self.menu = None
         return self
 
@@ -70,17 +71,20 @@ class ControlItem(NSObject):
 
         # 主菜单（右键用；左键行为由回调接管）
         self.menu = NSMenu.alloc().initWithTitle_("PeaseBar")
+        mi_settings = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "设置…", "openSettings:", "")
         mi_about = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "关于 PeaseBar", "showAbout:", "")
         mi_perms = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "检查辅助功能权限", "checkPermission:", "")
         mi_quit = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "退出 PeaseBar", "terminate:", "q")
-        for mi in (mi_about, mi_perms, mi_quit):
+        for mi in (mi_settings, mi_about, mi_perms, mi_quit):
             # 必须 setTarget_：nil-targeted action 沿响应链查找，而 ControlItem
             # 不在响应链里，点击菜单项后 action 会落空（实测 T14 首败根因）
             mi.setTarget_(self)
             self.menu.addItem_(mi)
+        self.menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 1)
 
         # 按下即回调（左右键都进 on_click，再按事件类型分发）
         button.setTarget_(self)
@@ -102,20 +106,25 @@ class ControlItem(NSObject):
                 rect_in_screen.size.width, rect_in_screen.size.height)
 
     def onStatusClick_(self, sender):
-        """状态图标点击入口：按事件类型分发左右键。"""
+        """状态图标点击入口：按事件类型分发左右键。
+
+        currentEvent 为 None 说明这次 action 不是鼠标点出来的，而是 AX 触发的
+        （T54：救援面板对 MenuBarAgent 的托管按钮执行 AXPress，MenuBarAgent 经
+        `addTarget:action:forControlEvents:` 转发「语义主点击」，路径上不带鼠标事件，
+        也不转发右键）。这种必须当主点击处理，否则面板/设置都点不开。
+        """
         event = NSApp.currentEvent()
-        print(f"[PeaseBar] onStatusClick 触发，currentEvent={event}")
-        if event is None:
-            print("[PeaseBar] 警告：currentEvent 为 None，无法分发")
-            return
-        etype = event.type()
-        print(f"[PeaseBar] 事件类型={etype}（left={int(NSEventTypeLeftMouseDown)}，"
-              f"right={int(NSEventTypeRightMouseDown)}），on_left={'已接线' if self.on_left else '空'}")
+        etype = event.type() if event is not None else None
+        print(f"[PeaseBar] onStatusClick 触发，"
+              f"currentEvent={'无（AX 触发）' if event is None else etype}，"
+              f"on_left={'已接线' if self.on_left else '空'}")
         if etype == NSEventTypeRightMouseDown:
             self._popup_menu()
-        elif etype == NSEventTypeLeftMouseDown:
-            if self.on_left is not None:
-                self.on_left()
+            return
+        if self.on_left is not None:
+            self.on_left()
+        else:
+            print("[PeaseBar] 警告：主点击回调未接线")
 
     def _popup_menu(self):
         """右键弹菜单：临时挂 NSMenu 到状态项，借 performClick 触发弹层。"""
@@ -124,6 +133,14 @@ class ControlItem(NSObject):
             self.item.button().performClick_(None)
         finally:
             self.item.setMenu_(None)
+
+    def openSettings_(self, sender):
+        """菜单「设置…」：打开设置窗口（分区编辑在这里做，不在救援面板）。"""
+        print("[PeaseBar] 菜单动作 openSettings 触发")
+        if self.on_settings is not None:
+            self.on_settings()
+        else:
+            print("[PeaseBar] 警告：on_settings 未接线")
 
     def showAbout_(self, sender):
         """关于窗口。"""

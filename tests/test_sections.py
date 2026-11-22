@@ -14,8 +14,8 @@ import unittest
 from peasebar import sections
 
 
-def item(bid, label):
-    return types.SimpleNamespace(owner_bundle_id=bid, label=label)
+def item(bid, label, key_part=""):
+    return types.SimpleNamespace(owner_bundle_id=bid, label=label, key_part=key_part)
 
 
 class TestItemKey(unittest.TestCase):
@@ -23,9 +23,17 @@ class TestItemKey(unittest.TestCase):
         self.assertEqual(sections.item_key(item("com.qq", "QQ")), "com.qq|QQ")
 
     def test_key区分双图标同名标签(self):
-        # 同 bundleId 不同 label → 不同键（双图标消歧待 Phase 3，label 是 v1 现实区分度）
+        # 同 bundleId 不同 label → 不同键（双图标消歧靠 inventory._dedup_keys 的 #rank）
         self.assertNotEqual(sections.item_key(item("com.x", "A")),
                             sections.item_key(item("com.x", "B")))
+
+    def test_稳定键优先用_key_part(self):
+        # 实测教训（T55）：label 常是活文本（温度/未读数），key_part 才是稳定身份
+        it = item("com.tgpro", "Performance Core 3: 57°C", key_part="com.tgpro.fan")
+        self.assertEqual(sections.item_key(it), "com.tgpro|com.tgpro.fan")
+
+    def test_无_key_part时回落_label(self):
+        self.assertEqual(sections.item_key(item("com.a", "A", key_part="")), "com.a|A")
 
 
 class TestSectionOf(unittest.TestCase):

@@ -4,15 +4,20 @@
 
 交互（验收标准见 docs/DEVELOPMENT.md F3/F4/F5）：
 - 左键控制图标或全局快捷键 ⌥⌘B → 面板出现在控制图标正下方（居中锚定）；
-- 网格按三区（F4：可见/隐藏/永久隐藏，配置在 config.json）分组展示：
-  名称 + 归属 + 刘海遮挡徽标「▨」；空区不展示；
-- 单击面板内图标 → 对真实图标合成右键（弹出其原生状态菜单，T17），面板随即收起；
-- 右键面板内图标 → 菜单移分区（回到可见区/移到隐藏区/移到永久隐藏区），即时持久化；
+- 网格按三区（F4：可见/隐藏/永久隐藏，配置在 config.json）分组展示，
+  **只显示图标本身**（被刘海遮挡的图标角标「▨」）；空区不展示；
+- 单击面板内图标 → 触发真实图标，面板随即收起：画在可见段上的合成右键（弹其原生
+  状态菜单，T17），被系统收纳的合成点击会打偏，改走 AXPress 直接投递；
+- 分区编辑不在本面板进行（参照 Thaw：编辑在设置窗口），右键控制图标 →「设置…」；
 - 「展开/收起收纳区」按钮联动原生收纳按钮（F12 提前接入，核心场景：
   被刘海遮挡/被收纳的图标从这里找回——展开后再点图标即可弹出菜单）；
 - 失焦自动收回（全局鼠标监听，T19）+ 超时自动收回（F5，默认 8s，config.json 可改，0=不超时）。
 
 实现要点：
+- 图标位图由 capture 模块截条带裁剪而来，需「屏幕录制」权限；缺权限或抓取失败
+  时用兜底图标（App 图标/系统模块 SF 符号）顶上，**格子上永远只有图标、不出名字**
+  （照 Thaw 的 OverflowFallbackIcon 思路）；名字只在悬停提示里；
+- 分区编辑不在本面板做（参照 Thaw），这里只负责找回并触发图标；
 - borderless NSPanel 默认不能成为 key 窗口，用 KeyPanel 子类放开 canBecomeKey；
 - 失焦收回不依赖 key 窗口状态（合成事件场景激活是半吊子，T19）；
 - 坐标转换：控制图标 frame 是全局 CG 坐标（左上原点），面板定位前转 AppKit。
@@ -25,8 +30,6 @@ from AppKit import (
     NSEventMaskLeftMouseDown,
     NSFont,
     NSMakeRect,
-    NSMenu,
-    NSMenuItem,
     NSPanel,
     NSScreen,
     NSTextField,
@@ -38,36 +41,21 @@ from AppKit import (
 )
 from Foundation import (NSMakePoint, NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer)
 import objc
-import Quartz
 
-from peasebar import inventory, sections
+from peasebar import capture, inventory, sections, trigger
 
-# 面板几何
+# 面板几何（格子只放图标，取小方格；PANEL_WIDTH 保持 468，测试脚本据此识别窗口）
 PANEL_WIDTH = 468
-GRID_COLS = 4
-CELL_W, CELL_H = 110, 42
-CELL_GAP = 6
+GRID_COLS = 9
+CELL_W, CELL_H = 44, 38
+CELL_GAP = 4
 EDGE = 8
 HEADER_H = 26
 SECTION_H = 22  # 区标题行高（F4）
 FOOTER_H = 36
 
-# 区名 → 右键菜单 tag（NSMenuItem 只能靠 tag/representedObject 传参）
-_SECTION_TAGS = {
-    sections.SECTION_VISIBLE: 0,
-    sections.SECTION_HIDDEN: 1,
-    sections.SECTION_ALWAYS_HIDDEN: 2,
-}
-# 右键移分区菜单文案（统一动词风格，且与区标题文本区分开）
-_MOVE_TITLES = {
-    sections.SECTION_VISIBLE: "回到可见区",
-    sections.SECTION_HIDDEN: "移到隐藏区",
-    sections.SECTION_ALWAYS_HIDDEN: "移到永久隐藏区",
-}
-_TAG_SECTIONS = {v: k for k, v in _SECTION_TAGS.items()}
-
-# 刘海遮挡徽标（置于名称前）
-NOTCH_BADGE = "\u25a8 "  # ▨
+# 刘海遮挡角标（画在格子左上角，不占文字位）
+NOTCH_BADGE = "\u25a8"  # ▨
 
 
 class KeyPanel(NSPanel):
@@ -75,10 +63,6 @@ class KeyPanel(NSPanel):
 
     def canBecomeKey(self):
         return True
-
-
-def _truncate(text, limit=12):
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 class RescuePanel(NSObject):
@@ -175,12 +159,19 @@ class RescuePanel(NSObject):
         all_items, _ = inventory.list_items()
         self.items = [m for m in all_items if not m.is_stash_button]
         notched = sum(1 for m in self.items if m.notched)
+        stashed = sum(1 for m in self.items if m.stashed)
         cfg = sections.load_config()
         buckets = sections.plan_sections(self.items, cfg)
-        print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，网格 {len(self.items)} 项，刘海 {notched} 项；"
+        print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，网格 {len(self.items)} 项，"
+              f"刘海 {notched} 项，被收纳 {stashed} 项；"
               f"分区：可见 {len(buckets[sections.SECTION_VISIBLE])}"
               f" / 隐藏 {len(buckets[sections.SECTION_HIDDEN])}"
               f" / 永久隐藏 {len(buckets[sections.SECTION_ALWAYS_HIDDEN])}")
+
+        # 图标位图（只显示图标）：截不到像素时 capture_icons 会用兜底图标顶上
+        images, no_perm = capture.capture_icons(self.items)
+        if no_perm:
+            print("[PeaseBar] 无屏幕录制权限 → 格子用兜底图标（App 图标/系统符号）")
 
         # 高度：头部 + Σ(非空区标题 + 该区网格行) + 底部；空区整段不占位
         groups = []  # (区名, [item])，按展示顺序
@@ -209,6 +200,7 @@ class RescuePanel(NSObject):
         # 头部标题
         header = NSTextField.labelWithString_(
             f"菜单栏救援 · 共 {len(self.items)} 项 · 刘海遮挡 {notched} 项"
+            + (f" · 被收纳 {stashed} 项" if stashed else "")
         )
         header.setFont_(NSFont.boldSystemFontOfSize_(12))
         header.setFrame_(NSMakeRect(EDGE, height - HEADER_H, PANEL_WIDTH - 2 * EDGE, HEADER_H))
@@ -233,22 +225,15 @@ class RescuePanel(NSObject):
                 row, col = divmod(idx, GRID_COLS)
                 x = EDGE + col * (CELL_W + CELL_GAP)
                 y = top - CELL_H - row * (CELL_H + CELL_GAP)
-                badge = NOTCH_BADGE if item.notched else ""
-                owner = "系统" if item.owner_app == "系统" else item.owner_app
-                title_text = f"{badge}{_truncate(item.label)}\n{_truncate(owner, 16)}"
-                btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, CELL_W, CELL_H))
-                btn.setTitle_(title_text)
-                btn.setBezelStyle_(0)  # rounded
-                btn.setUsesSingleLineMode_(False)
-                btn.setImagePosition_(2)  # NSNoImage：只显示文字（标题含两行）
-                btn.setFont_(NSFont.systemFontOfSize_(10))
-                btn.setTag_(id_to_idx[id(item)])
-                btn.setToolTip_(f"{owner}（{item.owner_bundle_id}）\n"
-                                f"左键：弹出该图标的原生菜单；右键：移分区")
-                btn.setTarget_(self)
-                btn.setAction_("onIconClick:")
-                btn.setMenu_(self._cell_menu(sections.item_key(item), sec))
-                content.addSubview_(btn)
+                content.addSubview_(
+                    self._make_cell(item, id_to_idx[id(item)],
+                                    images.get(sections.item_key(item)), x, y))
+                if item.notched:  # 角标压在格子上方（后加的子视图层级更高）
+                    badge = NSTextField.labelWithString_(NOTCH_BADGE)
+                    badge.setFont_(NSFont.boldSystemFontOfSize_(9))
+                    badge.setTextColor_(NSColor.systemOrangeColor())
+                    badge.setFrame_(NSMakeRect(x + 2, y + CELL_H - 14, 12, 12))
+                    content.addSubview_(badge)
             top -= rows * (CELL_H + CELL_GAP)
 
         # 底部操作行
@@ -273,7 +258,7 @@ class RescuePanel(NSObject):
         btn_refresh.setAction_("onRefreshClick:")
         content.addSubview_(btn_refresh)
 
-        hint = NSTextField.labelWithString_("左键=弹菜单 · 右键=移分区")
+        hint = NSTextField.labelWithString_("左键=触发图标 · 分区编辑请进设置")
         hint.setFont_(NSFont.systemFontOfSize_(10))
         hint.setTextColor_(NSColor.secondaryLabelColor())
         hint.setAlignment_(2)  # 右对齐
@@ -283,22 +268,27 @@ class RescuePanel(NSObject):
         panel.setContentView_(content)
         self._position_panel(height)
 
-    def _cell_menu(self, key, cur_section):
-        """格子的右键菜单（F4 移分区）；跳过当前区项。NSView.menu 由 AppKit
-        在右键时自动弹出，不影响左键 action。"""
-        menu = NSMenu.alloc().init()
-        menu.setAutoenablesItems_(False)
-        for sec in (sections.SECTION_VISIBLE, sections.SECTION_HIDDEN,
-                    sections.SECTION_ALWAYS_HIDDEN):
-            if sec == cur_section:
-                continue
-            mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                _MOVE_TITLES[sec], "onMoveSection:", "")
-            mi.setTarget_(self)  # nil-target 会沿响应链查找，ControlItem 不在链上（T21）
-            mi.setTag_(_SECTION_TAGS[sec])
-            mi.setRepresentedObject_(key)
-            menu.addItem_(mi)
-        return menu
+    def _make_cell(self, item, index, image, x, y):
+        """网格格子：**只有图标**（无位图时兜底图标顶上），名字只进悬停提示。"""
+        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, CELL_W, CELL_H))
+        img = image if image is not None else capture.fallback_image_for_item(item)
+        if img is not None:
+            btn.setImage_(img)
+        btn.setTitle_("")
+        btn.setImagePosition_(5)  # NSImageOverlaps：无标题，图标居中
+        btn.setBezelStyle_(0)  # rounded：保留可点击的按钮外形
+        btn.setTag_(index)     # 必须是全量 items 下标（onIconClick_ 按 tag 取）
+        btn.setTarget_(self)
+        btn.setAction_("onIconClick:")
+        owner = "系统" if item.owner_app == "系统" else item.owner_app
+        tip = f"{item.label}\n{owner}（{item.owner_bundle_id}）\n左键：触发它（弹原生菜单/默认动作）"
+        if item.stashed:
+            tip += "\n被系统收纳：坐标不可信，走 AX 直接投递"
+        if item.notched:
+            tip += "\n▨ 被刘海遮挡"
+        btn.setToolTip_(tip)
+        btn.setAccessibilityLabel_(item.label)
+        return btn
 
     def _position_panel(self, height):
         """面板定位：控制图标 AppKit frame，水平居中锚定在图标正下方 4pt。"""
@@ -319,50 +309,36 @@ class RescuePanel(NSObject):
     # ---------- 动作 ----------
 
     def onIconClick_(self, sender):
-        """点击面板内图标：对真实图标合成右键（弹其状态菜单），面板收起。
+        """点击面板内图标：触发真实图标，面板随即收起。
 
-        实测（T7，macOS 27）：AXPress 只会激活 App 不弹菜单（QQ 左键语义=开主窗口）；
-        合成左键也触发不了标准 NSStatusItem 菜单追踪；**右键是最通用的菜单触发**
-        （QQ/微信实测弹状态菜单）。frame 是全局 CG 坐标，CGEvent 同坐标系直用。
+        触发本身交给 trigger（按观察结果分级试），这里只负责「先收面板、再触发」：
+        原生菜单的跟踪循环会占住主线程，面板不先收掉会一直悬在那儿。
+
+        为什么不再用合成右键（T59/T60 推翻 T17）：macOS 27.2.1 上把左/右键
+        合成到控制中心、时钟、微信的槽位上，指针确实到位了但一个窗口都没多；
+        而对托管元素 AXPress 则真的能弹（T61：ToDesk/钉钉/TG Pro/One Switch 弹原生菜单）。
+        被收纳的图标同理：槽位挤在收纳按钮口，坐标不可信，只有 AXPress 能递到。
         """
         idx = sender.tag()
-        if 0 <= idx < len(self.items):
-            item = self.items[idx]
-            if item.frame is not None:
-                fx, fy, fw, fh = item.frame
-                cx, cy = fx + fw / 2, fy + fh / 2
-                move = Quartz.CGEventCreateMouseEvent(
-                    None, Quartz.kCGEventMouseMoved, (cx, cy), Quartz.kCGMouseButtonRight)
-                down = Quartz.CGEventCreateMouseEvent(
-                    None, Quartz.kCGEventRightMouseDown, (cx, cy), Quartz.kCGMouseButtonRight)
-                up = Quartz.CGEventCreateMouseEvent(
-                    None, Quartz.kCGEventRightMouseUp, (cx, cy), Quartz.kCGMouseButtonRight)
-                Quartz.CGEventPost(Quartz.kCGHIDEventTap, move)
-                Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
-                Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
-        self.close()
-
-    def onMoveSection_(self, sender):
-        """右键菜单移分区（F4）：立即持久化并重建面板让分组生效。"""
-        key = str(sender.representedObject())
-        target = _TAG_SECTIONS[sender.tag()]
-        cfg = sections.load_config()
-        sections.set_section(cfg, key, target)
-        sections.save_config(cfg)
-        print(f"[PeaseBar] 分区变更：{key} → {target}")
-        self._rebuild()
-        self.panel.makeKeyAndOrderFront_(None)
-        self._arm_timeout()  # 用户主动交互，重新计时
+        item = self.items[idx] if 0 <= idx < len(self.items) else None
+        self.close()  # 先收面板：对方的菜单跟踪循环会占住主线程
+        if item is None:
+            return
+        how, seen = trigger.open_item(item)
+        print(f"[PeaseBar] 触发 {item.owner_app}/{item.label}"
+              f"{'（被收纳）' if item.stashed else ''}：{how}，反应={'有' if seen else '无'}")
 
     def onStashClick_(self, sender):
-        """展开/收起系统收纳区，然后刷新网格。"""
+        """展开/收起系统收纳区，然后刷新网格（图标像素变了，同时使位图缓存失效）。"""
         inventory.set_stash_revealed(not inventory.stash_revealed())
+        capture.invalidate_cache()
         self._rebuild()
         self.panel.makeKeyAndOrderFront_(None)
         self._arm_timeout()  # 交互续期，避免操作中突然收回
 
     def onRefreshClick_(self, sender):
-        """手动刷新盘点。"""
+        """手动刷新盘点（图标可能增删/位移，位图缓存一并作废）。"""
+        capture.invalidate_cache()
         self._rebuild()
         self.panel.makeKeyAndOrderFront_(None)
         self._arm_timeout()  # 交互续期

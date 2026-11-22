@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""capture 模块纯像素函数的单测（合成数组，不需要屏幕录制权限）。"""
+import unittest
+
+import numpy as np
+
+from peasebar import capture
+
+
+def tile(bg=(100, 120, 140), size=(24, 48)):
+    """造一块「统一背景」的图（不透明）。"""
+    arr = np.zeros((size[0], size[1], 4), dtype=np.uint8)
+    arr[:, :, 0] = bg[0]
+    arr[:, :, 1] = bg[1]
+    arr[:, :, 2] = bg[2]
+    arr[:, :, 3] = 255
+    return arr
+
+
+def draw_glyph(arr, color=(240, 240, 240)):
+    """在中央画一块矩形当作图标字形。"""
+    h, w = arr.shape[0], arr.shape[1]
+    arr[h // 3 : h // 3 * 2, w // 3 : w // 3 * 2, :3] = color
+    return arr
+
+
+class TestBackground(unittest.TestCase):
+    def test_边缘环中位色(self):
+        arr = draw_glyph(tile())
+        bg = capture.background_color(arr)
+        self.assertTrue(np.allclose(bg, [100, 120, 140], atol=1))
+
+    def test_太小返回None(self):
+        self.assertIsNone(capture.background_color(np.zeros((4, 4, 4), np.uint8)))
+        self.assertIsNone(capture.background_color(None))
+
+
+class TestKnockout(unittest.TestCase):
+    def test_背景置透明_字形保留(self):
+        arr = capture.knockout(draw_glyph(tile()))
+        # 角落（纯背景）应变透明
+        self.assertEqual(arr[0, 0, 3], 0)
+        # 中央字形仍不透明
+        h, w = arr.shape[0], arr.shape[1]
+        self.assertEqual(arr[h // 2, w // 2, 3], 255)
+
+    def test_字形颜色不被破坏(self):
+        arr = capture.knockout(draw_glyph(tile()))
+        h, w = arr.shape[0], arr.shape[1]
+        self.assertEqual(tuple(arr[h // 2, w // 2, :3]), (240, 240, 240))
+
+    def test_阈值内弱差异也算背景(self):
+        base = tile(bg=(100, 120, 140))
+        base[10, 10] = [105, 122, 138, 255]  # 与背景很近的杂点
+        out = capture.knockout(base)
+        self.assertEqual(out[10, 10, 3], 0)
+
+    def test_空输入不崩(self):
+        self.assertIsNone(capture.knockout(None))
+
+
+class TestTrim(unittest.TestCase):
+    def test_裁掉透明边距(self):
+        arr = capture.knockout(draw_glyph(tile()))
+        out = capture.trim_transparent(arr, pad=0)
+        self.assertEqual(out.shape[0], arr.shape[0] // 3)
+        self.assertEqual(out.shape[1], arr.shape[1] // 3)
+
+    def test_全透明原样返回(self):
+        arr = np.zeros((10, 10, 4), dtype=np.uint8)
+        self.assertEqual(capture.trim_transparent(arr).shape, arr.shape)
+
+    def test_留白按pad扩展(self):
+        arr = capture.knockout(draw_glyph(tile()))
+        p0 = capture.trim_transparent(arr, pad=0)
+        p3 = capture.trim_transparent(arr, pad=3)
+        self.assertGreater(p3.shape[0], p0.shape[0])
+
+
+class TestSingleInk(unittest.TestCase):
+    def test_浅色字形是单色(self):
+        arr = capture.knockout(draw_glyph(tile()))
+        self.assertTrue(capture.is_single_ink(arr))
+
+    def test_彩色图标不是单色(self):
+        arr = np.zeros((24, 24, 4), dtype=np.uint8)
+        arr[:, :, 0] = 255  # 纯红满幅高饱和
+        arr[:, :, 3] = 255
+        arr[:8] = 0  # 抠出透明边（否则命中「整块不透明」短路，测不到色度分支）
+        arr[-8:] = 0
+        self.assertFalse(capture.is_single_ink(arr))
+
+    def test_整块不透明判否(self):
+        arr = tile()  # 背景没抠掉的实色贴图
+        self.assertFalse(capture.is_single_ink(arr))
+
+    def test_全透明判否(self):
+        arr = np.zeros((10, 10, 4), dtype=np.uint8)
+        self.assertFalse(capture.is_single_ink(arr))
+
+
+class TestImageRoundTrip(unittest.TestCase):
+    def test_数组转NSImage尺寸按scale还原(self):
+        arr = capture.knockout(draw_glyph(tile()))
+        img = capture.image_from_array(arr, scale=2.0, template=True)
+        self.assertIsNotNone(img)
+        size = img.size()
+        self.assertAlmostEqual(size.width, arr.shape[1] / 2.0, places=2)
+        self.assertAlmostEqual(size.height, arr.shape[0] / 2.0, places=2)
+        self.assertTrue(img.isTemplate())
+
+    def test_cgimage往返保形(self):
+        arr = draw_glyph(tile())
+        cg = capture.cgimage_from_numpy(arr)
+        self.assertIsNotNone(cg)
+        back = capture.numpy_from_cgimage(cg)
+        self.assertEqual(back.shape, arr.shape)
+
+
+class TestPermissionApi(unittest.TestCase):
+    def test_预检返回布尔(self):
+        self.assertIn(capture.has_screen_permission(), (True, False))
+
+
+if __name__ == "__main__":
+    unittest.main()
