@@ -86,11 +86,11 @@ BOTTOM_ROWS = 4
 # 撤销栈深度（一次编辑只存两个小列表，50 步足够找回手滑，也不会吃掉多少内存）
 UNDO_LIMIT = 50
 
-# 区 → 移区菜单文案（与面板旧实现一致，编辑语义在设置里更贴切）
+# 区 → 移区菜单/按钮文案（三区语义对齐 Thaw：菜单栏显示 / 弹窗显示 / 永久隐藏）
 _MOVE_TITLES = {
-    sections.SECTION_VISIBLE: "回到可见区",
-    sections.SECTION_HIDDEN: "移到隐藏区",
-    sections.SECTION_ALWAYS_HIDDEN: "移到永久隐藏区",
+    sections.SECTION_VISIBLE: "回到菜单栏显示",
+    sections.SECTION_HIDDEN: "移到弹窗显示",
+    sections.SECTION_ALWAYS_HIDDEN: "移到永久隐藏",
 }
 _SECTION_ORDER = sections.SECTION_ORDER
 _TAG_SECTIONS = {0: sections.SECTION_VISIBLE, 1: sections.SECTION_HIDDEN,
@@ -209,9 +209,9 @@ class SettingsController(NSObject):
         hints = []
         if self.stashed_count:
             hints.append(f"有 {self.stashed_count} 项被系统收纳：菜单栏挤不下，"
-                         f"可在面板「展开收纳区」找回，或选中后移到隐藏区。")
+                         f"可在面板「展开收纳区」找回，或选中后改为弹窗显示。")
         if self.notched_count:
-            hints.append(f"有 {self.notched_count} 项被刘海遮挡：够不着，可移到隐藏区腾位置。")
+            hints.append(f"有 {self.notched_count} 项被刘海遮挡：够不着，可改为弹窗显示腾位置。")
         # 有权限却一张真像素都没截到 = 菜单栏此刻没画出来（全屏 App 遮住）。
         # 不说清楚的话，用户只会看到一屏「不像本人」的 App 图标又找不到原因（T76）。
         if not self.stats["cropped"] and self.stats["permission"] and not self.stats["bar_drawn"]:
@@ -301,7 +301,9 @@ class SettingsController(NSObject):
         container.addSubview_(side)
         y = height - 12 - 30
         for key, name, _sub in PAGES:
-            btn = NSButton.alloc().initWithFrame_(NSMakeRect(10, y, SIDEBAR_W - 20, 28))
+            # 左缩进 14pt：文本贴边不好看（用户反馈），macOS 侧栏惯例约 16pt，
+            # 选中垫底与文本同起点，视觉上是整块内缩
+            btn = NSButton.alloc().initWithFrame_(NSMakeRect(14, y, SIDEBAR_W - 28, 28))
             btn.setTitle_(name)
             btn.setBordered_(False)
             btn.setAlignment_(3)  # 左对齐（默认居中会像按钮组不像页签列）
@@ -461,7 +463,7 @@ class SettingsController(NSObject):
         btn_reset.setFont_(NSFont.systemFontOfSize_(11))
         btn_reset.setTarget_(self)
         btn_reset.setAction_("onResetLayout:")
-        btn_reset.setToolTip_("把隐藏区/永久隐藏区的图标全部带回可见区，并清空自定义顺序")
+        btn_reset.setToolTip_("把弹窗显示/永久隐藏的图标全部带回菜单栏，并清空自定义顺序")
         content.addSubview_(btn_reset)
         return content
 
@@ -584,7 +586,7 @@ class SettingsController(NSObject):
         """重置布局：先弹确认再动；压了撤销点，重置完还能 ⌘Z 撤回来。"""
         alert = NSAlert.alloc().init()
         alert.setMessageText_("重置布局？")
-        alert.setInformativeText_("把隐藏区/永久隐藏区的图标全部带回可见区，并清空自定义顺序。"
+        alert.setInformativeText_("把弹窗显示/永久隐藏的图标全部带回菜单栏，并清空自定义顺序。"
                                   "此步可用 ⌘Z 撤销。")
         alert.addButtonWithTitle_("重置")
         alert.addButtonWithTitle_("取消")
@@ -595,7 +597,7 @@ class SettingsController(NSObject):
         self._push_undo(cfg)
         sections.reset_layout(cfg)
         sections.save_config(cfg)
-        print("[PeaseBar] 设置：重置布局（全部回可见区，顺序清空）")
+        print("[PeaseBar] 设置：重置布局（全部回菜单栏，顺序清空）")
         self._rebuild()
         if self.on_changed:
             self.on_changed()

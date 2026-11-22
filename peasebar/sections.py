@@ -3,7 +3,8 @@
 """分区与顺序模型（F4/F11）：可见 / 隐藏 / 永久隐藏 三区 + 区内顺序 + JSON 持久化。
 
 - 配置键 = bundleId + 稳定名（`key_part`）。同一 App 双图标的序号消歧由 inventory 负责（T55）；
-- 不在配置中的图标一律归「可见区」（默认区），配置文件只记非默认区，保持精简；
+- 不在配置中的图标一律归「菜单栏显示」（默认区，内部代号 SECTION_VISIBLE），
+  配置文件只记非默认区，保持精简；
 - 区内顺序：`order` 是一份显式的键序列（用户在前一格/后一格调出来的结果），
   没记过名的新图标按盘点顺序排在末尾 —— 与 Thaw 布局编辑器的语义一致
   （它把顺序存在 tag 上，我们存在这份列表里）；
@@ -23,8 +24,8 @@ SECTION_HIDDEN = "hidden"
 SECTION_ALWAYS_HIDDEN = "always_hidden"
 
 SECTION_LABELS = {
-    SECTION_VISIBLE: "可见区",
-    SECTION_HIDDEN: "隐藏区",
+    SECTION_VISIBLE: "菜单栏显示",
+    SECTION_HIDDEN: "弹窗显示",
     SECTION_ALWAYS_HIDDEN: "永久隐藏",
 }
 
@@ -108,7 +109,7 @@ def item_key(item):
 
 
 def section_of(cfg, key):
-    """查图标所在区；无记录 = 可见区。"""
+    """查图标所在区；无记录 = 菜单栏显示（默认）。"""
     s = cfg["sections"].get(key)
     return s if s in (SECTION_HIDDEN, SECTION_ALWAYS_HIDDEN) else SECTION_VISIBLE
 

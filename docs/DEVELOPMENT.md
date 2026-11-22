@@ -151,8 +151,11 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T90 | **拿到辅助功能授权后，未弹出的 NSMenu 也会以幽灵形态挂在 App 的 AX 树上**（size=(0,0)、位置 (0,屏底)），只看角色=误报「菜单弹了」（P48 假 FAIL 真因）；另：PyObjC 的 AXSize 是 AXValueRef，`.width` 直接取会 AttributeError（判据静默全假），必须 axutil.decode_value(…, kAXValueCGSizeType)。意外发现：授权后合成 HID 右键能真投递到自家状态项（T41 的「自家收不到」是没授权时代的现象） | find_menu 判据加 size>0；菜单弹出也可用 layer 101 窗口交叉验证 |
 | T91 | **屏幕录制权限同 T86 坑：重签=洗权限**，且列表残留开关=1 的旧记录会骗人；恢复流全程零人工：`tccutil reset ScreenCapture <bid>` → 重启 App → 疑难解答页「请求屏幕录制权限」（CGRequestScreenCaptureAccess）→ 系统自动把新条目加进列表且=开 → 再重启 App 生效（不像辅助功能那样要碰开关） | P42/P97 取证；辅助功能则走 T87 的「+添加」流 |
 | T92 | **设置格子的右键菜单要先左键点一下才弹得出**（T27 补充）：合成场景窗口常非 key（T19），裸右键弹不出 view 的 setMenu_，左键带活后才弹——批量跑时上一条用例的左键一直在暗中代劳，单跑就露馅（P52 假 FAIL 真因） | 取证右键前先左键热窗；§11「不依赖上一条」纪律再实锤一例 |
-| T93 | **显示图的「数字混入」与「半截文字」同根因**：capture 按状态项 AX frame 从菜单栏条带裁像素，图标+数字复合条连数字裁进来，宽文字条被 fit_box（GLYPH_MAX_W=40）压扁成半截。修法=split_leading_glyph 纯函数：宽条（w>1.4h）在前 2×高内找第一段 ≥3px 全透明缝，前导块须宽 0.55–1.7×高且墨迹高≥整图 75%（两行流量文字首词只占一行据此被拒），任一不满足返回 None 走兜底链（App 图标/系统符号），绝不显示半截文字。菜单栏本体不受影响——移回的是真状态项，不是我们的裁图（Q68：PeaseClash 流量条 208px 移回后仍带数值） | 显示层去数字只改 capture/兜底链；任何「剥图」判据要先在真缺陷构建上标定（§11 T74 纪律） |
+| T93 | **显示图的「数字混入」与「半截文字」同根因**：capture 按状态项 AX frame 从菜单栏条带裁像素，图标+数字复合条连数字裁进来，宽文字条被 fit_box（GLYPH_MAX_W=40）压扁成半截。修法=split_leading_glyph 纯函数：宽条（w>1.4h）在前 2×高内找第一段 ≥3px 全透明缝，前导块须宽 0.55–1.7×高且墨迹高≥整图 75%（两行流量文字首词只占一行据此被拒），任一不满足返回 None 走兜底链（App 图标/系统符号），绝不显示半截文字。菜单栏本体不受影响——移回的是真状态项，不是我们的裁图（Q68：PeaseClash 流量条 208px 移回后仍带数值） | 显示层去数字只改 capture/兜底链；任何「剥图」判据要先在真缺陷构建上标定（§11 T74 纪律）；**剥切法已被真机复核推翻，改为一律拒收，见 T97** |
 | T94 | **无 runloop 的探针进程里 NSWorkspace.runningApplications() 是陈旧快照**：它靠主运行循环通知刷新，纯轮询进程重启后新 PID 永远看不到、inventory.list_items（内部同走 NSWorkspace）盘不到新实例条目——Q66 假 FAIL 真因，表面症状是「rebind 不上/自家图标裁图永 None」。另：刚 kill 后 `open` 偶发 rc=1（LaunchServices 状态未稳），需 check=False+重敲 | 判活用 pgrep 子进程；盘点前泵运行循环（NSRunLoop.runUntilDate_ 0.3s）；重启后换绑要 exclude_pid=旧 PID，否则绑到退场中的实例全是悬空引用 |
+| T95 | **Thaw 弹窗语义是「只列看不见的」**（用户实锤截图批评后重读 tmp/Thaw-app）：救援面板不是全量镜像，只列用户藏起来的（弹窗显示区）+ 系统藏起来的（被收纳/被刘海遮挡）；永久隐藏不展示；全空给一行空态。实现陷阱：格子 tag 必须仍是全量 self.items 下标（onIconClick_ 按 tag 取），分桶只影响展示顺序，用 id→idx 映射还原，直接拿分组下标当 tag 会触发错家 App | panel.py `_rebuild`（hidden_group+lost_group）；配套三区文案改「菜单栏显示/弹窗显示/永久隐藏」（sections.SECTION_LABELS 唯一源，探针判据字符串同步） |
+| T96 | **正式包可只替换 python314.zip 内 peasebar/*.pyc 热更新**：TCC 记账看主二进制 cdhash，Resources 里的 zip 不在判定链上 → 签名/双权限全不动，避开 T86③「重签=洗权限+认证框」全套代价；工序：py_compile 编译同名 .pyc → `zip archive.zip peasebar/*.pyc` 原地更新 → pkill+open。注意：这会破包内密封（codesign --verify 报 invalid），取证/开发轮可用，发布产物必须重新完整打包+签名 | Phase 6 取证全程走此路（tmp/t_p6b.py），未碰一次认证框；发布前回到 T86 定型工序 |
+| T97 | **半截图标两类根因（用户截图实锤，推翻 T93 剥切法）**：①图标+数字复合条——knockout 抠像把图标内部镂空也当背景抠掉，split_leading_glyph 找「透明缝」会切进图标身体（钉钉翅膀/QQ铃/搜狗S/Qoder羽毛/LaunchOS 全中招）；②AX frame 宽 < 真实绘制宽（时钟 frame 36pt 实画「22:31」约 70pt、控制中心同理）——方形比例但裁窗口装不下，右沿必半截。取证法：把 capture_icons 最终显示图逐张落盘拼 grid 目视（tmp/p6a_final_grid.png 实锤 7 项）。修法：放弃剥切，宽条（trim 后 w>h×1.4）与贴边条（touches_side_edge：抠像后墨迹贴首/末列）一律拒收走 App 图标兜底——**宁误杀宽纯图标（剪刀/微信）也不出半截**；真机 Q71 复核 18 张显示图零半截 | capture.py 删 split_leading_glyph/GAP_MIN_PX，新增 touches_side_edge；单测 TestSideEdge+TestWideReject（105→107） |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -268,6 +271,17 @@ PeaseBar/
       属前置缺失非回归；P50 有权限时按设计 SKIP）+ t_p5 P91–P99 全 PASS（含 P98 真机复验）；
       单测 105 项；取证探针 tmp/t_p6.py（T94 新坑在这轮挖出）
 
+### Phase 6 半截图标根治 + Thaw 式弹窗与三区语义（用户 2026-11-22 截图实锤四件事）
+- [x] P6a 半截图标：两类根因定性并推翻 T93 剥切法（T97），宽条/贴边一律拒收走兜底；
+      真机 Q71 显示图 18 张零半截（原 7 半截项全完整）；单测 TestSideEdge+TestWideReject
+- [x] P6b 侧栏左缩进：页签按钮 x=10→14、宽 -20→-28，真机 Q72 量得 13pt（≥12）截图复核
+- [x] P6c 弹窗只显隐藏项（T95）：面板=弹窗显示区+被收纳/遮挡，永久隐藏不展示，全空空态；
+      真机 Q73 格子 7==2+5 零泄漏；Q74 本机常态不可达如实 SKIP
+- [x] P6d 三区语义对齐 Thaw：文案中枢改「菜单栏显示/弹窗显示/永久隐藏」，移区按钮/
+      右键菜单/tooltip/提示行同步；前两会可编辑顺序真机 Q76（⌥→ 换序+⌘Z）PASS
+- [x] Q77 回归：t_p2b 五条全 PASS（新判据字符串）+ t_p6 Q61–Q68 全 PASS + t_p4 P81/P82/P86
+      全 PASS；单测 107 项；Q78 环境还原 diff CONFIG_SAME；部署走 T96 .pyc 热替换未洗权限
+
 ## 9. 续作指引（重启后从这里开始）
 
 1. `cd /Users/daydream/Project/PeaseBar`
@@ -281,7 +295,7 @@ PeaseBar/
 8. 新 bundle 首次跑需授权辅助功能（T16）：**必须排在签名定稿之后**（重签=洗授权，T86）；首选「+添加」流一次到位、
    不需认证（T87，脚本 tmp/grant_ax2.py）；验收看日志「全局快捷键已注册」而非列表开关=1
 9. 测试脚本轮询等待面板窗口出现（盘点 ~2s，固定 sleep 会竞态）；参考 `tmp/t34_expand_click.py`/`tmp/t8_t12.py` 的 wait_panel 模式；进程存活/交接验证用 `pgrep`（T25）；双开唤醒测试用 `open -n`（T26）
-10. 纯逻辑单测：项目根目录 `python3 -m unittest discover -s tests -t .`（105 项，不需 GUI/AX 权限）
+10. 纯逻辑单测：项目根目录 `python3 -m unittest discover -s tests -t .`（107 项，不需 GUI/AX 权限）
 
 ## 10. 进度快照
 
@@ -409,6 +423,14 @@ PeaseBar/
   tag v1.0.0 已推；GitHub Release：https://github.com/PeaseAPI/PeaseBar/releases/tag/v1.0.0
   （无 gh CLI，git credential+API 脚本 tmp/gh_release.py，framework Python 要挂 certifi）。
   **Phase 5 全部收官；无遗留待办。**
+- **2026-11-22（Phase 6 取证收官）**：用户四件事（半截图标/侧栏贴边/弹窗只显隐藏项/三区语义）全部
+  落地并真机取证 Q71–Q78（计划 tmp/test-plan-phase6.md，探针 tmp/t_p6b.py）：T97 推翻 T93 剥切法
+  （宽条/贴边拒收，零半截）、T95 弹窗只列看不见的（格子 7==弹窗隐藏 2+被收纳 5，可见项零泄漏）、
+  三区新文案贯穿（sections 中枢+探针判据同步）、侧栏缩进 13pt、弹窗区内 ⌥→ 换序可编辑；
+  回归 t_p2b/t_p6/t_p4 全绿，单测 105→107；本轮部署走 T96 新路子（zip 内 .pyc 热替换，双权限没动、
+  零认证框）。注意：/Applications 里现在跑的是「1.0.0 壳 + Phase 6 热替换代码」，发布 1.0.1 必须
+  回到 T86 定型工序完整重打包+重授权。
+  **下一步：评估发布 1.0.1（沿用发布工工序）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；

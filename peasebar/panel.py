@@ -4,8 +4,9 @@
 
 交互（验收标准见 docs/DEVELOPMENT.md F3/F4/F5）：
 - 左键控制图标或全局快捷键 ⌥⌘B → 面板出现在控制图标正下方（居中锚定）；
-- 网格按三区（F4：可见/隐藏/永久隐藏，配置在 config.json）分组展示，
-  **只显示图标本身**（被刘海遮挡的图标角标「▨」）；空区不展示；
+- **只列被隐藏的图标**（照 Thaw：弹窗不是全量镜像，菜单栏画着的不出）：
+  弹窗显示区（SECTION_HIDDEN）+ 逻辑上在菜单栏但此刻被系统收纳/刘海遮挡的项；
+  永久隐藏区不展示；空区不占位，全空时给一行空态提示；
 - 单击面板内图标 → 触发真实图标，面板随即收起：画在可见段上的合成右键（弹其原生
   状态菜单，T17），被系统收纳的合成点击会打偏，改走 AXPress 直接投递；
 - 分区编辑不在本面板进行（参照 Thaw：编辑在设置窗口），右键控制图标 →「设置…」；
@@ -156,18 +157,27 @@ class RescuePanel(NSObject):
         return self.panel
 
     def _rebuild(self):
-        """盘点 → 按三区分桶（F4）→ 重建面板内容（每次弹出/刷新调用）。"""
-        # 收纳按钮不在网格重复出现（底部有专用按钮）；其余全量展示
+        """盘点 → 只挑「被隐藏的图标」分组展示 → 重建面板内容（每次弹出/刷新调用）。
+
+        照 Thaw：弹窗不是全量镜像——菜单栏此刻画着的图标不出现在面板里；
+        面板只负责找回「看不见」的：弹窗显示区（用户藏起来的）+
+        逻辑上在菜单栏但被系统收纳/刘海遮挡的（系统藏起来的）。永久隐藏不展示。
+        """
+        # 收纳按钮不在网格重复出现（底部有专用按钮）
         all_items, _ = inventory.list_items()
         self.items = [m for m in all_items if not m.is_stash_button]
-        notched = sum(1 for m in self.items if m.notched)
-        stashed = sum(1 for m in self.items if m.stashed)
         cfg = sections.load_config()
         buckets = sections.plan_sections(self.items, cfg)
-        print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，网格 {len(self.items)} 项，"
-              f"刘海 {notched} 项，被收纳 {stashed} 项；"
-              f"分区：可见 {len(buckets[sections.SECTION_VISIBLE])}"
-              f" / 隐藏 {len(buckets[sections.SECTION_HIDDEN])}"
+        hidden_group = buckets[sections.SECTION_HIDDEN]
+        # 可见区里此刻没画在菜单栏上的（被收纳/被刘海挡）：救援目标
+        lost_group = [m for m in buckets[sections.SECTION_VISIBLE]
+                      if m.stashed or m.notched]
+        notched = sum(1 for m in self.items if m.notched)
+        stashed = sum(1 for m in self.items if m.stashed)
+        print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，弹窗显示 {len(hidden_group)} 项，"
+              f"被收纳 {stashed} 项，刘海 {notched} 项；"
+              f"分区：菜单栏 {len(buckets[sections.SECTION_VISIBLE])}"
+              f" / 弹窗 {len(hidden_group)}"
               f" / 永久隐藏 {len(buckets[sections.SECTION_ALWAYS_HIDDEN])}")
 
         # 图标位图（只显示图标）：截不到像素时 capture_icons 会用兜底图标顶上
@@ -176,16 +186,17 @@ class RescuePanel(NSObject):
             print("[PeaseBar] 无屏幕录制权限 → 格子用兜底图标（App 图标/系统符号）")
 
         # 高度：头部 + Σ(非空区标题 + 该区网格行) + 底部；空区整段不占位
-        groups = []  # (区名, [item])，按展示顺序
+        groups = []  # (区标题, [item])，按展示顺序
+        if hidden_group:
+            groups.append((sections.SECTION_LABELS[sections.SECTION_HIDDEN], hidden_group))
+        if lost_group:
+            groups.append(("被系统收纳 / 遮挡", lost_group))
         height = EDGE + HEADER_H + FOOTER_H + EDGE
-        for s in (sections.SECTION_VISIBLE, sections.SECTION_HIDDEN,
-                  sections.SECTION_ALWAYS_HIDDEN):
-            group = buckets[s]
-            if not group:
-                continue
+        for _title, group in groups:
             rows = (len(group) + GRID_COLS - 1) // GRID_COLS
             height += SECTION_H + rows * (CELL_H + CELL_GAP)
-            groups.append((s, group))
+        if not groups:
+            height += SECTION_H  # 全空：一行空态提示
 
         panel = self._ensure_panel(height)
 
@@ -199,10 +210,10 @@ class RescuePanel(NSObject):
         blur.layer().setCornerRadius_(12)
         content.addSubview_(blur)
 
-        # 头部标题
+        # 头部标题：只报「看不见」的规模，不再报全量
         header = NSTextField.labelWithString_(
-            f"菜单栏救援 · 共 {len(self.items)} 项 · 刘海遮挡 {notched} 项"
-            + (f" · 被收纳 {stashed} 项" if stashed else "")
+            f"菜单栏救援 · 弹窗隐藏 {len(hidden_group)} 项"
+            + (f" · 被系统收纳/遮挡 {len(lost_group)} 项" if lost_group else "")
         )
         header.setFont_(NSFont.boldSystemFontOfSize_(12))
         header.setFrame_(NSMakeRect(EDGE, height - HEADER_H, PANEL_WIDTH - 2 * EDGE, HEADER_H))
@@ -213,9 +224,18 @@ class RescuePanel(NSObject):
         # 分桶只影响展示顺序，用 id 映射还原原索引
         id_to_idx = {id(m): i for i, m in enumerate(self.items)}
         top = height - HEADER_H
-        for sec, group in groups:
+        if not groups:
+            empty = NSTextField.labelWithString_(
+                "没有隐藏的图标：所有图标此刻都在菜单栏上")
+            empty.setFont_(NSFont.systemFontOfSize_(11))
+            empty.setTextColor_(NSColor.secondaryLabelColor())
+            empty.setFrame_(NSMakeRect(EDGE, top - SECTION_H,
+                                       PANEL_WIDTH - 2 * EDGE, SECTION_H))
+            content.addSubview_(empty)
+            top -= SECTION_H
+        for title_text, group in groups:
             title = NSTextField.labelWithString_(
-                f"{sections.SECTION_LABELS[sec]} · {len(group)}")
+                f"{title_text} · {len(group)}")
             title.setFont_(NSFont.boldSystemFontOfSize_(10))
             title.setTextColor_(NSColor.secondaryLabelColor())
             title.setFrame_(NSMakeRect(EDGE, top - SECTION_H,

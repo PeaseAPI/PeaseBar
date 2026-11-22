@@ -171,7 +171,7 @@ class TestDeadMenuBar(unittest.TestCase):
         self.assertIsNone(capture.image_for_item(strip, 1.0, self.Item((10, 0, 24, 24))))
 
     def test_有字形仍能裁到图(self):
-        # 画一个近似方形的小图标（宽条会被 split_leading_glyph 剥/拒，这里要的是纯图标路径）
+        # 画一个近似方形的小图标（纯图标路径，宽条/贴边条会被 T97 拒收）
         arr = tile(bg=(0, 0, 0), size=(24, 200))
         arr[6:18, 100:112, :3] = 240
         arr[6:18, 100:112, 3] = 255
@@ -208,40 +208,70 @@ class TestDeadMenuBar(unittest.TestCase):
             self.assertEqual(got, want)  # 兜底图就是应得的那张，不是一张全透明
 
 
-class TestLeadingGlyph(unittest.TestCase):
-    """宽条剥前导图标（用户定调：格子只显图标不显数字，半截文字不算图标）。"""
+class TestSideEdge(unittest.TestCase):
+    """贴边判定（T97 半截图标第二类根因）：AX frame 窄于真实绘制宽时，
+    裁窗口右沿一定吃到墨迹——这种条必须整条拒收走兜底，绝不交出半截图。"""
 
     @staticmethod
     def _mask(h, w, spans):
-        """按 (列起, 列止, 行起, 止) 列表造 alpha 图（split 只看通道 3）。"""
+        """按 (列起, 列止, 行起, 止) 列表造 alpha 图（判定只看通道 3）。"""
         arr = np.zeros((h, w, 4), dtype=np.uint8)
         for c0, c1, r0, r1 in spans:
             arr[r0:r1, c0:c1, 3] = 255
         return arr
 
-    def test_近方形原样返回(self):
-        arr = self._mask(20, 24, [(0, 24, 0, 20)])
-        self.assertIs(capture.split_leading_glyph(arr), arr)
+    def test_居中墨迹不贴边(self):
+        self.assertFalse(capture.touches_side_edge(self._mask(20, 40, [(10, 30, 4, 16)])))
 
-    def test_图标加缝隙加数字切出图标(self):
-        arr = self._mask(20, 34, [(0, 18, 0, 20), (22, 34, 0, 20)])
-        out = capture.split_leading_glyph(arr)
-        self.assertIsNotNone(out)
-        self.assertLessEqual(out.shape[1], 20)  # 只剩前导图标，数字被丢弃
+    def test_贴左沿判贴边(self):
+        self.assertTrue(capture.touches_side_edge(self._mask(20, 40, [(0, 18, 4, 16)])))
 
-    def test_无缝纯文字条拒收(self):
-        arr = self._mask(20, 60, [(0, 60, 0, 20)])
-        self.assertIsNone(capture.split_leading_glyph(arr))
+    def test_贴右沿判贴边(self):
+        # 时钟类：frame 36pt 实画「22:31」约 70pt，墨迹一定顶到裁剪窗口右沿
+        self.assertTrue(capture.touches_side_edge(self._mask(20, 40, [(5, 40, 4, 16)])))
 
-    def test_窄字头不当图标(self):
-        # 「902」这种窄首词（宽 < 0.55×高）切出来不是图标 → 走兜底
-        arr = self._mask(20, 40, [(0, 9, 0, 20), (13, 40, 0, 20)])
-        self.assertIsNone(capture.split_leading_glyph(arr))
+    def test_空图判贴边(self):
+        # 零宽/零高的退化数组没法当图标，判 True 让调用方走兜底
+        self.assertTrue(capture.touches_side_edge(np.zeros((0, 0, 4), dtype=np.uint8)))
 
-    def test_两行文字首词只占一行拒收(self):
-        # 流量条两行文字：首词墨迹高度只有整图一半 → 不是图标
-        arr = self._mask(20, 30, [(0, 15, 0, 10), (18, 30, 10, 20)])
-        self.assertIsNone(capture.split_leading_glyph(arr))
+
+class TestWideReject(unittest.TestCase):
+    """宽条与贴边条在 image_for_item 处一律拒收（T97：剥切会把图标身体切坏，
+    钉钉/QQ/搜狗 的半截图标就是这么来的；拒收后 App 图标兜底完整可辨识）。"""
+
+    class Item:
+        def __init__(self, frame, label="测试项", bundle="com.example.wide"):
+            self.frame = frame
+            self.label = label
+            self.owner_bundle_id = bundle
+            self.stashed = False
+
+    def _strip(self, arr):
+        return capture.cgimage_from_numpy(arr)
+
+    def test_图标加数字宽条拒收(self):
+        # 黑底条带上画 12pt 高 × 41pt 宽的「图标+数字」复合横条，裁窗口比墨迹宽（不贴边）
+        arr = tile(bg=(0, 0, 0), size=(24, 400))
+        arr[6:18, 100:141, :3] = 240
+        arr[6:18, 100:141, 3] = 255
+        self.assertIsNone(capture.image_for_item(self._strip(arr), 1.0,
+                                                 self.Item((96, 0, 50, 24))))
+
+    def test_墨迹顶到裁窗口右沿拒收(self):
+        # 时钟类：frame 只有 20pt 宽，墨迹从 100 一路画过 116 顶出裁窗口
+        arr = tile(bg=(0, 0, 0), size=(24, 400))
+        arr[6:18, 100:130, :3] = 240
+        arr[6:18, 100:130, 3] = 255
+        self.assertIsNone(capture.image_for_item(self._strip(arr), 1.0,
+                                                 self.Item((96, 0, 20, 24))))
+
+    def test_近方形纯图标仍收下(self):
+        # 拒收口径只杀宽条/贴边条，正常纯图标必须还能裁出来（剪刀/微信这类）
+        arr = tile(bg=(0, 0, 0), size=(24, 400))
+        arr[5:19, 100:114, :3] = 240
+        arr[5:19, 100:114, 3] = 255
+        self.assertIsNotNone(capture.image_for_item(self._strip(arr), 1.0,
+                                                    self.Item((96, 0, 20, 24))))
 
 
 if __name__ == "__main__":
