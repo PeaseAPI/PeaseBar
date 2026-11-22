@@ -49,9 +49,22 @@ def check_single_instance():
 
 
 def ensure_accessibility(interactive=False):
-    """检查辅助功能权限；缺失且 interactive 时弹窗引导到系统设置。返回是否已授权。"""
+    """检查辅助功能权限；缺失时用带提示的 API 让系统按**当前签名**重新登记并弹授权框。
+
+    为什么要用 AXIsProcessTrustedWithOptions(kAXTrustedCheckOptionPrompt) 而不是光 AXIsProcessTrusted：
+    ad-hoc 包反复重建/重装后，系统「辅助功能」列表里那条绿色开关常绑到旧的 cdhash，
+    普通检查会一直假阴（开关是绿的但读不到菜单栏）。带提示的调用会按当前二进制重新登记一条
+    干净条目并弹系统授权框，勾上后才对得上。返回是否已授权。
+    """
     if AS.AXIsProcessTrusted():
         return True
+    # 关键：让系统按当前 cdhash 重新登记条目并弹「允许控制此电脑」授权框（幂等，已授权不再弹）
+    try:
+        prompt = getattr(AS, "kAXTrustedCheckOptionPrompt", None)
+        if prompt is not None:
+            AS.AXIsProcessTrustedWithOptions({prompt: True})
+    except Exception as exc:  # noqa: BLE001 — 提示失败不致命，仍走下面的引导
+        print(f"[PeaseBar] 触发辅助功能授权提示失败：{exc}")
     if interactive:
         alert = NSAlert.alloc().init()
         alert.setMessageText_("需要辅助功能权限")
@@ -229,10 +242,12 @@ def main():
     delegate = AppDelegate.alloc().init()
     app.setDelegate_(delegate)
 
-    # 3) 权限检查：非阻塞。缺失不弹窗（模态弹窗会阻塞事件循环、状态项无法创建），
-    #    授权引导由菜单「检查辅助功能权限」承担
+    # 3) 权限检查：非阻塞。缺失时调 ensure_accessibility(interactive=False)——它只走
+    #    系统自带的授权提示（AXIsProcessTrustedWithOptions，异步、不阻塞事件循环），
+    #    不弹我们自己的模态 NSAlert（模态会卡住 didFinishLaunching、状态项建不出来）。
     if not AS.AXIsProcessTrusted():
-        print("[PeaseBar] 警告：缺少辅助功能权限（盘点功能受限），可在菜单中引导授权")
+        ensure_accessibility(interactive=False)
+        print("[PeaseBar] 警告：缺少辅助功能权限（盘点功能受限），按提示勾选后重启一次")
 
     # 4) 事件循环
     print("[PeaseBar] 事件循环开始")
