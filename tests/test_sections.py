@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""sections 纯逻辑单测：分区键、查询、移区、分桶、持久化往返。
+"""sections 纯逻辑单测：分区键、查询、移区、分桶、顺序、持久化往返。
 
 运行：项目根目录下 `python3 -m unittest discover -s tests -t .`
 不依赖 AppKit/AX 权限，item 用 SimpleNamespace 桩（只需 owner_bundle_id/label）。
@@ -117,7 +117,7 @@ class TestPersist(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "missing.json")
             cfg = sections.load_config(path)
-            self.assertEqual(cfg, {"sections": {}, "panel_timeout": 8})
+            self.assertEqual(cfg, {"sections": {}, "order": [], "panel_timeout": 8})
 
     def test损坏文件回默认(self):
         with tempfile.TemporaryDirectory() as d:
@@ -125,7 +125,7 @@ class TestPersist(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as f:
                 f.write("{不是json")
             self.assertEqual(sections.load_config(path),
-                             {"sections": {}, "panel_timeout": 8})
+                             {"sections": {}, "order": [], "panel_timeout": 8})
 
     def test加载丢弃脏分区值(self):
         with tempfile.TemporaryDirectory() as d:
@@ -143,6 +143,93 @@ class TestPersist(unittest.TestCase):
             sections.save_config({"sections": {}, "panel_timeout": 8}, path)
             self.assertTrue(os.path.isfile(path))
             self.assertFalse(os.path.exists(path + ".tmp"))
+
+    def test_order去重保序且丢非字符串(self):
+        # 脏数据里的重复键会让位次计算自相矛盾（同一个键两个位置），加载时就清掉
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"order": ["a|A", "b|B", "a|A", 7, None, "c|C"]}, f)
+            self.assertEqual(sections.load_config(path)["order"],
+                             ["a|A", "b|B", "c|C"])
+
+    def test_旧配置没order字段(self):
+        # 升级前的 config.json 里没有 order，不能因此报错或打乱盘点顺序
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"sections": {"a|A": "hidden"}, "panel_timeout": 3}, f)
+            cfg = sections.load_config(path)
+            self.assertEqual(cfg["order"], [])
+            items = [item("a", "A"), item("b", "B")]
+            self.assertEqual([sections.item_key(i) for i in sections.apply_order(items, cfg)],
+                             ["a|A", "b|B"])
+
+
+class TestOrder(unittest.TestCase):
+    """区内顺序（设置页 ⌥←/→ 与前移/后移的读侧与写侧）。"""
+
+    def setUp(self):
+        self.items = [item("a", "A"), item("b", "B"), item("c", "C")]
+
+    def keys(self, cfg):
+        return [sections.item_key(i) for i in sections.apply_order(self.items, cfg)]
+
+    def test_没记过名时保持盘点顺序(self):
+        self.assertEqual(self.keys({"order": []}), ["a|A", "b|B", "c|C"])
+
+    def test_显式顺序接管排列(self):
+        self.assertEqual(self.keys({"order": ["c|C", "a|A", "b|B"]}),
+                         ["c|C", "a|A", "b|B"])
+
+    def test_新图标排在末尾不插队(self):
+        # order 里只有 a/b（c 是刚出现的 App）→ c 补位到末尾，不能顶掉用户调好的顺序
+        self.assertEqual(self.keys({"order": ["b|B", "a|A"]}), ["b|B", "a|A", "c|C"])
+
+    def test_move_in_list前后移(self):
+        keys = ["a|A", "b|B", "c|C"]
+        self.assertEqual(sections.move_in_list(keys, "c|C", -1),
+                         (["a|A", "c|C", "b|B"], True))
+        self.assertEqual(sections.move_in_list(keys, "a|A", 1),
+                         (["b|B", "a|A", "c|C"], True))
+
+    def test_move_in_list边界与未知键不算改动(self):
+        # 返回 changed=False 才能让调用方跳过写盘与记撤销点（否则 ⌘Z 会被无效按键填满）
+        keys = ["a|A", "b|B"]
+        self.assertEqual(sections.move_in_list(keys, "a|A", -1), (keys, False))
+        self.assertEqual(sections.move_in_list(keys, "b|B", 1), (keys, False))
+        self.assertEqual(sections.move_in_list(keys, "z|Z", 1), (keys, False))
+        self.assertEqual(keys, ["a|A", "b|B"])  # 不就地改入参
+
+    def test_plan_sections桶内也按顺序(self):
+        cfg = {"sections": {"a|A": "hidden"}, "order": ["c|C", "b|B", "a|A"]}
+        buckets = sections.plan_sections(self.items, cfg)
+        self.assertEqual([sections.item_key(i) for i in buckets[sections.SECTION_VISIBLE]],
+                         ["c|C", "b|B"])
+        self.assertEqual([sections.item_key(i) for i in buckets[sections.SECTION_HIDDEN]],
+                         ["a|A"])
+
+    def test_store_order与flatten往返(self):
+        cfg = {"sections": {}, "order": []}
+        buckets = sections.plan_sections(self.items, cfg)
+        buckets[sections.SECTION_VISIBLE] = list(reversed(buckets[sections.SECTION_VISIBLE]))
+        sections.store_order(cfg, sections.flatten(buckets))
+        self.assertEqual(cfg["order"], ["c|C", "b|B", "a|A"])
+        again = sections.plan_sections(self.items, cfg)
+        self.assertEqual([sections.item_key(i) for i in again[sections.SECTION_VISIBLE]],
+                         ["c|C", "b|B", "a|A"])
+
+    def test_快照与恢复(self):
+        cfg = {"sections": {"a|A": "hidden"}, "order": ["b|B", "a|A"], "panel_timeout": 9}
+        snap = sections.snapshot(cfg)
+        cfg["sections"]["c|C"] = "always_hidden"
+        cfg["order"] = ["c|C"]
+        self.assertTrue(sections.restore_snapshot(cfg, snap))
+        self.assertEqual(cfg["sections"], {"a|A": "hidden"})
+        self.assertEqual(cfg["order"], ["b|B", "a|A"])
+        self.assertEqual(cfg["panel_timeout"], 9)  # 行为配置不参与撤销
+        snap["sections"]["a|A"] = "bogus"  # 快照与 cfg 必须解耦
+        self.assertEqual(cfg["sections"]["a|A"], "hidden")
 
 
 if __name__ == "__main__":

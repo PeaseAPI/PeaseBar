@@ -135,6 +135,9 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T74 | **屏幕录制权限按 bundle 记账且 ad-hoc 重建后保留**：终端 python3 preflight=True 不代表 App 有；App 必须主动调过 `CGRequestScreenCaptureAccess()` 才进系统列表，授权后要重启进程；`py2app -A` 重建（cdhash 变）后授权仍在（实测两个新实例都能截到像素）。另：**像素度量必须在真 bug 构建上标定**——人工涂色两次骗过我们（先涂了个与背景同色，后是涂的位置与真胶囊内缩不一致，度量对真 bug 直接报 0.00）；把 panel.py 改回 `setBordered_(True)` 跑真机才定下阈值 | t74_block.py 标定（缺陷 0.35–0.53 vs 修复 0.87–0.96，断点 0.70）；P42 判据 `_block_check` |
 | T75 | **1.501s 是 messaging 超时的固定价，不是时长证据**：`err=-25204`（元素没答话）也花 1.501s，所以计时探针必须**同时记 err**；t76 对照组（同一时刻别家图标：搜狗拼音基线 1.501s/-25204、随后三轮 0.001s）证明这是托管树/别家进程的事。另：**App 被 SIGSTOP 时，MenuBarAgent 会把自家可点元素从托管树里摘掉**（t77 三轮全取不到元素）——所以下一次 P56 的 1.5s 既可能是“我们主线程真卡住”也可能是“探针没落到能答话的元素上”，单靠时长分不开 | P56 判据重写：只看 err=0 的样本、阶梯中采 3 轮取最好值，异常值当场补对照组；灵敏度由 t77 验证（真冻住时 err=0 样本为 0 → 判 FAIL） |
 | T76 | **菜单栏被全屏 App 遮住时，整条条带是纯黑的**（连 `screencapture -R 0,0,2056,24` 也全零），而 `CGPreflightScreenCaptureAccess()` 照样返回 True——「有权限」与「菜单栏此刻画没画图标」是两件事。按 frame 裁到的是纯背景，抠像后一个像素不剩，旧实现把这张**全透明图**当成「截到了」交给按钮 → P42 实测 16 格空白（正好是非收纳的 16 项，有图的 9 格全是走兜底的收纳项） | capture.py `image_for_item` 无墨（`MIN_GLYPH_PIXELS=20`）返回 None → 兜底链顶上；新增 `strip_has_content()` + `last_stats`；设置页加「菜单栏当前没画出图标」提示行（P64 构造纯黑条带取证） |
+| T77 | **AX children 自然顺序 == 几何阅读序 == 模型顺序**（diag 实测设置窗 25 格逐项一致）→ 取证序列直接按自然序读，别拿坐标排：窗口改高度的动画里同一行格子 y 会飘 2–3px（Wi‑Fi 368 vs 同行 366），按 `(round(y),x)` 排会把一行拆成两行、序列「花掉」假 FAIL | t_p4.py `win_tiles`/`ids_seq` 用自然序；旧的 row_sorted/sec_seq/panel_seq 废弃 |
+| T78 | **图标名是活文本，不能当身份**：TG Pro 的名字 "Performance Core 8 (Highest): 59°C" ↔ "Core 7 … 57°C" 在两次读取之间自己变脸，拿名字比的序列前后对不上。产品侧给格子 `setAccessibilityIdentifier_(配置键)`（设置与面板同一套）；配置键由 key_part 生成（T55）与活文本无关 | settings.py `_make_tile` / panel.py `_make_cell`；单测新增 2 条身份钉桩（活文本改名不改身份、格子无标题） |
+| T79 | **主线程忙时合成按键会被吞**（刚开窗口正在盘点/取图那阵）：睡固定时长等按键生效赌输过（P81/P83 假 FAIL），必须「发键 + 等预期效果」（轮询配置变化/「已选：」文本变化/该不变的不变）。另：本机 PyObjC 没有 `NSWorkspace.runningApplicationWithProcessIdentifier_`/`…WithPID_`，`runningApplications()` 被绑成实例方法（类上调报 Missing argument: self）→ 拉前台走 AX：AXMain+AXRaise，拿 AXFocused 当硬判据，拿不到焦点记 SKIP 不假 FAIL | t_p4.py `press_edit/press_focus/press_nochange/bring_front/focus_first`（点选定焦比裸键走路稳）；P53 判据同 T61 改按「生效+反应=有」（err 码在目标忙时不可信） |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -220,6 +223,9 @@ PeaseBar/
       `OutOfRoomWarning`/`.outOfReach` 那类信息放设置页，不在格子上打角标）；
       计数与盘点同源不二次枚举，提示只给计数与指引绝不列名字（P61–P63 真机 PASS）；
       另加「菜单栏当前没画出图标」一条（T76，P64 构造纯黑条带取证）→ **节点提交**
+- [x] P4.1b 设置页编辑本体（照 Thaw LayoutBarsSection 的键盘契约：区内顺序持久化 + ⌥←/→ 改序
+      + ⌥↑/↓ 换区落末尾 + ⌘1/2/3 移区 + ⌘Z 撤销 + 底部前移/后移/撤销按钮；
+      编辑只在设置窗口，救援面板不编辑）：真机 P81–P86 全 PASS、单测 95 项（T77–T79）→ **节点提交**
 - [ ] P4.2 py2app 打包 + AppIcon 资产 + SMAppService 开机自启
 - [ ] P4.3 全量回归 + README 使用说明 → **v1.0 发布节点**
 
@@ -314,6 +320,14 @@ PeaseBar/
   条带全黑记「环境受限」不算失败）。P64 用纯黑条带构造取证：25 格全部拿到兜底图标、提示行出现且高度涨一行。
   菜单栏恢复可见后复验：P42 PASS（裁到墨 16/16、空白 0）、P61–P64 全 PASS、全量 15 条全 PASS、单测 67 项全绿。
   **下一步：Phase 4b（SMAppService 开机自启 + py2app 正式打包 + AppIcon）。**
+- **2026-11-22（晚·Phase 4d 设置页编辑本体）**：把「设置页才是编辑器」做实：区内顺序持久化
+  （`config.order`）+ ⌥←/→ 改序 + ⌥↑/↓ 换区落末尾 + ⌘1/2/3 移区 + ⌘Z 撤销（栈深 50、原地不动不写盘
+  不入栈）+ 底部前移/后移/撤销按钮；救援面板零改动（只跟着 plan_sections 同序）。真机
+  P81–P86 全 PASS + P87 回归（t_p2b 16 条全绿、P61–P64 全绿、单测 95 项）；取证底座三条硬教训
+  写入 §5（T77 自然序代替坐标排序、T78 AXIdentifier=配置键代替活文本身份、T79 主线程吞按键
+  必须等效果 + PyObjC NSWorkspace 坑）；产品侧同步给格子加 `setAccessibilityIdentifier_`；
+  P53 判据按 T61 修正（err 码不可信时看新窗口）；取证会话级配置保护上线（起点归位+结尾写回校验，
+  用户 config.json 零残留）。**下一步：Phase 4b（SMAppService 开机自启 + py2app 打包 + AppIcon）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；

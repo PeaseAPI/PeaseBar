@@ -298,6 +298,8 @@ class RescuePanel(NSObject):
             tip += "\n▨ 被刘海遮挡"
         btn.setToolTip_(tip)
         btn.setAccessibilityLabel_(item.label)
+        # 身份标识用配置键（与设置窗口同一套）：图标名是活文本，不能当身份用
+        btn.setAccessibilityIdentifier_(sections.item_key(item))
         return btn
 
     def _position_panel(self, height):
