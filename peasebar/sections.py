@@ -48,7 +48,11 @@ DEFAULT_CONFIG = {"sections": {}, "order": [], "panel_timeout": 8,
                   # use_captured=格子优先用菜单栏真实截图像素；bar_wrap=图标条放不下就换行
                   # 换行默认开：单行放不下会被条子裁掉，用户看到的是「图标少了一半」，
                   # 宁可区变高，也要整区一次看全（Thaw 的 LayoutBar 就是自动折行）
-                  "use_captured": True, "bar_wrap": True}
+                  "use_captured": True, "bar_wrap": True,
+                  # real_bar（Phase 10）：换区/改序时把动作镜像到真实菜单栏（合成 ⌘-拖）。
+                  # 默认开——用户批评过「设成弹窗显示菜单栏图标却没减少、顺序拖不动」，
+                  # 根因就是我们只改逻辑分区从没动过系统菜单栏；关掉则回到纯逻辑编辑（安全垫）
+                  "real_bar": True}
 
 
 def config_path():

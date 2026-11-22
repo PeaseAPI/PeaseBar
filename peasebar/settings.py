@@ -82,7 +82,7 @@ from ApplicationServices import AXIsProcessTrusted
 
 import ServiceManagement as SM
 
-from peasebar import capture, inventory, sections
+from peasebar import capture, inventory, menubar_drag, sections
 
 # 方向键的 keyCode（AppKit 的 NS*ArrowFunctionKey 取值，写数字谁也看不懂）
 KEY_LEFT, KEY_RIGHT, KEY_DOWN, KEY_UP = 123, 124, 125, 126
@@ -104,8 +104,8 @@ BAR_H = 46
 # 图标条胶囊内边距（上下 / 左右）与宽图标的格宽上限
 BAR_PAD_Y, BAR_PAD_X = 4, 6
 BAR_TILE_MAX_W = 110
-# 选项卡片高（标题行 24 + 两行开关各 34，再留点底）
-OPT_CARD_H = 96
+# 选项卡片高（标题行 24 + 三行开关各 34，再留点底）
+OPT_CARD_H = 142
 # 布局页底部固定行数：选中提示 + 移区按钮 + 顺序按钮 + 重置行
 BOTTOM_ROWS = 4
 # 撤销栈深度（一次编辑只存两个小列表，50 步足够找回手滑，也不会吃掉多少内存）
@@ -144,6 +144,7 @@ BAR_ROW_H = 38 + 4
 _OPT_SWITCHES = (
     ("use_captured", "优先用菜单栏真实像素", "关掉后格子一律用 App 图标/系统符号，截图权限没给也长得整齐"),
     ("bar_wrap", "图标条放不下时换行", "开：整区图标一次看全（区会变高）；关：单行横向滚动"),
+    ("real_bar", "同步到真实菜单栏", "开：换区/改序时用合成 ⌘-拖真的隐显/重排系统图标（仅第三方，苹果系统项自动跳过）"),
 )
 
 LOG_PATH = os.path.expanduser("~/Library/Logs/PeaseBar.log")
@@ -437,6 +438,7 @@ class SettingsController(NSObject):
         self.drag_key = None      # 正在拖的图标配置键（没拖时 None）
         self.use_captured = True  # 布局页选项：格子优先用真实截图像素
         self.bar_wrap = True      # 布局页选项：图标条装不下就换行而不是横向滚动
+        self.real_bar = True      # 布局页选项：换区/改序镜像到真实菜单栏（合成 ⌘-拖）
         self.buckets = {}     # 最近一次 _rebuild 的分桶结果（键盘编辑读它，不二次盘点）
         self._undo = []       # 撤销栈：每格是 {sections, order} 快照
         self.on_changed = None  # 分区/超时变更后回调（app 用来刷新面板）
@@ -545,9 +547,10 @@ class SettingsController(NSObject):
         cfg = sections.load_config()
         buckets = sections.plan_sections(self.items, cfg)
         self.buckets = buckets  # 键盘编辑（⌥方向键/前移后移）就在这份分桶上动手
-        # 两个布局选项同步成标记：格子宽/高与取图都看它，一处读盘多处用
+        # 三个布局选项同步成标记：格子宽/高、取图、真实菜单栏镜像都看它，一处读盘多处用
         self.use_captured = bool(cfg.get("use_captured", True))
         self.bar_wrap = bool(cfg.get("bar_wrap", True))
+        self.real_bar = bool(cfg.get("real_bar", True))
         self.tiles = {}
         self.move_buttons = []
         self.order_buttons = []
@@ -1090,6 +1093,11 @@ class SettingsController(NSObject):
             self.on_changed()
         print(f"[PeaseBar] 设置：拖动 {key} → {sections.SECTION_LABELS[target]} "
               f"第 {min(index, len(new[target]))} 格")
+        # 拖拽落位也镜像：同区→改序，跨区→隐显（与按钮/键盘同一套真实菜单栏链路）
+        if target != src_sec:
+            self._mirror_section_move(key, target)
+        else:
+            self._mirror_section_reorder(target, key)
         return True
 
     # ---------- 布局页选项（真实像素优先 / 图标条换行） ----------
@@ -1195,6 +1203,26 @@ class SettingsController(NSObject):
         self._rebuild()
         if self.on_changed:
             self.on_changed()
+        # 重置也镜像到真实菜单栏：把系统收着的第三方图标全部拖回可见段
+        if self.opt("real_bar"):
+            self._reveal_all_stashed()
+
+    @objc.python_method
+    def _reveal_all_stashed(self):
+        """把系统收纳区里的第三方图标逐个拖回可见段（重置布局用）。"""
+        n = 0
+        for it in list(self.items):
+            if getattr(it, "stashed", False) and not it.is_stash_button:
+                bid = it.owner_bundle_id or ""
+                if bid and not bid.startswith("com.apple."):
+                    try:
+                        if menubar_drag.reveal(it):
+                            n += 1
+                    except Exception as exc:
+                        print(f"[PeaseBar] 真实菜单栏同步（重置放出）失败：{exc}")
+        self._resync_frames()
+        if n:
+            print(f"[PeaseBar] 重置：把 {n} 个图标拖回真实菜单栏")
 
     def onLaunchToggle_(self, sender):
         """开机自启开关（SMAppService）：改完以系统回读为准，UI 不自说自话（P95 判据）。"""
@@ -1503,8 +1531,8 @@ class SettingsController(NSObject):
         """同区内前移/后移一格。返回是否真动了（动不了不记撤销点）。
 
         重排本体在 `sections.reorder_bucket`（纯函数、单测直接测它），
-        这里只负责「取位置→写盘→刷界面」。注意重排只改我们自己的展示顺序，
-        把顺序写回**真实菜单栏**是 Phase 3 的 ⌘拖拽（§8 P3.1）。
+        这里负责「取位置→写盘→刷界面」，再在 real_bar 开时把「菜单栏显示」区的
+        新顺序镜像回真实菜单栏（合成 ⌘-拖，Phase 10；弹窗/永久隐藏区不动）。
         """
         if not key or not delta:
             return False
@@ -1520,6 +1548,8 @@ class SettingsController(NSObject):
         total = len(buckets[sec])
         self._commit_order_note(buckets,
                                 f"顺序：{key} → {sections.SECTION_LABELS[sec]} 第 {n}/{total} 格")
+        # 同区改序后镜像到真实菜单栏（仅「菜单栏显示」区会真动，其余区静默）
+        self._mirror_section_reorder(sec, key)
         return True
 
     def _move_selected_section(self, delta):
@@ -1576,6 +1606,72 @@ class SettingsController(NSObject):
         self._rebuild()
         if self.on_changed:
             self.on_changed()
+        # 写盘刷完界面，再把「换区」镜像到真实菜单栏（real_bar 关时静默跳过）
+        self._mirror_section_move(key, target)
+
+    @objc.python_method
+    def _mirror_section_move(self, key, target):
+        """把「换区」镜像到真实菜单栏（Phase 10）：移进弹窗/永久隐藏 → 系统真收纳（图标从
+        菜单栏消失）；移回菜单栏显示 → 从溢出区拖回可见段。只在 real_bar 开、且是可拖的
+        第三方图标时动手；苹果系统项对合成 ⌘-拖有抵抗（同 Thaw），一律跳过。"""
+        if not self.opt("real_bar"):
+            return
+        item = self._item_by_key(key)
+        if item is None:
+            return
+        did = False
+        try:
+            if target in (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN):
+                did = menubar_drag.movable(item) and menubar_drag.hide(item)
+            elif target == sections.SECTION_VISIBLE:
+                did = menubar_drag.reveal(item)
+        except Exception as exc:  # 真实拖拽任何异常都不能弄崩设置窗
+            print(f"[PeaseBar] 真实菜单栏同步（移区）失败：{exc}")
+        if did:
+            self._resync_frames()
+
+    @objc.python_method
+    def _mirror_section_reorder(self, sec, key):
+        """把「同区内前后移」镜像到真实菜单栏：只有「菜单栏显示」区对应真实菜单栏，
+        弹窗/永久隐藏区里的项本就被系统收着，没什么可排的。"""
+        if not self.opt("real_bar") or sec != sections.SECTION_VISIBLE:
+            return
+        group = self.buckets.get(sec) or []
+        idx = next((i for i, it in enumerate(group)
+                    if sections.item_key(it) == key), None)
+        if idx is None:
+            return
+        src = self._item_by_key(key)
+        if src is None or not menubar_drag.movable(src):
+            return
+        # 落点锚：优先拿它左邻（拖到其右），没左邻就拿右邻（拖到其左）
+        after = True
+        anchor_item = None
+        if idx > 0:
+            anchor_item = self._item_by_key(sections.item_key(group[idx - 1]))
+        elif idx + 1 < len(group):
+            anchor_item = self._item_by_key(sections.item_key(group[idx + 1]))
+            after = False
+        if anchor_item is None:
+            return
+        try:
+            if menubar_drag.reorder(src, anchor_item, after=after):
+                self._resync_frames()
+        except Exception as exc:
+            print(f"[PeaseBar] 真实菜单栏同步（改序）失败：{exc}")
+
+    @objc.python_method
+    def _resync_frames(self):
+        """真实 ⌘-拖后系统会重新排布菜单栏，本地缓存的 frame 立刻过期；只按 key 回写
+        frame/stashed/notched 三个几何字段，不重截图（快，不影响已显示的图）。"""
+        all_items, _ = inventory.list_items()
+        fresh = {sections.item_key(m): m for m in all_items if not m.is_stash_button}
+        for it in self.items:
+            f = fresh.get(sections.item_key(it))
+            if f is not None:
+                it.frame = f.frame
+                it.stashed = f.stashed
+                it.notched = f.notched
 
     def _sync_selection(self):
         """把选中态刷到界面：格子高亮、提示文字、移区/顺序/撤销按钮可用度。"""

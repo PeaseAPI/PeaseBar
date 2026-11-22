@@ -167,6 +167,8 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T106 | **菜单栏真实高必须按屏算**：刘海屏 32~39pt（本机 39），写死 24 常量会把两行文字图标（网速那类）的下半行**在抓取阶段**就裁掉——不是格子裁的，目视很容易误判到显示端。两个附带坑：①AX frame 在刘海屏报 y=7.5/h=24（图标居中绘制），收口只能按条带高不能按常量；②条带最底 1pt 是菜单栏分隔线（整行都是墨），当成字形会让 ink_run 把整个窗口认成一个字形 → 反过来判「仍被切」→ **所有图标全退到兜底图**（改第一版就踩，整页变成 App 图标） | capture.py menu_bar_height()/image_for_item 纵向收口 + CAPTURE_MAX_H=28；tests/test_capture.py 刘海两行用例+分隔线用例 |
 | T107 | **设计一变旧判据就是误报源，判据必须跟着新语义重写（不放宽）**：Phase 9 回归里四个假 FAIL 全属此类——①侧栏「缩进 ≥12pt」已被「贴边显示文字」推翻（Q72 改 ≤12pt，左右关系交 V1）；②图标条「单行 y 极差 ≤4」在可换行后作废（U2 改「分行后行内 x 不重复」）；③面板格子数门槛 ≥10 与「只列被藏项」语义矛盾（P64 改逐格判定）；④整表比 config 把产品新键（use_captured/bar_wrap）当成探针漂移（S9 改为只比备份里存在的键）。同类：拖拽样本押在单个第三方 App 上（Little Snitch Agent 本就没窗口，P44 改按名单逐个试）；菜单栏图标增减打断整表序比较（只比共同键） | tmp/t_p6b.py Q72/Q73、tmp/t_p8.py U2、tmp/t_p4.py P64、tmp/t_p7.py S9、tmp/t_p2b.py P44；修后四套探针回归全绿 |
 | T108 | **探针自己要把窗口按回目标页签**：设置窗只在「从关到开」时重置页签（`show()` 里 `if not self.window.isVisible()`），窗口一直开着时上一条用例留在「通用」页，下一条的 `ensure_settings()` 拿到的是静态页 → 「设置窗口里没有格子」「选中放不到可见区首格」全是假 FAIL（S7/S8 那轮就是这么来的）。修法与既有纪律一致：**用例不许依赖上一条留下的窗口状态**——读 `AXTitle` 后缀不对就 `AXPress` 侧栏「布局」再 `wait_for` 标题回来 | tmp/t_p2b.py ensure_settings；修后 S7/S8 转 PASS |
+| T109 | **QQ/微信被合并的真根因在裁剪阶段的借宽，不在显示端**：`capture.neighbour_room` 对帧重叠的邻居（微信 x1=1479 > QQ tx=1477）不触发 `x1<=tx` 判定而整个跳过，又用 `max(tx-x1)` 取到**最远**左邻居（借 90pt 上限）→ 窗口吞进邻居；`ink_run` 返回与窗口相交所有墨段的**并集** → 把微信+QQ 拼成一段。曾一度改 `ink_run` 只取「重叠最多的单段」——随即回退：QQ「企鹅+15」就是两段，拆开会丢数字。正确修法：按中心 cx 把其他图标分左/右两侧（重叠的也按中心归侧），借宽只卡在**最近**邻居内沿（`tx-max(left_edges)` / `min(right_edges)-(tx+tw)`），无该侧邻居才借 ROOM_MAX；`ink_run` 保留并集 | capture.py neighbour_room/ink_run；微信/QQ 借宽 90→12/12，tests.test_capture 43 例全绿 |
+| T110 | **合成 ⌘-拖能真改系统菜单栏（本机 macOS 27 实测）**：按住 Command（keycode 0x37/55）在菜单栏上拖动一个状态项 = macOS 原生移动/收纳它（不是拖进它自己的 App）。CGEvent 序列：CGWarpMouseCursorPosition(src) → ⌘ 按下 → leftMouseDown(flags=Command, clickState=1) → 多步 leftMouseDragged → leftMouseUp → ⌘ 松开。三方向实测通过：reorder（拖到目标 x）、hide（拖进刘海中点→变 stashed）、reveal（先 set_stash_revealed(True) 展开拿真实坐标→拖回可见区最右→再收起）。两个 PyObjC 坑：①`Quartz.CGMouseButton.LEFT` 不存在（NewType 对象），必须用 `kCGMouseButtonLeft`；②CGEventCreateMouseEvent 只 4 参，clickCount 用 CGEventSetIntegerValueField(e,kCGMouseEventClickState,1) 单独设。边界：只对第三方生效，Apple 系统图标对合成拖有抵抗（同 Thaw isNonConcealableSystemItem） | peasebar/menubar_drag.py；tmp/t_p10_drag.py + p10_*.png 取证；settings.py real_bar 接线
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -332,6 +334,24 @@ PeaseBar/
       不是产品问题，是 `ensure_settings()` 不管窗口停在哪个页；补「自己按回布局页」后
       S1–S4/S6–S9 全 PASS（日志 tmp/p9_reg_p7b.log）；环境已还原（config 与备份零漂移）
 - [ ] 待办：发布 1.0.1 需回 T86 完整重打包+重授权；「展开收纳区」右键菜单需真鼠标人工复核一次（S5）
+
+### Phase 10 真实菜单栏联动 + QQ/微信合并根治（用户 2026-11-23 批评「设了弹窗显示图标却没少 / QQ 跟微信合并成一颗 / 依旧拖不动顺序 / 仿得太糙」）
+- [x] P10a QQ/微信合并（T109）：真根因不在显示端而在 `capture.neighbour_room`——
+      对帧重叠的邻居不计数、又用 `max(tx-x1)` 借到最远邻居（90pt），窗口吞进邻居，
+      `ink_run` 取并集把两颗图标拼成一段。修法：按中心（cx）把其他图标分左/右两侧（重叠的
+      也按中心归侧），借宽只卡在**最近**邻居内沿；`ink_run` 保留并集（复合图标「企鹅+数字」必须合并）。
+      实测：微信/QQ 借宽由 90 收敛到 12/12（卡邻居内沿），裁出不再合并
+- [x] P10b 合成 ⌘-拖可行性（T110）：新建 `peasebar/menubar_drag.py`（command_drag/movable/reorder/hide/reveal），
+      按住 ⌘ 在菜单栏上拖状态项 = macOS 原生移动/收纳它；三方向真机实测全通（tmp/t_p10_drag.py + 截图）
+- [x] P10c 接线：`settings.py` 新增布局页开关 `real_bar`（默认开），在 applyMove_to_/reorderSelected_by_/
+      applyDrop/onResetLayout_ 写入链后镜像：进弹窗/永久隐藏→真 hide（拖进刘海）、回菜单栏显示→真 reveal
+      （展开溢出区拖回可见段最右）、可见区同区改序→真 reorder；全用 `movable` 守卫（跳过 Apple 系统项）
+- [x] P10d 真机取证（部署后走 T96）：hide 把 Alcove 从真实菜单栏拿走（可见第三方 15→14）、reveal 带回（14→15）；
+      reorder 把 PeaseClash 1305→1261（钉钉→1363）再拖回原位；QQ/微信帧分离（微信 x=1407 w=40 / QQ x=1445 w=54）
+- [x] P10e 回归：单测 162 项全绿（新增 test_menubar_drag 14 例 + test_settings_real_bar 接线 7 例）；
+      `movable`/`reveal` 改 getattr 容错（桩对象/缺属性判不可拖而不抛）；计划 tmp/test-plan-phase10.md；部署仍走 T96
+- [ ] 已知边界（如实告知）：合成 ⌘-拖只对**第三方**图标真隐/真排序，Apple 系统图标（com.apple.*）对拖有抵抗（同 Thaw）一律跳过；
+      隐藏方向可靠，还原方向需展开溢出区；与 Thaw 首选的「写 Menu Bar Layout 位置文件」相比，本路无需用户授权文件但依赖刘海几何
 
 ## 9. 续作指引（重启后从这里开始）
 

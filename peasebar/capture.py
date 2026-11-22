@@ -365,6 +365,8 @@ def ink_run(arr, lo, hi, gap):
     hit = [(a, b) for (a, b) in runs if b > lo and a < hi]
     if not hit:
         return None
+    # 并集：同一图标内「图标+数字/文字」可能隔 >gap 空白成两段，必须合并取回；
+    # 不跨邻居靠 neighbour_room 把窗口边界卡在邻居内侧，不靠这里拆段。
     return (min(a for a, _ in hit), max(b for _, b in hit))
 
 
@@ -591,7 +593,12 @@ def neighbour_room(items, target):
     if not tf:
         return (ROOM_MIN, ROOM_MIN)
     tx, tw = float(tf[0]), float(tf[2])
-    left, right = 0.0, 0.0
+    cx = tx + tw / 2.0
+    # 按中心把其他图标分到左/右两侧（重叠的也算：微信中心在 QQ 左边就是 QQ 的左邻居），
+    # 借宽只到**最近**那一个邻居的内沿——旧版取 max(tx - x1) 会借到最远的邻居、
+    # 把中间那个图标一起裁进来（Phase 10：QQ/微信合并成一格的真根因）。
+    left_edges = []   # 左侧邻居的右边界
+    right_edges = []  # 右侧邻居的左边界
     for it in items:
         if it is target or getattr(it, "stashed", False):
             continue
@@ -599,11 +606,14 @@ def neighbour_room(items, target):
         if not f or float(f[2]) <= 0:
             continue
         x0, x1 = float(f[0]), float(f[0]) + float(f[2])
-        if x1 <= tx:
-            left = max(left, min(ROOM_MAX, tx - x1))
-        elif x0 >= tx + tw:
-            right = max(right, min(ROOM_MAX, x0 - tx - tw))
-    return (max(ROOM_MIN, left), max(ROOM_MIN, right))
+        if x0 + float(f[2]) / 2.0 < cx:
+            left_edges.append(x1)
+        else:
+            right_edges.append(x0)
+    # 左边没邻居才能一路借到屏边，否则卡在最近邻居的右边界（重叠时自然得 0）
+    left = ROOM_MAX if not left_edges else max(0.0, min(ROOM_MAX, tx - max(left_edges)))
+    right = ROOM_MAX if not right_edges else max(0.0, min(ROOM_MAX, min(right_edges) - (tx + tw)))
+    return (left, right)
 
 
 def capture_icons(items, force=False):
