@@ -128,6 +128,12 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T62/T63 | **设置格子用 PushOnPushOff 切换态（`setButtonType_(1)`）→ AX 报成 `AXCheckBox` 而不是 `AXButton`**；测试若按角色认格子会全盘找不到。另：上一用例留着的设置窗口会让 `cells()` 把两边格子混在一起（假 FAIL） | 取证脚本按**窗口作用域**取格子（panel_win/settings_win_el），角色不再参与判定 |
 | T65/T66 | **合成点击没死，是按 App 家族分裂**（25 项 AXPress×合成右键对照）：AXPress 开窗 17/25、合成右键 8/25；**只有点击有效**=LaunchOS、Little Snitch Agent（后者根本不给 AX 元素），只有 AXPress 有效=Qoder/欧路词典/ToDesk/EdgeShelf/Alcove/TextInputMenuAgent/CleanMyMac/AlDente/控制中心；**被收纳的 9 项点击 0/9**（frame 不是画出来的位置，点击落邻居槽位）=与 Thaw `isElectronItem`「Electron 系忽略合成点击必须 AX press」同源。字段工法另有三条硬坑：投 session tap 而非 HID tap、必须打 `kCGEventTargetUnixProcessID`、down 的 clickState=1/up=0 且 mouseUp 发两次；**照 Thaw 塞 windowID/「指针下窗口」字段（我们只能塞假哈希）会让钉钉的菜单不弹，`CGEventPostToPid` 同样归零** | trigger.py 阶梯补第三档（可见且 AXPress 无窗 → 补一次合成右键，P55 取证 LaunchOS 生效）；被收纳项显式不试坐标点击 |
 | T67/T68 | **量「对端主线程忙不忙」只能用会抵达对端执行的动作，读属性一律不灵**：把 PeaseBar `SIGSTOP` 住 0.5s，`AXWindows`/`AXChildren` 仍然 0.000s 秒回（客户端不等对端）；而对自家状态项 `AXPress` 会排队：空载 0.111s vs 被冻 0.746s | P56 用 AXPress 往返时长当探针，证明阶梯搬后台后主线程不再被占 |
+| T69/T70 | **两个 AppKit 枚举值把「只显示图标」悄悄破坏了**：`setImagePosition_(5)` 当时按「NSImageOverlaps」写，其实 5=**NSImageAbove**（图在标题上方），空标题下图标被顶到格子**上沿**（t72 亮像素定位：距顶 2pt），居中要 `NSImageOnly`=1（修后 14pt=(40−12)/2）；`setImageScaling_(3)` 同理是 **ProportionallyUpOrDown**（把 18pt 小图撑满整格），ProportionallyDown=0。另：`NSButton` 的 rounded 胶囊会在图标后面垫一块灰底（真 bug 构建实测格内 65% 像素不是面板背景）——必须 `setBordered_(False)`；设置窗口的选中态改为自己画一层 layer 淡底（选中仍由 state 承载，AX 仍报 AXCheckBox，T63 不破） | panel.py `_make_cell` / settings.py `_make_tile`+`_paint_tile`；枚举一律用命名常量，不写字面量 |
+| T71 | **无边框 NSButton 不执行 imageScaling**：宽图标（网速/温度这类文字条，裁出来 80–104pt）直接溢出格子压邻居。宽度收口只能在抓取端做：`fit_box()` 改 NSImage 的**点尺寸**（只缩不放）；Retina 下裁图像素是点尺寸 2 倍，缩点尺寸反而更清晰 | capture.py `GLYPH_MAX_W=40` + `fit_box()`（3 条单测） |
+| T72 | **本机刘海在 macOS 27 上是死区**：内建屏 notch=(918,1138)，但 26 项全落在刘海两侧可用区（收纳项 x≈1167–1176、收纳按钮 1190、可见项 1222–1999）→ `notched` 恒 False，系统把挤不下的图标塞进收纳（stashed）而不是画到刘海底下。Thaw 同判断：`LayoutSolver.planNotchOverflow` 把溢出项移到 hidden 区，并在**设置页**用 `OutOfRoomWarning`（"Some items don't fit in the menu bar" + "Move to Hidden"）/`.outOfReach` 提示，不在格子上打角标 | P43 用构造项验证角标本体；Phase 4 设置页照此加「挤不下/够不着」提示行 |
+| T73 | **托管元素会失效，拿旧元素按只能等到超时**：`inventory.list_items()` 返回的 MenuBarAgent 树元素在菜单栏一变（展开收纳区/图标增减）就过期，对它 `AXPress` 不报错而是耗满 messaging 超时（P56 因此假 FAIL 成 1.501s；t73 分解证明阶梯中读/按两条通道都 <0.11s） | 探针每轮重新 `list_items()` 取元素，并筛 `role == "AXButton"` 的可点面 |
+| T74 | **屏幕录制权限按 bundle 记账且 ad-hoc 重建后保留**：终端 python3 preflight=True 不代表 App 有；App 必须主动调过 `CGRequestScreenCaptureAccess()` 才进系统列表，授权后要重启进程；`py2app -A` 重建（cdhash 变）后授权仍在（实测两个新实例都能截到像素）。另：**像素度量必须在真 bug 构建上标定**——人工涂色两次骗过我们（先涂了个与背景同色，后是涂的位置与真胶囊内缩不一致，度量对真 bug 直接报 0.00）；把 panel.py 改回 `setBordered_(True)` 跑真机才定下阈值 | t74_block.py 标定（缺陷 0.35–0.53 vs 修复 0.87–0.96，断点 0.70）；P42 判据 `_block_check` |
+| T75 | **1.501s 是 messaging 超时的固定价，不是时长证据**：`err=-25204`（元素没答话）也花 1.501s，所以计时探针必须**同时记 err**；t76 对照组（同一时刻别家图标：搜狗拼音基线 1.501s/-25204、随后三轮 0.001s）证明这是托管树/别家进程的事。另：**App 被 SIGSTOP 时，MenuBarAgent 会把自家可点元素从托管树里摘掉**（t77 三轮全取不到元素）——所以下一次 P56 的 1.5s 既可能是“我们主线程真卡住”也可能是“探针没落到能答话的元素上”，单靠时长分不开 | P56 判据重写：只看 err=0 的样本、阶梯中采 3 轮取最好值，异常值当场补对照组；灵敏度由 t77 验证（真冻住时 err=0 样本为 0 → 判 FAIL） |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -195,6 +201,10 @@ PeaseBar/
 - [x] P2.2 超时自动收回（默认 8s，config `panel_timeout`，交互续期；P27 3.0s 精确取证）+ `hotkeys.py` ⌥⌘B（T23 CGEventTap；P26 PASS；含 NSRunLoopCommonModes 未导入 NameError 修复）
 - [x] P2.3 单实例唤醒接线（哨兵 0.5s 轮询 accept → show；P28 `open -n` PASS，T26 事实同记）；权限引导已有（菜单项 alert，T14），引导窗升级留 Phase 4
 - [x] P2.4 tests/ 纯逻辑单测 29 项全 PASS（分区规划 + 遮挡判定；拓出并修复 rect_intersects 零宽误报）；Phase 1 回归 T7–T12 全绿 → **节点提交**
+- [x] P2b 按用户两项定调重做 UI 分工（**编辑只在设置窗口、面板不编辑**；**只显图标不显名字**，名字进 tooltip）：
+      `capture.py` 条带抓取 + 色键去背 + 兜底链（T28/T44–T46/T71）、`settings.py` 设置窗口、`trigger.py` 四档阶梯
+      并搬后台（T61/T65–T68）；胶囊底色、图标居中、宽图标溢出三个真缺陷均 P42 当场拓出并修复（T69–T75）；
+      真机 P41–P56 共 15 条全 PASS，单测 54 项 → **节点提交**
 
 ### Phase 3 顺序写入（F11–F12，视 E2/T66 结论）
 - [ ] P3.1 `mover.py` ⌘拖拽写入 + 编辑器上移/下移/拖拽
@@ -205,7 +215,8 @@ PeaseBar/
 - [ ] P3.3 真机顺序编辑回归（移 3 个图标并复原）→ **节点提交**
 
 ### Phase 4 完整化（F13–F14）
-- [ ] P4.1 设置窗口（中文、简单模式默认）
+- [ ] P4.1 设置窗口（中文、简单模式默认）；照 Thaw 加「挤不下/够不着」提示行（T72：
+      `OutOfRoomWarning`/`.outOfReach` 那类信息放设置页，不在格子上打角标）
 - [ ] P4.2 py2app 打包 + AppIcon 资产 + SMAppService 开机自启
 - [ ] P4.3 全量回归 + README 使用说明 → **v1.0 发布节点**
 
@@ -275,6 +286,18 @@ PeaseBar/
   ② **P44 旧版是假 PASS**（只问「有没有任何外来小窗」，而选中的 OneDrive 左键只刷同步从不开窗），
   收紧为「目标 pid/layer 101 的窗口差 + 靠 T66 名单选样本」后重跑 PASS。
   至此 12 条真机用例（P41/P44/P45/P46/P47/P48/P49/P52/P53/P54/P55/P56）全 PASS。
+- **2026-11-22（清晨）**：bundle 授权到手，像素图标路径补齐取证：P42/P43/P51 从「仍未取证」转 PASS。
+  P42 当场抓到真缺陷——**格子里有 NSButton rounded 胶囊灰底**，直接违背「只显示图标」；顺带挖出两个
+  枚举陷阱（图标被顶到上沿、小图被撑满整格）与宽图标溢出，三处一起修（panel/settings/capture.fit_box），
+  并把 P42 的判据换成在**真 bug 构建上标定**过的背景占比（0.35–0.53 vs 0.87–0.96，断点 0.70）。
+  新事实 T69–T75 写入 §5；本机刘海是死区（真实遮挡以 stashed 呈现），Thaw 把「挤不下/够不着」放设置页
+  提示而非格子角标——Phase 4 照此办理。
+  同时修掉取证脚本自身的三处假 FAIL：P56 的 1.5s 其实是 messaging 超时的固定价（带 err 才能分开
+  「我们卡住」与「探针没落到元素上」，T75；对照组与灵敏度分别由 t76/t77 取证）、P49/P52 依赖上一条
+  用例留下的设置窗口（P48 会关掉它）→ 改为 `ensure_settings()` 自给自足、P42 截图前先挪开指针（悬停
+  tooltip 会盖住格子）。
+  全量 15 条（P41/P42/P43/P44/P45/P46/P47/P48/P49/P51/P52/P53/P54/P55/P56）复跑 PASS，单测 54 项全绿。
+  **下一步：Phase 4（设置窗口完整化 + 打包 + 开机自启）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
@@ -294,5 +317,16 @@ PeaseBar/
 - **测「主线程忙闲」要选会抵达对端执行的动作**（对自家状态项 AXPress 的往返时长）：
   读属性（AXWindows/AXChildren）在 App 被冻住时也会 0.000s 秒回，量不到延迟（T67/T68）；
   灵敏度还要先用 SIGSTOP 对照验证，否则「全部很快」什么都不能证明（假 PASS）；
+  多轮采样取最好值的判据，同样要跑一遍 SIGSTOP 对照确认它会被判 FAIL（T75/t77）；
+- **计时探针必须同时记录错误码**：超时与失败往往有固定价（本例 1.501s），只看时长会把
+  「没落到能答话的元素上」当成「被占住」；必要时拉一个**对照组**（同一时刻另一家图标）分清是谁慢（T75）；
 - 涉及图标移动的实验必须可复原：记录前/后坐标，测试后把图标拖回原位；
+- **像素度量必须在真 bug 构建上标定**，不接受「人工涂色」当灵敏度对照：涂色的位置与对比度跟真缺陷
+  对不上，会造出永远报 0.00 的瞎判据（本轮就连输两次）。做法：把源码改回缺陷版跑一次真机、再改回来，
+  取两侧分布的空隙当阈值（T74）；
+- **截图前先挪开指针**：悬停 tooltip 会盖在格子上，能把底色差从 0 顶到 188；
+- **度量不要依赖两次盘点之间的格子↔item 对位**：菜单栏一变就整串错位（实测 26 vs 25），
+  只拿格子自身与周边背景作比较；
+- **用例不许依赖上一条留下的窗口状态**：需要设置窗口就自己开（`ensure_settings()`），否则批量顺序一变
+  就报「设置窗口里没有格子」这种假 FAIL；同理，拿 AX 元素做计时探针必须每轮重取（T73）；
 - 不在未授权的机器上静默降级——权限缺失时给出中文指引。

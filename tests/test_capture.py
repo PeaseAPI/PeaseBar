@@ -118,6 +118,32 @@ class TestImageRoundTrip(unittest.TestCase):
         self.assertEqual(back.shape, arr.shape)
 
 
+class TestFitBox(unittest.TestCase):
+    """宽图标尺寸收口（无边框按钮不执行 imageScaling，溢出只能在这里拦，P42）。"""
+
+    def _img(self, w, h):
+        from Foundation import NSSize
+        from AppKit import NSImage
+        img = NSImage.alloc().initWithSize_(NSSize(w, h))
+        return img
+
+    def test宽文字条缩进框内(self):
+        img = capture.fit_box(self._img(104, 15))
+        s = img.size()
+        self.assertLessEqual(s.width, capture.GLYPH_MAX_W + 0.01)
+        self.assertLessEqual(s.height, capture.GLYPH_MAX_H + 0.01)
+        self.assertAlmostEqual(s.height / s.width, 15 / 104, places=3)  # 保比例
+
+    def test小图不放大(self):
+        img = capture.fit_box(self._img(18, 14))
+        s = img.size()
+        self.assertAlmostEqual(s.width, 18.0, places=2)
+        self.assertAlmostEqual(s.height, 14.0, places=2)
+
+    def test无图返回None(self):
+        self.assertIsNone(capture.fit_box(None))
+
+
 class TestPermissionApi(unittest.TestCase):
     def test_预检返回布尔(self):
         self.assertIn(capture.has_screen_permission(), (True, False))

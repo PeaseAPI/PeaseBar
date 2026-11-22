@@ -20,6 +20,8 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSButton,
     NSFont,
+    NSImageOnly,
+    NSImageScaleProportionallyDown,
     NSMakeRect,
     NSMenu,
     NSMenuItem,
@@ -37,6 +39,7 @@ from AppKit import (
 from Foundation import NSObject, NSMakeSize
 from AppKit import NSApplication
 import objc
+import Quartz
 
 from peasebar import capture, inventory, sections
 
@@ -266,11 +269,15 @@ class SettingsController(NSObject):
         if img is not None:
             btn.setImage_(img)
         btn.setTitle_("")
-        btn.setImagePosition_(5)  # NSImageOverlaps：只有图，居中
-        btn.setBezelStyle_(0)
-        btn.setBordered_(True)
+        btn.setImagePosition_(NSImageOnly)   # 只有图且居中（5 是 NSImageAbove，会把图顶到上沿）
+        btn.setImageScaling_(NSImageScaleProportionallyDown)  # 兜底：宽度收口在 capture.fit_box
+        # 同面板（P42）：不画 rounded 胶囊底色，只给选中那一项自己垫一层淡底，
+        # 余下格子就是干净的图标（选中态仍由 state 承载，AX 仍报 AXCheckBox，T63）
+        btn.setBordered_(False)
         btn.setButtonType_(1)  # PushOnPushOff：选中态由 state 承载
         btn.setState_(1 if key == self.selected_key else 0)
+        btn.setWantsLayer_(True)
+        self._paint_tile(btn, key == self.selected_key)
         btn.setTag_(_SECTION_ORDER.index(sec))
         btn.setRepresentedObject_(key)  # 反查 item 用（图标模式下标题为空）
         btn.setTarget_(self)
@@ -297,6 +304,18 @@ class SettingsController(NSObject):
             mi.setRepresentedObject_(sections.item_key(item))
             menu.addItem_(mi)
         return menu
+
+    def _paint_tile(self, btn, selected):
+        """选中格自己画一层淡底（其余格子透明），避开 NSButton 胶囊底块的硬边。"""
+        layer = btn.layer()
+        if layer is None:
+            return
+        layer.setCornerRadius_(6.0)
+        if selected:
+            cg = Quartz.CGColorCreateGenericRGB(1.0, 1.0, 1.0, 0.14)
+        else:
+            cg = Quartz.CGColorCreateGenericRGB(0.0, 0.0, 0.0, 0.0)
+        layer.setBackgroundColor_(cg)
 
     # ---------- 交互 ----------
 
@@ -349,6 +368,7 @@ class SettingsController(NSObject):
         item = self._item_by_key(self.selected_key) if self.selected_key else None
         for key, btn in self.tiles.items():
             btn.setState_(1 if key == self.selected_key else 0)
+            self._paint_tile(btn, key == self.selected_key)
         if item is None:
             text = "未选择图标 · 单击图标选中，也可右键直接弹移区菜单"
         else:

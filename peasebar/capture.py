@@ -48,6 +48,8 @@ _generation = 0
 APP_ICON_MAX_H = 18.0
 # 系统模块符号的绘制上限（比 App 图标略高，贴近菜单栏字形）
 GLYPH_MAX_H = 18.0
+# 裁图点尺寸宽度上限（面板格子 44 宽，留边不溢出；宽文字条靠它收口，见 fit_box）
+GLYPH_MAX_W = 40.0
 # 谁都对不上时的占位符号（Thaw MenuBarItemPlaceholderStyle.symbolName）
 GENERIC_SYMBOL = "menubar.rectangle"
 
@@ -343,6 +345,22 @@ def capture_strip():
     return strip, scale
 
 
+def fit_box(img, max_w=GLYPH_MAX_W, max_h=GLYPH_MAX_H):
+    """把 NSImage 的点尺寸限进 max_w×max_h（只缩不放）。
+
+    只改 size 不改位图分辨率：Retina 下裁图像素是点尺寸的 2 倍，缩小点尺寸反而更清。
+    必须在抓取端做：无边框 NSButton 不执行 imageScaling，宽图标（网速/温度这类
+    文字条，裁出来 80–104pt 宽）会直接溢出格子压到邻居（P42/t72 像素定位实测）。
+    """
+    if img is None:
+        return None
+    s = img.size()
+    k = min(1.0, max_w / max(s.width, 1.0), max_h / max(s.height, 1.0))
+    if k < 1.0:
+        img.setSize_(NSSize(s.width * k, s.height * k))
+    return img
+
+
 def image_for_item(strip, scale, item):
     """按 item.frame 从条带裁出单个图标并处理成 NSImage；失败返回 None。"""
     if strip is None or item.frame is None:
@@ -362,7 +380,7 @@ def image_for_item(strip, scale, item):
     if arr is None:
         return None
     arr = trim_transparent(knockout(arr))
-    return image_from_array(arr, scale, is_single_ink(arr))
+    return fit_box(image_from_array(arr, scale, is_single_ink(arr)))
 
 
 def capture_icons(items, force=False):

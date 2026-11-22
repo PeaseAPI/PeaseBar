@@ -29,6 +29,8 @@ from AppKit import (
     NSEvent,
     NSEventMaskLeftMouseDown,
     NSFont,
+    NSImageOnly,
+    NSImageScaleProportionallyDown,
     NSMakeRect,
     NSPanel,
     NSScreen,
@@ -275,8 +277,16 @@ class RescuePanel(NSObject):
         if img is not None:
             btn.setImage_(img)
         btn.setTitle_("")
-        btn.setImagePosition_(5)  # NSImageOverlaps：无标题，图标居中
-        btn.setBezelStyle_(0)  # rounded：保留可点击的按钮外形
+        # 只有图、居中：原先写的 5 其实是 NSImageAbove（图在标题上方），
+        # 空标题下图标被顶到格子上沿；NSImageOnly=1 才居中（t72 像素定位实测）
+        btn.setImagePosition_(NSImageOnly)
+        # 宽图标（网速/温度这类文字条）的宽度收口在 capture.fit_box：
+        # 无边框 NSButton 不执行 imageScaling，这里只当兜底（值为 ProportionallyDown，
+        # 写成 3 就变成 UpOrDown、会把小图撑满）
+        btn.setImageScaling_(NSImageScaleProportionallyDown)
+        # 不画按钮外形：rounded 胶囊会在图标后面垫一块灰底，违背「只显示图标」
+        # （P42 截图实测：带 bezel 时格子四角与背景差 54，去掉后只剩毛玻璃本身）
+        btn.setBordered_(False)
         btn.setTag_(index)     # 必须是全量 items 下标（onIconClick_ 按 tag 取）
         btn.setTarget_(self)
         btn.setAction_("onIconClick:")
