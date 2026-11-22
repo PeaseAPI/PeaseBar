@@ -149,5 +149,60 @@ class TestPermissionApi(unittest.TestCase):
         self.assertIn(capture.has_screen_permission(), (True, False))
 
 
+class TestDeadMenuBar(unittest.TestCase):
+    """菜单栏此刻没画出图标（被全屏 App 遮住）：绝不给空白格子（T76，P42 实测 16 格空白）。
+
+    那种场景下整条条带都是黑的，按 frame 裁到的是纯背景：抠像后一个像素不剩。
+    旧实现把这张全透明图当成「截到了」交给按钮 → 格子什么也不画。
+    """
+
+    class Item:
+        def __init__(self, frame, label="测试项", bundle="com.example.dead"):
+            self.frame = frame
+            self.label = label
+            self.owner_bundle_id = bundle
+            self.stashed = False
+
+    def _strip(self, arr):
+        return capture.cgimage_from_numpy(arr)
+
+    def test_纯背景裁图返回None(self):
+        strip = self._strip(tile(bg=(0, 0, 0), size=(24, 200)))
+        self.assertIsNone(capture.image_for_item(strip, 1.0, self.Item((10, 0, 24, 24))))
+
+    def test_有字形仍能裁到图(self):
+        strip = self._strip(draw_glyph(tile(bg=(0, 0, 0), size=(24, 200))))
+        self.assertIsNotNone(capture.image_for_item(strip, 1.0, self.Item((0, 0, 200, 24))))
+
+    def test_条带有无内容(self):
+        self.assertFalse(capture.strip_has_content(self._strip(tile(bg=(0, 0, 0), size=(24, 200)))))
+        self.assertTrue(capture.strip_has_content(self._strip(draw_glyph(tile(size=(24, 200))))))
+        self.assertFalse(capture.strip_has_content(None))
+
+    def test_全黑条带下全部走兜底(self):
+        """有权限但条带全黑 → 每张图都必须是兜底图，且统计报出「零张真像素」。"""
+        strip = self._strip(tile(bg=(0, 0, 0), size=(24, 400)))
+        orig_strip, orig_perm = capture.capture_strip, capture.has_screen_permission
+        orig_stats = dict(capture.last_stats)
+        capture.capture_strip = lambda: (strip, 1.0)
+        capture.has_screen_permission = lambda: True
+        items = [self.Item((10, 0, 24, 24), label="甲"), self.Item((60, 0, 24, 24), label="乙")]
+        try:
+            images, no_perm = capture.capture_icons(items, force=True)
+            stats = dict(capture.last_stats)
+        finally:
+            capture.capture_strip, capture.has_screen_permission = orig_strip, orig_perm
+            capture.last_stats = orig_stats  # 模块状态不留到下一个用例
+        self.assertFalse(no_perm)  # 权限确实有，问题不在权限
+        self.assertEqual(stats["cropped"], 0)
+        self.assertEqual(stats["fallback"], 2)
+        self.assertFalse(stats["bar_drawn"])
+        for it in items:
+            key = capture.sections.item_key(it)
+            got = bytes(images[key].TIFFRepresentation())
+            want = bytes(capture.fallback_image_for_item(it).TIFFRepresentation())
+            self.assertEqual(got, want)  # 兜底图就是应得的那张，不是一张全透明
+
+
 if __name__ == "__main__":
     unittest.main()

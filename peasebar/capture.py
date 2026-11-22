@@ -37,10 +37,18 @@ VIVID_CHROMA = 0.3
 MAX_VIVID_SHARE = 0.02
 # 裁边后保留的留白（点，按 scale 换算成像素）
 TRIM_PAD = 2
+# 裁图抠像后至少要剩这么多像素，否则视为「这一格根本没画上图标」。
+# 菜单栏被全屏 App 遮住时整条条带都是黑的，裁出来是纯背景 → 抠像后一个不剩，
+# 那种全透明图交给按钮就是空白格子（P42 实测 16 格空白），必须当成截不到走兜底。
+MIN_GLYPH_PIXELS = 20
 
 # 抓取结果缓存：{item_key: (NSImage, 代际)}；盘点刷新时代际递增使旧缓存失效
 _cache = {}
 _generation = 0
+
+# 最近一次 capture_icons 的取图构成（设置页提示用，只读不参与决策）。
+# 初值按「还没截过」给：cropped/fallback 为 0，bar_drawn 乐观假定为 True。
+last_stats = {"cropped": 0, "fallback": 0, "permission": True, "bar_drawn": True}
 
 # ---------- 图标兜底（参照 Thaw OverflowFallbackIcon：永远给图，不给字） ----------
 
@@ -380,7 +388,24 @@ def image_for_item(strip, scale, item):
     if arr is None:
         return None
     arr = trim_transparent(knockout(arr))
+    if int((arr[:, :, 3] > 0).sum()) < MIN_GLYPH_PIXELS:
+        return None  # 无墨 = 这里没画上图标，不是「图标是透明的」→ 交给兜底链
     return fit_box(image_from_array(arr, scale, is_single_ink(arr)))
+
+
+def strip_has_content(strip):
+    """条带里到底画没画东西：全屏 App 遮住菜单栏时系统给的是纯黑条带。
+
+    与「有没有屏幕录制权限」是两件事：权限有、preflight 返回 True，照样可能
+    截到一张全黑（菜单栏此刻不可见）。UI 要据此告诉用户「现在不是真实图标」。
+    """
+    import numpy as np
+
+    arr = numpy_from_cgimage(strip) if strip is not None else None
+    if arr is None:
+        return False
+    rgb = arr.reshape(-1, arr.shape[2])[:, :3].astype(int)
+    return int(rgb.max() - rgb.min()) > 8
 
 
 def capture_icons(items, force=False):
@@ -393,8 +418,9 @@ def capture_icons(items, force=False):
     截取结果按代际缓存：同一批图标重复调用只回读缓存，force=True 或盘点刷新
     （invalidate_cache）后重新截图。
     """
-    global _generation
+    global _generation, last_stats
     no_permission = not has_screen_permission()
+    bar_drawn = last_stats["bar_drawn"]  # 本轮没重截条带时沿用上次的判断
     if no_permission:
         captures = {}
     else:
@@ -417,6 +443,8 @@ def capture_icons(items, force=False):
             if strip is None:
                 no_permission = True
                 missing = []
+            else:
+                bar_drawn = strip_has_content(strip)
             for it in missing:
                 img = image_for_item(strip, scale, it) if strip is not None else None
                 if img is not None:
@@ -426,6 +454,13 @@ def capture_icons(items, force=False):
     for it in items:
         key = sections.item_key(it)
         out[key] = captures.get(key) or fallback_image_for_item(it)
+    # 取图构成只供 UI 说明「现在是真实像素还是兜底图标」，不参与任何决策
+    last_stats = {
+        "cropped": len(captures),
+        "fallback": len(items) - len(captures),
+        "permission": not no_permission,
+        "bar_drawn": bar_drawn,
+    }
     return out, no_permission
 
 

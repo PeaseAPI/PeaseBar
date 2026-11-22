@@ -25,6 +25,7 @@ from AppKit import (
     NSMakeRect,
     NSMenu,
     NSMenuItem,
+    NSLineBreakByTruncatingTail,
     NSColor,
     NSTextField,
     NSView,
@@ -80,6 +81,9 @@ class SettingsController(NSObject):
         self.window = None
         self.items = []
         self.images = {}
+        self.stashed_count = 0    # 被系统收纳项数（提示行用，与盘点同源不二次枚举）
+        self.notched_count = 0    # 被刘海遮挡项数
+        self.stats = dict(capture.last_stats)  # 最近一次取图构成（真实像素/兜底）
         self.tiles = {}       # 配置键 → 格子按钮（选中态/反查用）
         self.selected_key = None  # 当前选中的图标（编辑动作的作用对象）
         self.on_changed = None  # 分区/超时变更后回调（app 用来刷新面板）
@@ -115,9 +119,32 @@ class SettingsController(NSObject):
         if self.selected_key not in self.images:
             self.selected_key = None
         stashed = sum(1 for m in self.items if m.stashed)
+        self.stashed_count = stashed
+        self.notched_count = sum(1 for m in self.items if m.notched and not m.is_stash_button)
+        self.stats = dict(capture.last_stats)
         print(f"[PeaseBar] 设置盘点：图标 {len(self.items)} 项（被系统收纳 {stashed} 项，"
               f"AX 不可用进程 {len(unavailable)} 个），图标位图 {len(self.images)} 张，"
               f"屏幕录制权限={'有' if not self.no_permission else '无（用兜底图标）'}")
+
+    def _hints(self):
+        """「挤不下 / 够不着」提示行（照 Thaw：这类信息放设置页，不在格子上打角标，T72）。
+
+        只给计数与操作指引，不列名字——用户定调「UI 只显示图标」；名字仅在
+        「已选：」行出现（那是用户主动选中后才有的上下文）。
+        本机刘海是死区（T72），notched 通常为 0，该行因此不出现，但逻辑要支持。
+        """
+        hints = []
+        if self.stashed_count:
+            hints.append(f"有 {self.stashed_count} 项被系统收纳：菜单栏挤不下，"
+                         f"可在面板「展开收纳区」找回，或选中后移到隐藏区。")
+        if self.notched_count:
+            hints.append(f"有 {self.notched_count} 项被刘海遮挡：够不着，可移到隐藏区腾位置。")
+        # 有权限却一张真像素都没截到 = 菜单栏此刻没画出来（全屏 App 遮住）。
+        # 不说清楚的话，用户只会看到一屏「不像本人」的 App 图标又找不到原因（T76）。
+        if not self.stats["cropped"] and self.stats["permission"] and not self.stats["bar_drawn"]:
+            hints.append("菜单栏当前没画出图标（多半被全屏应用遮住）：格子暂用 App 图标/系统符号，"
+                         "退出全屏后点「重新抓取图标」恢复真实像素。")
+        return hints
 
     # ---------- 窗口骨架 ----------
 
@@ -146,7 +173,7 @@ class SettingsController(NSObject):
                 continue
             rows = (n + cols - 1) // cols
             h += SECTION_H + rows * (TILE_H + TILE_GAP) + GAP
-        h += (BOTTOM_ROWS + (1 if self.no_permission else 0)) * (ROW_H + 8) + EDGE
+        h += (BOTTOM_ROWS + (1 if self.no_permission else 0) + len(self._hints())) * (ROW_H + 8) + EDGE
         return int(h)
 
     def _rebuild(self):
@@ -204,6 +231,16 @@ class SettingsController(NSObject):
             btn_perm.setTarget_(self)
             btn_perm.setAction_("onRequestPermission:")
             content.addSubview_(btn_perm)
+            top -= ROW_H + 8
+
+        # 挤不下/够不着提示（Thaw OutOfRoomWarning/.outOfReach 的位置选择，T72）
+        for text in self._hints():
+            hint = NSTextField.labelWithString_(text)
+            hint.setFont_(NSFont.systemFontOfSize_(11))
+            hint.setTextColor_(NSColor.systemOrangeColor())
+            hint.setFrame_(NSMakeRect(EDGE, top - ROW_H, WIN_WIDTH - 2 * EDGE, ROW_H))
+            hint.cell().setLineBreakMode_(NSLineBreakByTruncatingTail)   # 窄窗口截尾不折行（枚举用命名常量，T70）
+            content.addSubview_(hint)
             top -= ROW_H + 8
 
         # 选中提示（名字只在这里出现，格子上永远只有图标）
