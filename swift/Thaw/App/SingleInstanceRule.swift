@@ -15,7 +15,7 @@ nonisolated enum SingleInstanceRule {
     static let relaunchArgument = "--relaunched-from"
 
     /// The release bundle identifier. Other builds append one component, such as `.debug`.
-    static let baseBundleIdentifier = "com.stonerl.Thaw"
+    static let baseBundleIdentifier = "com.pease.peasebar"
 
     /// Bundles under Thaw's identifier that are parts of Thaw, not copies of the app.
     private static let componentSuffixes: Set = ["MenuBarCaptureService", "ThawControls", "tests"]

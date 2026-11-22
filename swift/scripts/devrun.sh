@@ -24,9 +24,9 @@ cd "$SCRIPT_DIR/.."
 PROJECT="Thaw.xcodeproj"
 SCHEME="Thaw"
 CONFIG="Release"
-APP_NAME="Thaw Debug"
+APP_NAME="PeaseBar"
 DEST="/Applications/$APP_NAME.app"
-BUNDLE_ID="com.stonerl.Thaw.debug"
+BUNDLE_ID="com.pease.peasebar"
 PROCESS_PATTERN="^${DEST//./\\.}/Contents/MacOS/$APP_NAME( |$)"
 AD_HOC=0
 SKIP_PACKAGES=0
@@ -72,8 +72,8 @@ BUILD_ARGS=(
     -destination 'platform=macOS'
     -onlyUsePackageVersionsFromResolvedFile
     -skipPackageUpdates
-    THAW_BUNDLE_ID_SUFFIX=.debug
-    "THAW_PRODUCT_NAME_SUFFIX= Debug"
+    THAW_BUNDLE_ID_SUFFIX=
+    "THAW_PRODUCT_NAME_SUFFIX="
 )
 # Library validation can reject an embedded framework that has no Team ID.
 AD_HOC_ARGS=(DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- PROVISIONING_PROFILE_SPECIFIER= RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION=YES)

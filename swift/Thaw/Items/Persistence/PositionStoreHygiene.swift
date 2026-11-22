@@ -108,7 +108,7 @@ enum PositionStoreHygiene {
         // Apple's own items come and go with OS features rather than with
         // anything installed, and Thaw's keys are rewritten by Thaw itself.
         guard !SharedConstants.isAppleBundleIdentifier(owner),
-              !owner.hasPrefix("com.stonerl.Thaw")
+              !owner.hasPrefix("com.pease.peasebar")
         else {
             return false
         }
