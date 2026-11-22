@@ -311,22 +311,25 @@ class RescuePanel(NSObject):
     def onIconClick_(self, sender):
         """点击面板内图标：触发真实图标，面板随即收起。
 
-        触发本身交给 trigger（按观察结果分级试），这里只负责「先收面板、再触发」：
-        原生菜单的跟踪循环会占住主线程，面板不先收掉会一直悬在那儿。
+        触发走 trigger 的阶梯（T61/T66：AXPress → AXShowMenu → 坐标可信时补一次合成右键），
+        并且丢后台跑：阶梯里全是跨进程等待（最坏 ~3s），卡在主线程会把面板和热键一起冻住。
+        面板先收再触发：对方的菜单跟踪循环会占住主线程，面板不先收掉会一直悬在那儿。
 
-        为什么不再用合成右键（T59/T60 推翻 T17）：macOS 27.2.1 上把左/右键
-        合成到控制中心、时钟、微信的槽位上，指针确实到位了但一个窗口都没多；
-        而对托管元素 AXPress 则真的能弹（T61：ToDesk/钉钉/TG Pro/One Switch 弹原生菜单）。
-        被收纳的图标同理：槽位挤在收纳按钮口，坐标不可信，只有 AXPress 能递到。
+        为什么不能只靠坐标：合成点击按 App 家族分裂（部分根本不吃），而被收纳的图标
+        frame 不是画出来的位置（坐标点击 0/9），那一类只能靠 AXPress 投递。
         """
         idx = sender.tag()
         item = self.items[idx] if 0 <= idx < len(self.items) else None
         self.close()  # 先收面板：对方的菜单跟踪循环会占住主线程
         if item is None:
             return
-        how, seen = trigger.open_item(item)
-        print(f"[PeaseBar] 触发 {item.owner_app}/{item.label}"
-              f"{'（被收纳）' if item.stashed else ''}：{how}，反应={'有' if seen else '无'}")
+
+        def done(how, seen):
+            # 子线程回调：只写日志，不碰 UI
+            print(f"[PeaseBar] 触发 {item.owner_app}/{item.label}"
+                  f"{'（被收纳）' if item.stashed else ''}：{how}，反应={'有' if seen else '无'}")
+
+        trigger.open_item_async(item, done)
 
     def onStashClick_(self, sender):
         """展开/收起系统收纳区，然后刷新网格（图标像素变了，同时使位图缓存失效）。"""
