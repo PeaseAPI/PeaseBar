@@ -173,6 +173,28 @@ def reorder_bucket(buckets, section, key, delta):
     return out, True
 
 
+def sort_bucket_by_name(buckets, section):
+    """把某区按显示名排序（大小写不敏感），不改入参。
+
+    对应 Thaw 每区「Sort by Name」菜单项。返回 (新 buckets, 是否真的变了)：
+    已经有序时 changed=False，调用方据此决定要不要写盘/记撤销点（与
+    reorder_bucket 同一套「无效动作不留撤销痕迹」的纪律）。
+    """
+    group = list(buckets.get(section) or [])
+    ordered = sorted(group, key=lambda it: (it.label or "").casefold())
+    out = dict(buckets)
+    out[section] = ordered
+    changed = [item_key(it) for it in group] != [item_key(it) for it in ordered]
+    return out, changed
+
+
+def reset_layout(cfg):
+    """重置布局：分区归属与自定义顺序清空，panel_timeout 等行为配置不动。"""
+    cfg["sections"] = {}
+    cfg["order"] = []
+    return cfg
+
+
 def neighbour_section(section, delta):
     """⌥↑/⌥↓ 的目标区：沿 SECTION_ORDER 移动，越界返回 None（顶端不再往上换区）。"""
     if section not in SECTION_ORDER:

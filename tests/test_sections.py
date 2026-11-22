@@ -232,5 +232,44 @@ class TestOrder(unittest.TestCase):
         self.assertEqual(cfg["sections"]["a|A"], "hidden")
 
 
+class TestSortAndReset(unittest.TestCase):
+    """Phase 4e：每区「按名称排序」与「重置布局」（对应 Thaw Sort by Name / Reset Layout）。"""
+
+    def setUp(self):
+        self.items = [item("com.b", "Beta"), item("com.a", "alpha"),
+                      item("com.c", "Gamma")]
+        self.buckets = {sections.SECTION_VISIBLE: self.items,
+                        sections.SECTION_HIDDEN: [], sections.SECTION_ALWAYS_HIDDEN: []}
+
+    def test_按名称排序大小写不敏感(self):
+        out, changed = sections.sort_bucket_by_name(self.buckets, sections.SECTION_VISIBLE)
+        self.assertTrue(changed)
+        self.assertEqual([it.label for it in out[sections.SECTION_VISIBLE]],
+                         ["alpha", "Beta", "Gamma"])
+        self.assertEqual([it.label for it in self.buckets[sections.SECTION_VISIBLE]],
+                         ["Beta", "alpha", "Gamma"])  # 入参不被改
+
+    def test_已有序时不算改动(self):
+        # 排完一次再排一次：已经有序就不报 changed（调用方据此不写盘、不留撤销点）
+        out, _ = sections.sort_bucket_by_name(self.buckets, sections.SECTION_VISIBLE)
+        _, again = sections.sort_bucket_by_name(out, sections.SECTION_VISIBLE)
+        self.assertFalse(again)
+
+    def test_单元素与空区(self):
+        for sec, group in ((sections.SECTION_VISIBLE, [self.items[0]]),
+                           (sections.SECTION_HIDDEN, [])):
+            out, changed = sections.sort_bucket_by_name({sec: group}, sec)
+            self.assertEqual(out[sec], group)
+            self.assertFalse(changed)
+
+    def test_重置只动分区与顺序(self):
+        cfg = {"sections": {"a|A": "hidden", "c|C": "always_hidden"},
+               "order": ["c|C", "a|A"], "panel_timeout": 5}
+        sections.reset_layout(cfg)
+        self.assertEqual(cfg["sections"], {})
+        self.assertEqual(cfg["order"], [])
+        self.assertEqual(cfg["panel_timeout"], 5)  # 行为配置不归布局重置管
+
+
 if __name__ == "__main__":
     unittest.main()

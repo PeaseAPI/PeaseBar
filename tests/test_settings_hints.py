@@ -62,7 +62,7 @@ class TestBarNotDrawnHint(unittest.TestCase):
         self.assertEqual(controller(0, 0, LIVE)._hints(), [])
 
     def test_缺权限时不重复说(self):
-        """缺权限时另有红色提示行 +「请求权限」按钮，这里不叠第三条。"""
+        """缺权限时红色提醒在「疑难解答」页，布局页提示行不叠第三条。"""
         no_perm = {"cropped": 0, "fallback": 25, "permission": False, "bar_drawn": False}
         self.assertEqual(controller(0, 0, no_perm)._hints(), [])
 
@@ -77,7 +77,7 @@ class TestHintHeight(unittest.TestCase):
         ctrl.stashed_count = stashed
         ctrl.notched_count = notched
         ctrl.stats = dict(LIVE)  # 只算「挤不下/够不着」的行数，不掺遮挡提示
-        return ctrl._content_height({sec: [] for sec in settings._SECTION_ORDER})
+        return ctrl._page_height("layout", {sec: [] for sec in settings._SECTION_ORDER})
 
     def test_each_hint_costs_one_row(self):
         """提示行必须按行占高度：不占就会把底部按钮裁掉，占多了会留大片空白。"""

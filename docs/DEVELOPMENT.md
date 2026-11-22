@@ -138,6 +138,12 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T77 | **AX children 自然顺序 == 几何阅读序 == 模型顺序**（diag 实测设置窗 25 格逐项一致）→ 取证序列直接按自然序读，别拿坐标排：窗口改高度的动画里同一行格子 y 会飘 2–3px（Wi‑Fi 368 vs 同行 366），按 `(round(y),x)` 排会把一行拆成两行、序列「花掉」假 FAIL | t_p4.py `win_tiles`/`ids_seq` 用自然序；旧的 row_sorted/sec_seq/panel_seq 废弃 |
 | T78 | **图标名是活文本，不能当身份**：TG Pro 的名字 "Performance Core 8 (Highest): 59°C" ↔ "Core 7 … 57°C" 在两次读取之间自己变脸，拿名字比的序列前后对不上。产品侧给格子 `setAccessibilityIdentifier_(配置键)`（设置与面板同一套）；配置键由 key_part 生成（T55）与活文本无关 | settings.py `_make_tile` / panel.py `_make_cell`；单测新增 2 条身份钉桩（活文本改名不改身份、格子无标题） |
 | T79 | **主线程忙时合成按键会被吞**（刚开窗口正在盘点/取图那阵）：睡固定时长等按键生效赌输过（P81/P83 假 FAIL），必须「发键 + 等预期效果」（轮询配置变化/「已选：」文本变化/该不变的不变）。另：本机 PyObjC 没有 `NSWorkspace.runningApplicationWithProcessIdentifier_`/`…WithPID_`，`runningApplications()` 被绑成实例方法（类上调报 Missing argument: self）→ 拉前台走 AX：AXMain+AXRaise，拿 AXFocused 当硬判据，拿不到焦点记 SKIP 不假 FAIL | t_p4.py `press_edit/press_focus/press_nochange/bring_front/focus_first`（点选定焦比裸键走路稳）；P53 判据同 T61 改按「生效+反应=有」（err 码在目标忙时不可信） |
+| T80 | **真机侦查 Thaw 3.0.0-beta.7 设置界面**（用户装了 beta，dump 全部 11 页于 `tmp/thaw_ref/`：截图+AX 树）：NavigationSplitView 侧栏 11 页、窗口 1018×720、每页带副标题、顶部工具栏含搜索；通用页=SMAppService 登录时启动/语言/主题/精简模式；布局页=条形分区 + 每区「按名称排序」MenuButton + 拖拽 + ⌥-arrows + Reset Layout；关于页=版本 + 复制版本信息 + 源码链接；疑难解答页=权限状态 + 诊断导出 | 对标取舍（定位「选项精简、中文优先」，不抄模块生态）：做五页侧栏（布局/通用/快捷键/疑难解答/关于，760 宽），结构、开机自启、排序/重置、疑难解答、关于一条不能输（Phase 4e-1） |
+| T81 | **PyObjC 会把单下划线开头的带参方法导出成选择子**：`_label(self,view,x,y,…)` 建类即报 BadPrototypeError「expects 0 arguments」，启动即死（T41 同族扩展）；内部 helper 必须 ≥2 下划线命名。另：sed 批量改名时 `self\_mk_label` 的转义把点吃掉，产出 `self_mk_label(` 二次坑 | settings.py helper 定名 `_mk_label/_mk_row/_mk_btn` |
+| T82 | **T63 第二战**：侧栏页签最初 `setButtonType_(1)`（PushOnPushOff）→ AX 报成 AXCheckBox，取证 `find_button`（按 AXButton 找）全部漏切页。修复：页签不设 buttonType，保持 AXButton，选中态用加粗字体 + layer 白垫底表达（也不与格子判据碰撞） | settings.py `_build_sidebar`（带注释钉住此坑） |
+| T83 | **PyObjC 桥成属性的方法不能用尾下划线调**：`NSProcessInfo.operatingSystemVersionString` 是属性，`operatingSystemVersionString_()` 抛 AttributeError；且 **action 回调里的异常被 AppKit 吞进系统日志**（我们的日志文件里连 traceback 都没有），表象是「按钮按了没反应」（P98 假 FAIL 真因）。另两条同晚取证：本机 PyObjC 无 `NSButtonSwitchType`（`NSButtonTypeSwitch` 画出来是方框），拨动开关用 **NSSwitch**；AX 属性 `AXEditable` 本机探针拿不到，找输入框只按 role=AXTextField | settings.py `onCopyVersion_`（属性直调）/`_page_general`（NSSwitch + 独立标题文本 + AXIdentifier） |
+| T84 | **SMAppService**：`mainAppService().status()` 枚举 NotRegistered=0/Enabled=1/RequiresApproval=2/NotFound=3；`registerAndReturnError_(None)` 返回 (ok, error) 元组；**adhoc 签名的 py2app -A 开发包报 NotFound**——开机自启的开关状态必须以系统回读为准（写后重读 status，失败拨回并把错误上屏），正式包的取证要等 Phase 4b 打包后（P95 开发包合法 SKIP） | settings.py `_LOGIN_STATUS` 映射 + `onLaunchToggle_` |
+| T85 | **菜单栏管理器互斥**：Thaw beta 运行中会把 PeaseBar 的控制图标**原生收纳**（盘点里没有 owner=com.pease.peasebar、菜单栏截图无图标，而 App 日志照常报「控制图标就绪」）——t_p2b 首轮 P42/P44/P45/P54/P56 连环 FAIL 全因此环。退出 Thaw 后盘点 14→26 项、图标回来 | 取证前 `osascript -e 'quit app "Thaw"'` 并核对盘点项数正常（写入 §11 规范） |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -226,6 +232,12 @@ PeaseBar/
 - [x] P4.1b 设置页编辑本体（照 Thaw LayoutBarsSection 的键盘契约：区内顺序持久化 + ⌥←/→ 改序
       + ⌥↑/↓ 换区落末尾 + ⌘1/2/3 移区 + ⌘Z 撤销 + 底部前移/后移/撤销按钮；
       编辑只在设置窗口，救援面板不编辑）：真机 P81–P86 全 PASS、单测 95 项（T77–T79）→ **节点提交**
+- [x] P4.1c 设置窗口侧栏多页化（对标 thaw@beta 3.0.0-beta.7，T80）：布局/通用/快捷键/疑难解答/关于
+      五页（窗口 760 宽，标题「PeaseBar 设置 · 页名」，重开归位布局页）；布局页补每区「按名称排序」
+      与「重置布局」（NSAlert 确认 + ⌘Z 可回）；通用页 NSSwitch 开机自启（SMAppService 写后回读，T84）
+      + 超时输入框；疑难解答页权限对照/重新抓取/打开日志/盘点摘要；关于页版本+复制+源码链。
+      真机 P91–P99：8 PASS + P95 SKIP（开发包 NotFound，待正式包复测）；P100 回归全绿（含 P53/P63/P64
+      判据按环境漂移修正后复验，T85；单测 99 项）→ **节点提交**
 - [ ] P4.2 py2app 打包 + AppIcon 资产 + SMAppService 开机自启
 - [ ] P4.3 全量回归 + README 使用说明 → **v1.0 发布节点**
 
@@ -241,7 +253,7 @@ PeaseBar/
 7. 排障先看 `~/Library/Logs/PeaseBar.log`（app.py 落盘，UTF-8，见 T15）；open 启动的进程 stdout/stderr 不可见
 8. 新 bundle 首次跑需授权辅助功能（T16）：系统设置「设备控制和数据访问」页打开 PeaseBar 开关（需 Touch ID 认证）
 9. 测试脚本轮询等待面板窗口出现（盘点 ~2s，固定 sleep 会竞态）；参考 `tmp/t34_expand_click.py`/`tmp/t8_t12.py` 的 wait_panel 模式；进程存活/交接验证用 `pgrep`（T25）；双开唤醒测试用 `open -n`（T26）
-10. 纯逻辑单测：项目根目录 `python3 -m unittest discover -s tests -t .`（67 项，不需 GUI/AX 权限）
+10. 纯逻辑单测：项目根目录 `python3 -m unittest discover -s tests -t .`（99 项，不需 GUI/AX 权限）
 
 ## 10. 进度快照
 
@@ -328,6 +340,18 @@ PeaseBar/
   必须等效果 + PyObjC NSWorkspace 坑）；产品侧同步给格子加 `setAccessibilityIdentifier_`；
   P53 判据按 T61 修正（err 码不可信时看新窗口）；取证会话级配置保护上线（起点归位+结尾写回校验，
   用户 config.json 零残留）。**下一步：Phase 4b（SMAppService 开机自启 + py2app 打包 + AppIcon）。**
+- **2026-11-22（夜·Phase 4e 设置窗口侧栏多页化）**：用户装了 thaw@beta 要求对照补齐——真机 dump
+  Thaw 3.0.0-beta.7 全部 11 个设置页（T80），取舍后做五页侧栏（布局/通用/快捷键/疑难解答/关于，760 宽，
+  重开归位布局页保探针判据）；布局页补每区「按名称排序」（纯函数 casefold，已有序不写盘不留撤销痕迹）
+  与「重置布局」（NSAlert 确认 + 先推撤销栈再写盘，一步 ⌘Z 可回）；通用页 NSSwitch 开机自启（SMAppService
+  写后回读为准，开发包 NotFound 如实 SKIP，T84）+ 超时输入框搬入；疑难解答页权限行↔App 日志对照 +
+  打开日志 + 盘点摘要；关于页版本/复制/源码链。新事实 T81–T85（单下划线选择子导出、PushOnPushOff 二战、
+  属性无尾下划线且 action 异常被 AppKit 吞、SMAppService 枚举、**Thaw 运行时把我们控制图标原生收纳**）。
+  真机 P91–P99：8 PASS + P95 SKIP；P100 回归：t_p4 全绿（P63 因收纳 0 改判 SKIP 分支、后在收纳 9 环境
+  复验 PASS；P64 阈值 15→10），t_p2b 首轮 5 连 FAIL 查出是 Thaw 互斥环境根因（T85），退 Thaw 后 15 PASS；
+  P53 押单目标失效（Snapzy 当晚静默吞 AXPress，同一收纳路径在欧路词典/Qoder 上反应=有）→ 判据改「逐个
+  试收纳格，任一命中即 PASS 并注明目标」后 PASS。单测 95→99 项全绿。定调复核（P99）：格子仍只显图标、
+  编辑仍只在设置窗口、提示行仍在布局页。**下一步：Phase 4b（py2app 正式打包 + AppIcon，打包后回测 P95）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
@@ -369,4 +393,9 @@ PeaseBar/
   只拿格子自身与周边背景作比较；
 - **用例不许依赖上一条留下的窗口状态**：需要设置窗口就自己开（`ensure_settings()`），否则批量顺序一变
   就报「设置窗口里没有格子」这种假 FAIL；同理，拿 AX 元素做计时探针必须每轮重取（T73）；
+- **反应类判据不许押在单个第三方 App 的即时状态上**（P53 教训）：同一收纳触发路径，Snapzy 当晚
+  err=0 静默吐掉（窗口/前置/像素三路全无反应），而欧路词典/Qoder 照常开窗——目标 App 哑了不等于
+  路径坏了。做法：按图谱逐个试同类样本，任一命中真实反应即 PASS 并注明取证目标，全部静默才 FAIL；
+- **取证前先检查环境有没有别家同类占用者**：菜单栏管理器（Thaw/Bartender/Ice）运行中会把 PeaseBar
+  控制图标原生收纳，造成连环假 FAIL（T85）——开工先 `pgrep` 确认并退出对照 App，再核对盘点项数正常；
 - 不在未授权的机器上静默降级——权限缺失时给出中文指引。
