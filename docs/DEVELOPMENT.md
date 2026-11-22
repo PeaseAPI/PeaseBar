@@ -130,7 +130,7 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T67/T68 | **量「对端主线程忙不忙」只能用会抵达对端执行的动作，读属性一律不灵**：把 PeaseBar `SIGSTOP` 住 0.5s，`AXWindows`/`AXChildren` 仍然 0.000s 秒回（客户端不等对端）；而对自家状态项 `AXPress` 会排队：空载 0.111s vs 被冻 0.746s | P56 用 AXPress 往返时长当探针，证明阶梯搬后台后主线程不再被占 |
 | T69/T70 | **两个 AppKit 枚举值把「只显示图标」悄悄破坏了**：`setImagePosition_(5)` 当时按「NSImageOverlaps」写，其实 5=**NSImageAbove**（图在标题上方），空标题下图标被顶到格子**上沿**（t72 亮像素定位：距顶 2pt），居中要 `NSImageOnly`=1（修后 14pt=(40−12)/2）；`setImageScaling_(3)` 同理是 **ProportionallyUpOrDown**（把 18pt 小图撑满整格），ProportionallyDown=0。另：`NSButton` 的 rounded 胶囊会在图标后面垫一块灰底（真 bug 构建实测格内 65% 像素不是面板背景）——必须 `setBordered_(False)`；设置窗口的选中态改为自己画一层 layer 淡底（选中仍由 state 承载，AX 仍报 AXCheckBox，T63 不破） | panel.py `_make_cell` / settings.py `_make_tile`+`_paint_tile`；枚举一律用命名常量，不写字面量 |
 | T71 | **无边框 NSButton 不执行 imageScaling**：宽图标（网速/温度这类文字条，裁出来 80–104pt）直接溢出格子压邻居。宽度收口只能在抓取端做：`fit_box()` 改 NSImage 的**点尺寸**（只缩不放）；Retina 下裁图像素是点尺寸 2 倍，缩点尺寸反而更清晰 | capture.py `GLYPH_MAX_W=40` + `fit_box()`（3 条单测） |
-| T72 | **本机刘海在 macOS 27 上是死区**：内建屏 notch=(918,1138)，但 26 项全落在刘海两侧可用区（收纳项 x≈1167–1176、收纳按钮 1190、可见项 1222–1999）→ `notched` 恒 False，系统把挤不下的图标塞进收纳（stashed）而不是画到刘海底下。Thaw 同判断：`LayoutSolver.planNotchOverflow` 把溢出项移到 hidden 区，并在**设置页**用 `OutOfRoomWarning`（"Some items don't fit in the menu bar" + "Move to Hidden"）/`.outOfReach` 提示，不在格子上打角标 | P43 用构造项验证角标本体；Phase 4 设置页照此加「挤不下/够不着」提示行 |
+| T72 | **本机刘海在 macOS 27 上是死区**（2026-11-22 晚起不再恒成立：环境变化后真机出现过 notched=1，相关判据已改相对基线，见 P43）：内建屏 notch=(918,1138)，但 26 项全落在刘海两侧可用区（收纳项 x≈1167–1176、收纳按钮 1190、可见项 1222–1999）→ `notched` 恒 False，系统把挤不下的图标塞进收纳（stashed）而不是画到刘海底下。Thaw 同判断：`LayoutSolver.planNotchOverflow` 把溢出项移到 hidden 区，并在**设置页**用 `OutOfRoomWarning`（"Some items don't fit in the menu bar" + "Move to Hidden"）/`.outOfReach` 提示，不在格子上打角标 | P43 用构造项验证角标本体；Phase 4 设置页照此加「挤不下/够不着」提示行 |
 | T73 | **托管元素会失效，拿旧元素按只能等到超时**：`inventory.list_items()` 返回的 MenuBarAgent 树元素在菜单栏一变（展开收纳区/图标增减）就过期，对它 `AXPress` 不报错而是耗满 messaging 超时（P56 因此假 FAIL 成 1.501s；t73 分解证明阶梯中读/按两条通道都 <0.11s） | 探针每轮重新 `list_items()` 取元素，并筛 `role == "AXButton"` 的可点面 |
 | T74 | **屏幕录制权限按 bundle 记账且 ad-hoc 重建后保留**：终端 python3 preflight=True 不代表 App 有；App 必须主动调过 `CGRequestScreenCaptureAccess()` 才进系统列表，授权后要重启进程；`py2app -A` 重建（cdhash 变）后授权仍在（实测两个新实例都能截到像素）。另：**像素度量必须在真 bug 构建上标定**——人工涂色两次骗过我们（先涂了个与背景同色，后是涂的位置与真胶囊内缩不一致，度量对真 bug 直接报 0.00）；把 panel.py 改回 `setBordered_(True)` 跑真机才定下阈值 | t74_block.py 标定（缺陷 0.35–0.53 vs 修复 0.87–0.96，断点 0.70）；P42 判据 `_block_check` |
 | T75 | **1.501s 是 messaging 超时的固定价，不是时长证据**：`err=-25204`（元素没答话）也花 1.501s，所以计时探针必须**同时记 err**；t76 对照组（同一时刻别家图标：搜狗拼音基线 1.501s/-25204、随后三轮 0.001s）证明这是托管树/别家进程的事。另：**App 被 SIGSTOP 时，MenuBarAgent 会把自家可点元素从托管树里摘掉**（t77 三轮全取不到元素）——所以下一次 P56 的 1.5s 既可能是“我们主线程真卡住”也可能是“探针没落到能答话的元素上”，单靠时长分不开 | P56 判据重写：只看 err=0 的样本、阶梯中采 3 轮取最好值，异常值当场补对照组；灵敏度由 t77 验证（真冻住时 err=0 样本为 0 → 判 FAIL） |
@@ -148,6 +148,9 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T87 | **TCC 辅助功能重授权工法（macOS 27）**：`tccutil reset Accessibility <bundleid>` 后到「设备控制和数据访问」页点「+」，弹的是**独立 AXWindow「打开」文件面板**（不是 AXSheet）；侧栏行合成点击只选中不导航、AXRow 无 AXPress 动作（-25206）；可靠路：先 activate 系统设置到前台（⌘⇧G 在后台试过不抵达——**合成按键只认前台 App**）→ ⌘⇧G 弹「前往文件夹」→ 对 focused AXTextField `SetAttributeValue(AXValue, 路径)` → Return → 选中条目 → AXPress「打开」；**「+添加」这条流不触发 SecurityAgent**，加完开关直接=1 且生效；要认证的是改已存在行的开关；列表显示开关=1 不代表生效（记录可能绑旧 cdhash，killall tccd 也刷不动） | 换 bundle/修签名后重授权走「+添加」一次到位；脚本 tmp/grant_ax2.py |
 | T88 | **SMAppService NotFound 不是签名坏**：它是「从未注册过」的正常初态（语义=关），正式包上 register 一次即成功：ON→status=1「已开启」、OFF→0「未开启」；旧判据拿 NotFound 当 SKIP 把打包版复测挡了道 | P95 判据改：未登记初态照拨不 SKIP；不能再拿 NotFound 当「包坏了」的信号 |
 | T89 | **NSSwitch 只吃坐标点击**：AXPress 不触发 action（onLaunchToggle_ 从未被调）、AXValue 拿不到（None）——拨动必须 `click_at(center(sw))`，判据只认状态行 label（App 对系统回读的答案） | 取证拨开关一律坐标点击；产品侧写后回读+失败拨回的设计正好扛住了这个怪癖 |
+| T90 | **拿到辅助功能授权后，未弹出的 NSMenu 也会以幽灵形态挂在 App 的 AX 树上**（size=(0,0)、位置 (0,屏底)），只看角色=误报「菜单弹了」（P48 假 FAIL 真因）；另：PyObjC 的 AXSize 是 AXValueRef，`.width` 直接取会 AttributeError（判据静默全假），必须 axutil.decode_value(…, kAXValueCGSizeType)。意外发现：授权后合成 HID 右键能真投递到自家状态项（T41 的「自家收不到」是没授权时代的现象） | find_menu 判据加 size>0；菜单弹出也可用 layer 101 窗口交叉验证 |
+| T91 | **屏幕录制权限同 T86 坑：重签=洗权限**，且列表残留开关=1 的旧记录会骗人；恢复流全程零人工：`tccutil reset ScreenCapture <bid>` → 重启 App → 疑难解答页「请求屏幕录制权限」（CGRequestScreenCaptureAccess）→ 系统自动把新条目加进列表且=开 → 再重启 App 生效（不像辅助功能那样要碰开关） | P42/P97 取证；辅助功能则走 T87 的「+添加」流 |
+| T92 | **设置格子的右键菜单要先左键点一下才弹得出**（T27 补充）：合成场景窗口常非 key（T19），裸右键弹不出 view 的 setMenu_，左键带活后才弹——批量跑时上一条用例的左键一直在暗中代劳，单跑就露馅（P52 假 FAIL 真因） | 取证右键前先左键热窗；§11「不依赖上一条」纪律再实锤一例 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -246,7 +249,10 @@ PeaseBar/
       setup.py iconfile/CFBundleIconFile）；签名链三坑与修复工序见 T86；重授权走 T87 一次到位（这次没要用户认证）；
       开机自启打包版复测 P95 PASS（未登记初态→register 成功→ON/OFF 回读全对，T88）；
       冒烟回归：t_p5 全包 P91–P99 全绿、t_p2b 核心条全绿（P44 首轮目标 App 哑复跑 PASS，P53 同族）、单测 99 项 → **节点提交**
-- [ ] P4.3 全量回归 + README 使用说明 → **v1.0 发布节点**
+- [x] P4.3 全量回归 + README 使用说明 → **v1.0 发布节点**
+      打包版同环境全量：t_p2b 15 条 + t_p4 10 条 + t_p5 9 条全 PASS、单测 99 项 OK；
+      回归拦出三件真事（T90 幽灵菜单、T91 录屏权限被重签洗掉、T92 右键菜单要左键热窗），
+      P43 判据改相对基线（本机 notched 环境前提已变，T72 加注）；README 重写为使用说明
 
 ## 9. 续作指引（重启后从这里开始）
 
@@ -366,6 +372,12 @@ PeaseBar/
   重启即见「全局快捷键已注册」；P95 打包版复测揭穿「NotFound=签名坏」误判（T88，未登记是从未注册的正常初态），
   判据修正后 PASS（ON→已开启、OFF→未开启，系统回读为准；拨动靠坐标点击，T89）；冒烟回归 t_p5 九条全绿 +
   t_p2b 核心条全绿 + 单测 99 项。**下一步：Phase 4c（全量回归 + README 使用说明 → v1.0 发布节点）。**
+- **2026-11-22（夜·Phase 4c 收官 v1.0 节点）**：打包版同环境全量回归 34 条 + 单测 99 项全绿。
+  回归没白跑，挖出三件真事：T90（授权后未弹出的 NSMenu 也在 AX 树上，find_menu 必须验 size>0，
+  顺带发现授权后合成右键已能真达自家图标）、T91（重签洗掉录屏权限，恢复流 reset+App 内请求+
+  重启，零人工）、T92（设置格子右键菜单要先左键热窗，P52 单跑才露馅）；P43 硬编码基线换相对基线
+  （本机 notched 不再恒 0，T72 加注）。README 重写为使用说明（功能/五页设置/权限/安装/已知边界）。
+  **Phase 4 全部收官；待办只剩发布工相关（版本号、dmg/zip 产物、GitHub Release）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
@@ -412,4 +424,8 @@ PeaseBar/
   路径坏了。做法：按图谱逐个试同类样本，任一命中真实反应即 PASS 并注明取证目标，全部静默才 FAIL；
 - **取证前先检查环境有没有别家同类占用者**：菜单栏管理器（Thaw/Bartender/Ice）运行中会把 PeaseBar
   控制图标原生收纳，造成连环假 FAIL（T85）——开工先 `pgrep` 确认并退出对照 App，再核对盘点项数正常；
+- **菜单类判据只认「真弹出」**（T90）：拿到辅助功能授权后未弹出的 NSMenu 也在 AX 树上（幽灵 size=(0,0)），
+  find_menu 必须要求解码后的 size>0（AXValueRef 不能直接 `.width`，走 decode_value），可用 layer 101 窗口交叉验证；
+- **TCC 列表里的开关=1 不是生效证据**（T86/T91）：重签/换 bundle 后旧记录失效但残影还在，
+  验收一律看 App 实际能力（日志「全局快捷键已注册」、截屏有像素），不看系统设置 UI；
 - 不在未授权的机器上静默降级——权限缺失时给出中文指引。
