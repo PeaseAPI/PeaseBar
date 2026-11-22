@@ -144,6 +144,10 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T83 | **PyObjC 桥成属性的方法不能用尾下划线调**：`NSProcessInfo.operatingSystemVersionString` 是属性，`operatingSystemVersionString_()` 抛 AttributeError；且 **action 回调里的异常被 AppKit 吞进系统日志**（我们的日志文件里连 traceback 都没有），表象是「按钮按了没反应」（P98 假 FAIL 真因）。另两条同晚取证：本机 PyObjC 无 `NSButtonSwitchType`（`NSButtonTypeSwitch` 画出来是方框），拨动开关用 **NSSwitch**；AX 属性 `AXEditable` 本机探针拿不到，找输入框只按 role=AXTextField | settings.py `onCopyVersion_`（属性直调）/`_page_general`（NSSwitch + 独立标题文本 + AXIdentifier） |
 | T84 | **SMAppService**：`mainAppService().status()` 枚举 NotRegistered=0/Enabled=1/RequiresApproval=2/NotFound=3；`registerAndReturnError_(None)` 返回 (ok, error) 元组；**adhoc 签名的 py2app -A 开发包报 NotFound**——开机自启的开关状态必须以系统回读为准（写后重读 status，失败拨回并把错误上屏），正式包的取证要等 Phase 4b 打包后（P95 开发包合法 SKIP） | settings.py `_LOGIN_STATUS` 映射 + `onLaunchToggle_` |
 | T85 | **菜单栏管理器互斥**：Thaw beta 运行中会把 PeaseBar 的控制图标**原生收纳**（盘点里没有 owner=com.pease.peasebar、菜单栏截图无图标，而 App 日志照常报「控制图标就绪」）——t_p2b 首轮 P42/P44/P45/P54/P56 连环 FAIL 全因此环。退出 Thaw 后盘点 14→26 项、图标回来 | 取证前 `osascript -e 'quit app "Thaw"'` 并核对盘点项数正常（写入 §11 规范） |
+| T86 | **py2app 正式打包三坑**：① 末尾自动 `codesign_adhoc` 抛 RuntimeError "Cannot sign bundle"，需手动 `codesign --force --deep -s -`；② 产物含**悬空 symlink** `Contents/Resources/lib/python3.14/config` → `spctl` 报 "a sealed resource is missing or invalid"，删掉再重签才能过 `codesign --verify --deep --strict`；③ **重签 = cdhash 变 = 辅助功能授权作废**（表象：CGEventTap 创建失败但 App 照常跑）——授权必须放在签名定稿之后，定稿后绝不再重签 | 构建工序固定：py2app → 删悬空 symlink → 手动重签 → 验签 → 部署 → 才去 TCC 授权 |
+| T87 | **TCC 辅助功能重授权工法（macOS 27）**：`tccutil reset Accessibility <bundleid>` 后到「设备控制和数据访问」页点「+」，弹的是**独立 AXWindow「打开」文件面板**（不是 AXSheet）；侧栏行合成点击只选中不导航、AXRow 无 AXPress 动作（-25206）；可靠路：先 activate 系统设置到前台（⌘⇧G 在后台试过不抵达——**合成按键只认前台 App**）→ ⌘⇧G 弹「前往文件夹」→ 对 focused AXTextField `SetAttributeValue(AXValue, 路径)` → Return → 选中条目 → AXPress「打开」；**「+添加」这条流不触发 SecurityAgent**，加完开关直接=1 且生效；要认证的是改已存在行的开关；列表显示开关=1 不代表生效（记录可能绑旧 cdhash，killall tccd 也刷不动） | 换 bundle/修签名后重授权走「+添加」一次到位；脚本 tmp/grant_ax2.py |
+| T88 | **SMAppService NotFound 不是签名坏**：它是「从未注册过」的正常初态（语义=关），正式包上 register 一次即成功：ON→status=1「已开启」、OFF→0「未开启」；旧判据拿 NotFound 当 SKIP 把打包版复测挡了道 | P95 判据改：未登记初态照拨不 SKIP；不能再拿 NotFound 当「包坏了」的信号 |
+| T89 | **NSSwitch 只吃坐标点击**：AXPress 不触发 action（onLaunchToggle_ 从未被调）、AXValue 拿不到（None）——拨动必须 `click_at(center(sw))`，判据只认状态行 label（App 对系统回读的答案） | 取证拨开关一律坐标点击；产品侧写后回读+失败拨回的设计正好扛住了这个怪癖 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -238,7 +242,10 @@ PeaseBar/
       + 超时输入框；疑难解答页权限对照/重新抓取/打开日志/盘点摘要；关于页版本+复制+源码链。
       真机 P91–P99：8 PASS + P95 SKIP（开发包 NotFound，待正式包复测）；P100 回归全绿（含 P53/P63/P64
       判据按环境漂移修正后复验，T85；单测 99 项）→ **节点提交**
-- [ ] P4.2 py2app 打包 + AppIcon 资产 + SMAppService 开机自启
+- [x] P4.2 py2app 正式打包（非 -A，numpy 捆入 114M）+ AppIcon（ImageGen 底图→PIL 裁 bbox 贴回正方→iconset→iconutil，
+      setup.py iconfile/CFBundleIconFile）；签名链三坑与修复工序见 T86；重授权走 T87 一次到位（这次没要用户认证）；
+      开机自启打包版复测 P95 PASS（未登记初态→register 成功→ON/OFF 回读全对，T88）；
+      冒烟回归：t_p5 全包 P91–P99 全绿、t_p2b 核心条全绿（P44 首轮目标 App 哑复跑 PASS，P53 同族）、单测 99 项 → **节点提交**
 - [ ] P4.3 全量回归 + README 使用说明 → **v1.0 发布节点**
 
 ## 9. 续作指引（重启后从这里开始）
@@ -251,7 +258,8 @@ PeaseBar/
 5. 代码注释一律中文（Pease 产品线规范）；UI 文案中文优先
 6. 启动/重启 PeaseBar 一律 `open /Applications/PeaseBar.app`（开发态构建：`python3 setup.py py2app -A && ditto dist/PeaseBar.app /Applications/PeaseBar.app`）；**切勿**终端直启二进制（T12：StatusBarServer 拒绝记账，图标不显示）
 7. 排障先看 `~/Library/Logs/PeaseBar.log`（app.py 落盘，UTF-8，见 T15）；open 启动的进程 stdout/stderr 不可见
-8. 新 bundle 首次跑需授权辅助功能（T16）：系统设置「设备控制和数据访问」页打开 PeaseBar 开关（需 Touch ID 认证）
+8. 新 bundle 首次跑需授权辅助功能（T16）：**必须排在签名定稿之后**（重签=洗授权，T86）；首选「+添加」流一次到位、
+   不需认证（T87，脚本 tmp/grant_ax2.py）；验收看日志「全局快捷键已注册」而非列表开关=1
 9. 测试脚本轮询等待面板窗口出现（盘点 ~2s，固定 sleep 会竞态）；参考 `tmp/t34_expand_click.py`/`tmp/t8_t12.py` 的 wait_panel 模式；进程存活/交接验证用 `pgrep`（T25）；双开唤醒测试用 `open -n`（T26）
 10. 纯逻辑单测：项目根目录 `python3 -m unittest discover -s tests -t .`（99 项，不需 GUI/AX 权限）
 
@@ -352,6 +360,12 @@ PeaseBar/
   P53 押单目标失效（Snapzy 当晚静默吞 AXPress，同一收纳路径在欧路词典/Qoder 上反应=有）→ 判据改「逐个
   试收纳格，任一命中即 PASS 并注明目标」后 PASS。单测 95→99 项全绿。定调复核（P99）：格子仍只显图标、
   编辑仍只在设置窗口、提示行仍在布局页。**下一步：Phase 4b（py2app 正式打包 + AppIcon，打包后回测 P95）。**
+- **2026-11-22（夜·Phase 4b 正式打包收官）**：AppIcon 从生成到 icns 入 Assets（ImageGen 1024→PIL 裁内容 bbox 贴回正方
+  →10 尺寸 iconset→iconutil）；setup.py 去 -A 正式打包，连过三坑（T86：py2app 自动签名 RuntimeError、悬空 symlink 毁
+  密封、重签洗授权）；签名定稿后走 T87 工法重授权（「+添加」+⇧⌘G+AX 写路径，全程没麻烦用户按指纹），
+  重启即见「全局快捷键已注册」；P95 打包版复测揭穿「NotFound=签名坏」误判（T88，未登记是从未注册的正常初态），
+  判据修正后 PASS（ON→已开启、OFF→未开启，系统回读为准；拨动靠坐标点击，T89）；冒烟回归 t_p5 九条全绿 +
+  t_p2b 核心条全绿 + 单测 99 项。**下一步：Phase 4c（全量回归 + README 使用说明 → v1.0 发布节点）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
