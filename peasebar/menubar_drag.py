@@ -42,14 +42,27 @@ def _post_mouse(kind, pt, flags, click=None):
 
 
 def command_drag(src, dst, steps=16, hold=0.02):
-    """⌘ 按住，从 src=(x,y) 直线拖到 dst=(x,y) 再松手。steps 越多越像真人。"""
+    """⌘ 按住，从 src=(x,y) 直线拖到 dst=(x,y) 再松手。
+
+    菜单栏状态项的 ⌘-拖有个坑：按下后得先短暂停留并小幅移动，系统才把它识别成
+    「拖拽抓取」；按下即高速平移会被当成一次点击，拖不动。所以这里：warp 后交还
+    光标→按下→原地抖两下起手→再匀速拖到 dst。"""
     CMD = Quartz.kCGEventFlagMaskCommand
     Quartz.CGWarpMouseCursorPosition(src)
-    time.sleep(0.06)
+    # 交还光标与硬件的关联，避免 warp 后事件坐标与实际指针不一致
+    try:
+        Quartz.CGAssociateMouseAndMouseCursorPosition(True)
+    except Exception:  # noqa: BLE001 — 老签名没有就直接跳过
+        pass
+    time.sleep(0.12)
     Quartz.CGEventPost(_HID, Quartz.CGEventCreateKeyboardEvent(None, _CMD_KEYCODE, True))
-    time.sleep(0.04)
+    time.sleep(0.06)
     _post_mouse(Quartz.kCGEventLeftMouseDown, src, CMD, click=1)
-    time.sleep(hold)
+    time.sleep(0.18)  # 抓取停留：让系统进入拖拽态
+    # 起手抖动：先小步移动两三下，触发拖拽识别
+    for jx in (3, 6, 3):
+        _post_mouse(Quartz.kCGEventLeftMouseDragged, (src[0] + jx, src[1]), CMD)
+        time.sleep(0.05)
     sx, sy = src
     dx, dy = dst
     for i in range(1, steps + 1):
@@ -92,12 +105,17 @@ def _notch_mid_x():
 
 def reorder(src_item, dst_item, after=True):
     """把 src_item 在真实菜单栏上拖到 dst_item 的前/后，达成目标顺序。"""
-    if not (movable(src_item) and src_item.frame and dst_item and dst_item.frame):
+    ok = movable(src_item) and src_item.frame and dst_item and dst_item.frame
+    if not ok:
+        print(f"[PeaseBar][拖] reorder 跳过：movable={movable(src_item)} "
+              f"src有帧={bool(src_item and src_item.frame)} dst有帧={bool(dst_item and dst_item.frame)}")
         return False
     df = dst_item.frame
     # after：落到 dst 右边界外一点；否则落到 dst 左边界内一点
     tx = df[0] + df[2] + 6 if after else max(2.0, df[0] - 6)
     y = _center(src_item.frame)[1]
+    print(f"[PeaseBar][拖] reorder {getattr(src_item,'owner_bundle_id','?')} "
+          f"src={_center(src_item.frame)} -> dst_x={round(tx,1)} after={after}")
     command_drag(_center(src_item.frame), (tx, y))
     return True
 
@@ -105,11 +123,15 @@ def reorder(src_item, dst_item, after=True):
 def hide(item):
     """把 item ⌘-拖进刘海：macOS 把它收进溢出区（下一次盘点 stashed=True）。"""
     if not (movable(item) and item.frame):
+        print(f"[PeaseBar][拖] hide 跳过：movable={movable(item)} 有帧={bool(item and item.frame)}")
         return False
     mx = _notch_mid_x()
     if mx is None:
+        print("[PeaseBar][拖] hide 跳过：未检测到刘海（_notch_mid_x=None）")
         return False  # 无刘海屏，这条路不适用（老屏用溢出按钮，另议）
     y = _center(item.frame)[1]
+    print(f"[PeaseBar][拖] hide {getattr(item,'owner_bundle_id','?')} "
+          f"src={_center(item.frame)} -> 刘海中点 x={round(mx,1)}")
     command_drag(_center(item.frame), (mx, y))
     return True
 

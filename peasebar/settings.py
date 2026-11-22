@@ -2368,6 +2368,10 @@ class SettingsController(NSObject):
         第三方图标时动手；苹果系统项对合成 ⌘-拖有抵抗（同 Thaw），一律跳过。"""
         if not self.opt("real_bar"):
             return
+        # 关键：真实菜单栏从开窗到现在可能已经移位（时钟/控制中心宽度变化、别的 App 增减图标），
+        # 缓存的 frame 早就过期，直接拿旧坐标 ⌘-拖会抓到空白处或别的图标，看起来就是「没反应」。
+        # 所以动手前先从实时盘点把坐标刷新一遍，再按 key 找回要拖的那枚。
+        self._resync_frames()
         item = self._item_by_key(key)
         if item is None:
             return
@@ -2388,6 +2392,8 @@ class SettingsController(NSObject):
         弹窗/永久隐藏区里的项本就被系统收着，没什么可排的。"""
         if not self.opt("real_bar") or sec != sections.SECTION_VISIBLE:
             return
+        # 同 _mirror_section_move：拖之前刷新实时坐标，避免拿过期 frame 拖空。
+        self._resync_frames()
         group = self.buckets.get(sec) or []
         idx = next((i for i, it in enumerate(group)
                     if sections.item_key(it) == key), None)
