@@ -18,17 +18,47 @@ def copy_attr(el, attr):
         return -1, None
 
 
+def _as_list(val):
+    """把 PyObjC 返回值统一转成 Python list。
+
+    关键怪癖：AX 数组在 PyObjC 里是 __NSArrayM/NSMutableArray，不是 Python list，
+    isinstance(x, (list, tuple)) 判不出来；不可迭代的 AXUIElementRef 则视为单元素。
+    """
+    if val is None:
+        return []
+    if isinstance(val, (list, tuple)):
+        return list(val)
+    try:
+        return list(val)  # NSArray/NSMutableArray 等可迭代对象
+    except TypeError:
+        return [val]      # 单元素（如 AXUIElementRef）
+
+
 def copy_children(el, attr):
-    """读取某属性下的子元素数组；属性值本身可能是单容器元素，自动下钻一层 AXChildren。"""
+    """读取某属性下的子元素数组。
+
+    实测结构三种（T6 扩展）：① 数组（__NSArrayM）；② 单容器元素（如
+    AXExtrasMenuBar → AXMenuBar，需下钻一层）；③ 同一结构在不同时刻可能返回
+    空树（MenuBarAgent 懒加载），由调用方重试。单元素按角色分流：容器角色
+    （AXMenuBar/AXGroup/AXMenu）才下钻，其余视为单项。
+    """
     err, val = copy_attr(el, attr)
     if err != 0 or val is None:
         return err, []
     if isinstance(val, (list, tuple)):
-        return err, list(val)
-    err2, kids = copy_attr(val, "AXChildren")
-    if err2 != 0 or kids is None:
-        return err, []
-    return err, list(kids)
+        return err, _as_list(val)
+    try:
+        iter(val)
+        return err, _as_list(val)  # 可迭代：就是数组
+    except TypeError:
+        pass
+    role = element_role(val)
+    if role in ("AXMenuBar", "AXGroup", "AXMenu"):
+        err2, kids = copy_attr(val, "AXChildren")
+        if err2 != 0 or kids is None:
+            return err, []
+        return err, _as_list(kids)
+    return err, [val]
 
 
 def decode_value(val, kind):

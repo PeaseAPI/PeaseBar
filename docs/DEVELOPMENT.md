@@ -94,7 +94,7 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T3 | 第三方图标仍留在**各自 App 进程**的 `AXExtrasMenuBar`（实测 13 个 App 全部枚举成功，`AXPress` 全可用） | 读与触发双通道可用；第三方不需要 MenuBarAgent |
 | T4 | MenuBarAgent 与第三方上报的坐标**均为 CG 坐标（左上原点，y 向下）**；转 AppKit：`y_appkit = screenH - y_cg - h` | 面板定位、遮挡判定统一用 CG，出口再转 |
 | T5 | AXValue 解码：`AS.AXValueGetValue(val, kAXValueCGPointType, None) → (ok, CGPoint)`（PyObjC 自动出结构体；`val.x` 不存在） | axutil 封装 |
-| T6 | `AXExtrasMenuBar` 属性返回值可能是单容器元素（取其 `AXChildren`）也可能直接是数组；MenuBarAgent 是 Group 包 Item，第三方直接是 Item | 盘点器做两级兼容 |
+| T6 | `AXExtrasMenuBar` 属性返回值可能是单容器元素（取其 `AXChildren`）也可能直接是数组；MenuBarAgent 是 Group 包 Item，第三方直接是 Item。**PyObjC 关键怪癖**：AX 数组是 `__NSArrayM/NSMutableArray`，`isinstance(x, (list, tuple))` 判不出来，必须用可迭代性判断（axutil._as_list）；MenuBarAgent 子树为**懒加载**，闲置后查询返回空 Group，反复轮询可唤醒 | 盘点器统一走 axutil.copy_children + 空树重试 |
 | T7 | 刘海区：`NSScreen.auxiliaryTopLeftArea/auxiliaryTopRightArea` 拼不满整行即为有刘海；本机刘海 x∈[918,1138]（宽 220pt），菜单栏高 38pt；`safeAreaInsets` 在 27 只报 top，**不能**用 | 遮挡判定 = 图标矩形与刘海矩形相交 |
 | T8 | CGWindowList 层 24/25 在 27 上只剩 Window Server 的 "Menubar" 背景条；**图标没有自己的窗口** | 位图/位置不能走窗口列表，只能走 AX |
 | T9 | `NSStatusItem Preferred Position` 经典存储仅个别域残留（TextInputMenuAgent、CleanMyMac5.Menu） | 顺序写入不靠它；走 ⌘拖拽合成（E2）或 27 顺序文件（需"菜单栏布局访问"TCC，Python 难授权，列为受限路线） |
@@ -102,6 +102,7 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T11 | **菜单栏准入门**（系统设置→菜单栏→允许在菜单栏显示）：列表**自动注册**——App 首次成功创建状态项即入列（TestItem/PeaseBar 均实测）；无“+”手动添加按钮；每 App 一个开关（默认开），关闭后“无法再在菜单栏显示” | 无需引导用户手动放行；但必须保证状态项**尽早创建**（见 T12） |
 | T12 | **状态项显示三要素**（E5 对照实验：最小 Swift App TestItem vs PeaseBar）：① 启动不能被模态弹窗阻塞——runModal 卡在状态项创建之前 → 图标永不出现且永不入准入门（修复前 PeaseBar 正是此因）；② 必须走 LaunchServices 正规启动（`open`/Finder/launchd），终端 `nohup` 直启 bundle 二进制时 StatusBarServer 拒绝记账 → 图标不显示且进程 `AXExtrasMenuBar` 报 -25212；③ 图标过多时新图标被**自动收纳**进溢出区（« 按钮）——正常业务非故障 | app.py 启动顺序已按此修复（状态项先建、权限检查非阻塞）；测试/运行一律 `open` 启动 |
 | T13 | **AX 可见性联动**：图标被收纳（不可见）时，其 owner 进程 `AXExtrasMenuBar` 返回 -25212；原生按钮展开后同一进程 err=0。即 E1 “被收纳图标不在 AX”的扩展：**连 owner 自己的 AX 树都没有它** | F1 盘点需“展开收纳区→枚举→diff→收起”舞步（含 PeaseBar 自举）；-25212 可用作“图标当前不可见”信号 |
+| T14 | **第三方 AX 通道依赖菜单栏可见性**：全屏 App 隐藏菜单栏时，**所有**第三方进程 `AXExtrasMenuBar` 报 -25212（含可见图标）；MenuBarAgent 托管的系统图标树不受影响。激活非全屏 App 恢复菜单栏后立即恢复。且 -25212 无法区分「无状态项 / 被收纳 / 菜单栏隐藏」，盘点器不做精确判定 | 盘点/移动前先确认非全屏；后台守护（activationPolicy==2）直接跳过枚举 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -154,7 +155,7 @@ PeaseBar/
 - [x] P0.6 骨架：`__main__/app.py` AppKit 生命周期 + Accessory + 单实例 + 右键菜单可退出；启动顺序修复（状态项先建、权限引导非阻塞）；**E5** 准入机制对照实验：状态项自动入准入门、图标现身收纳展开区（证据 `tmp/bar_peasebar_icon.png`、`tmp/bar_expanded_zoom.png`、`tmp/allow_list_1.png`）→ **节点提交**
 
 ### Phase 1 v1 核心（F1–F3, F8）
-- [ ] P1.1 `axutil.py` + `inventory.py`（含遮挡判定、两级结构兼容、轮询刷新）
+- [x] P1.1 `axutil.py` + `inventory.py`（含遮挡判定、两级结构兼容、轮询刷新）：终端取证通过——系统 4 项（Wi‑Fi/控制中心/时钟/收纳按钮，名称坐标全对）+ 第三方 12 项与菜单栏实际一致；修复 `__NSArrayM` 判断怪癖与 MenuBarAgent 懒加载空树（T6/T14 取证写入 §5）
 - [ ] P1.2 `control_item.py`（左键/右键）
 - [ ] P1.3 `panel.py` 救援面板（网格、刘海徽标、AXPress 触发、失焦收回）
 - [ ] P1.4 `tmp/test-plan.md` 逐条真机执行 + 截图取证 → **节点提交**
@@ -196,6 +197,10 @@ PeaseBar/
   排障「图标不显示」定案三层根因（权限弹窗阻塞启动 / 终端直启链被拒 / 自动收纳属正常业务），
   全部取证并修复：T11–T13、E5 写入 §5/§6，app.py 启动顺序改为「状态项先建、权限非阻塞」。
   **下一步：Phase 1（P1.1 盘点引擎 axutil+inventory）→ P1.3 面板。**
+- **2026-11-22（傍晚）**：P1.1 盘点引擎完成并终端取证（系统 4 项 + 第三方 12 项与实际一致）。
+  过程中挖出两个基础事实：PyObjC AX 数组是 `__NSArrayM`（isinstance 判不出）与 MenuBarAgent
+  懒加载空树（轮询唤醒），连同 T14（全屏隐藏菜单栏时第三方 AX 全线 -25212）写入 §5。
+  **下一步：P1.3 救援面板（panel.py）→ test-plan 真机取证 → 节点提交。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
