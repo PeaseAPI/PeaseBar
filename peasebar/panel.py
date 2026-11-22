@@ -4,15 +4,21 @@
 
 交互（验收标准见 docs/DEVELOPMENT.md F3/F4/F5）：
 - 左键控制图标或全局快捷键 ⌥⌘B → 面板出现在控制图标正下方（居中锚定）；
-- **只列被隐藏的图标**（照 Thaw：弹窗不是全量镜像，菜单栏画着的不出）：
+- **只列被隐藏的图标、且只有一张干净的网格**（照 Thaw 的 overflow 面板：
+  无头部标题、无分区标题、无底部按钮，图标居中排布）：
   弹窗显示区（SECTION_HIDDEN）+ 逻辑上在菜单栏但此刻被系统收纳/刘海遮挡的项；
-  永久隐藏区不展示；空区不占位，全空时给一行空态提示；
+  永久隐藏区不展示；全空时给一行空态提示；
 - 单击面板内图标 → 触发真实图标，面板随即收起：画在可见段上的合成右键（弹其原生
   状态菜单，T17），被系统收纳的合成点击会打偏，改走 AXPress 直接投递；
 - 分区编辑不在本面板进行（参照 Thaw：编辑在设置窗口），右键控制图标 →「设置…」；
-- 「展开/收起收纳区」按钮联动原生收纳按钮（F12 提前接入，核心场景：
-  被刘海遮挡/被收纳的图标从这里找回——展开后再点图标即可弹出菜单）；
+- 「展开/收起收纳区」联动原生收纳按钮（F12）已移到控制图标右键菜单——面板本体不留按钮；
 - 失焦自动收回（全局鼠标监听，T19）+ 超时自动收回（F5，默认 8s，config.json 可改，0=不超时）。
+
+性能（T98，用户反馈「点一下卡半天、连点卡死」的修法）：
+- 盘点 + 全屏截图像素是重活（最坏秒级），绝不在点击后的主线程同步跑：
+  show() 用上一次数据快照**立即渲染**，随后后台线程重新采集，采完回主线程就地更新；
+- _collecting 标志防重入：连点只切显隐，不会排队多份采集把主线程事件压垮；
+- app.py 启动即 prewarm()，第一次点开也有快照可用。
 
 实现要点：
 - 图标位图由 capture 模块截条带裁剪而来，需「屏幕录制」权限；缺权限或抓取失败
@@ -44,21 +50,19 @@ from AppKit import (
 )
 from Foundation import (NSMakePoint, NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer)
 import objc
+import threading
+import time
 
 from peasebar import capture, inventory, sections, trigger
 
-# 面板几何（格子只放图标，取小方格；PANEL_WIDTH 保持 468，测试脚本据此识别窗口）
+# 面板几何：单张干净网格（Thaw 式），格子只放图标、四周留呼吸感；
+# PANEL_WIDTH 保持 468，测试脚本据此识别窗口
 PANEL_WIDTH = 468
 GRID_COLS = 9
-CELL_W, CELL_H = 44, 38
-CELL_GAP = 4
-EDGE = 8
-HEADER_H = 26
-SECTION_H = 22  # 区标题行高（F4）
-FOOTER_H = 36
-
-# 刘海遮挡角标（画在格子左上角，不占文字位）
-NOTCH_BADGE = "\u25a8"  # ▨
+CELL_W, CELL_H = 44, 40
+CELL_GAP = 6
+EDGE = 10
+EMPTY_H = 28  # 空态提示行高
 
 
 class KeyPanel(NSPanel):
@@ -82,6 +86,9 @@ class RescuePanel(NSObject):
         self.panel = None
         self._monitor = None  # 全局鼠标按下监听（失焦收回，不依赖 key 状态）
         self._timeout_timer = None  # 超时自动收回（F5）
+        self._snapshot = None    # 上一次采集的数据快照：无它也能秒开渲染
+        self._collecting = False  # 后台采集进行中标记（防重入）
+        self._pending = None      # 后台采完待回主线程的结果
         return self
 
     # ---------- 对外接口 ----------
@@ -96,11 +103,16 @@ class RescuePanel(NSObject):
             self.show()
 
     def show(self):
-        """盘点 → 建网格 → 定位在控制图标正下方 → 显示。"""
+        """秒开：先用快照渲染显示，再后台采集刷新（T98：点击响应与重活解耦）。"""
+        t0 = time.perf_counter()
         print("[PeaseBar] 面板 show 开始")
         try:
-            self._rebuild()
-            print(f"[PeaseBar] 网格完成，frame={self.panel.frame()}")
+            if self._snapshot is None:
+                # 首次无快照（prewarm 还没采完）：只能同步采一次，仅此一回
+                self._snapshot = self._collect()
+            self._render(self._snapshot)
+            print(f"[PeaseBar] 网格完成（{time.perf_counter() - t0:.3f}s），"
+                  f"frame={self.panel.frame()}")
             self.panel.makeKeyAndOrderFront_(None)
             NSApp.activateIgnoringOtherApps_(True)
             # 失焦收回（F5）：合成事件场景 App 激活是半吊子状态（isActive=False，
@@ -111,6 +123,7 @@ class RescuePanel(NSObject):
                 self._monitor = NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
                     NSEventMaskLeftMouseDown, self._outsideClick_)
             self._arm_timeout()  # 超时自动收回（F5）
+            self._start_background_refresh()  # 显示后再换最新数据，不阻塞点击响应
             print(f"[PeaseBar] 面板已显示：visible={self.panel.isVisible()}，"
                   f"key={self.panel.isKeyWindow()}，active={NSApp.isActive()}")
         except Exception:
@@ -156,50 +169,92 @@ class RescuePanel(NSObject):
                 NSMakeRect(f.origin.x, f.origin.y, PANEL_WIDTH, height), True)
         return self.panel
 
-    def _rebuild(self):
-        """盘点 → 只挑「被隐藏的图标」分组展示 → 重建面板内容（每次弹出/刷新调用）。
-
+    # ---------- 内部：采集（重活，可后台）与渲染（主线程） ----------
+    
+    def prewarm(self):
+        """启动后后台预热快照：第一次点击也能秒开。"""
+        self._start_background_refresh()
+    
+    def refresh_now(self):
+        """设置变更/展开收纳后：作废位图缓存并后台刷新（面板开着就即时更新）。"""
+        capture.invalidate_cache()
+        if self._snapshot is None:
+            self._snapshot = self._collect()
+            if self.panel is not None and self.panel.isVisible():
+                self._render(self._snapshot)
+        else:
+            self._start_background_refresh()
+    
+    def _collect(self):
+        """纯数据采集：盘点 → 挑「被隐藏的图标」→ 位图。不做任何 AppKit UI，可子线程调用。
+    
         照 Thaw：弹窗不是全量镜像——菜单栏此刻画着的图标不出现在面板里；
         面板只负责找回「看不见」的：弹窗显示区（用户藏起来的）+
         逻辑上在菜单栏但被系统收纳/刘海遮挡的（系统藏起来的）。永久隐藏不展示。
         """
-        # 收纳按钮不在网格重复出现（底部有专用按钮）
         all_items, _ = inventory.list_items()
-        self.items = [m for m in all_items if not m.is_stash_button]
+        items = [m for m in all_items if not m.is_stash_button]
         cfg = sections.load_config()
-        buckets = sections.plan_sections(self.items, cfg)
+        buckets = sections.plan_sections(items, cfg)
         hidden_group = buckets[sections.SECTION_HIDDEN]
         # 可见区里此刻没画在菜单栏上的（被收纳/被刘海挡）：救援目标
         lost_group = [m for m in buckets[sections.SECTION_VISIBLE]
                       if m.stashed or m.notched]
-        notched = sum(1 for m in self.items if m.notched)
-        stashed = sum(1 for m in self.items if m.stashed)
+        stashed = sum(1 for m in items if m.stashed)
+        notched = sum(1 for m in items if m.notched)
+        # 单张网格：先用户藏的、再系统藏的（两类的区分留给 tooltip 说明）
+        group = hidden_group + lost_group
+        # 图标位图（只显示图标）：截不到像素时 capture_icons 会用兕底图标顶上；
+        # 位置没变时代际缓存命中，后台刷新也不会重截
+        images, no_perm = capture.capture_icons(items)
         print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，弹窗显示 {len(hidden_group)} 项，"
-              f"被收纳 {stashed} 项，刘海 {notched} 项；"
-              f"分区：菜单栏 {len(buckets[sections.SECTION_VISIBLE])}"
-              f" / 弹窗 {len(hidden_group)}"
-              f" / 永久隐藏 {len(buckets[sections.SECTION_ALWAYS_HIDDEN])}")
+              f"被收纳 {stashed} 项，刘海 {notched} 项；网格 {len(group)} 项"
+              + ("，无屏幕录制权限→兕底图标" if no_perm else ""))
+        return {"items": items, "images": images, "group": group}
+    
+    def _start_background_refresh(self):
+        """后台采集（防重入）：同一时刻最多一份，点击再快也不会排队堆积压垮主线程。"""
+        if self._collecting:
+            return
+        self._collecting = True
+        threading.Thread(target=self._collect_worker, daemon=True).start()
+    
+    def _collect_worker(self):
+        """子线程：只采纯数据，采完回主线程渲染（UI 绝不在子线程碰）。"""
+        try:
+            self._pending = self._collect()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self._pending = None
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "_refreshDone:", None, False)
+    
+    def _refreshDone_(self, _sender):
+        """主线程回调：快照落袋；面板还开着就地更新（不抢焦点、不重设超时）。"""
+        self._collecting = False
+        snap = self._pending
+        self._pending = None
+        if snap is None:
+            return
+        self._snapshot = snap
+        if self.panel is not None and self.panel.isVisible():
+            self._render(snap)
+    
+    @objc.python_method
+    def _render(self, snap):
+        """主线程渲染单张干净网格：无标题、无按钮、图标居中（Thaw 式）。
 
-        # 图标位图（只显示图标）：截不到像素时 capture_icons 会用兜底图标顶上
-        images, no_perm = capture.capture_icons(self.items)
-        if no_perm:
-            print("[PeaseBar] 无屏幕录制权限 → 格子用兜底图标（App 图标/系统符号）")
-
-        # 高度：头部 + Σ(非空区标题 + 该区网格行) + 底部；空区整段不占位
-        groups = []  # (区标题, [item])，按展示顺序
-        if hidden_group:
-            groups.append((sections.SECTION_LABELS[sections.SECTION_HIDDEN], hidden_group))
-        if lost_group:
-            groups.append(("被系统收纳 / 遮挡", lost_group))
-        height = EDGE + HEADER_H + FOOTER_H + EDGE
-        for _title, group in groups:
-            rows = (len(group) + GRID_COLS - 1) // GRID_COLS
-            height += SECTION_H + rows * (CELL_H + CELL_GAP)
-        if not groups:
-            height += SECTION_H  # 全空：一行空态提示
-
+        必须 @objc.python_method：单参且无尾下划线的名字会被 PyObjC 拿去对号
+        运行时里已存在的 0 参选择子 _render，建类即 BadPrototypeError（T41 变体，
+        启动装配崩、面板快捷键全挂——日志里抓到的真因）。"""
+        items, images, group = snap["items"], snap["images"], snap["group"]
+        self.items = items  # onIconClick_ 按 tag 取格，必须与快照一致
+        rows = (len(group) + GRID_COLS - 1) // GRID_COLS if group else 1
+        height = EDGE * 2 + (rows * (CELL_H + CELL_GAP) - CELL_GAP
+                             if group else EMPTY_H)
         panel = self._ensure_panel(height)
-
+    
         # 内容视图：毛玻璃背景 + 手动布局
         content = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, PANEL_WIDTH, height))
         blur = NSVisualEffectView.alloc().initWithFrame_(content.frame())
@@ -209,84 +264,32 @@ class RescuePanel(NSObject):
         blur.setWantsLayer_(True)
         blur.layer().setCornerRadius_(12)
         content.addSubview_(blur)
-
-        # 头部标题：只报「看不见」的规模，不再报全量
-        header = NSTextField.labelWithString_(
-            f"菜单栏救援 · 弹窗隐藏 {len(hidden_group)} 项"
-            + (f" · 被系统收纳/遮挡 {len(lost_group)} 项" if lost_group else "")
-        )
-        header.setFont_(NSFont.boldSystemFontOfSize_(12))
-        header.setFrame_(NSMakeRect(EDGE, height - HEADER_H, PANEL_WIDTH - 2 * EDGE, HEADER_H))
-        content.addSubview_(header)
-
-        # 分区绘制（从顶部往下：区标题 + 该区网格；AppKit y 轴向上，逐区下移）。
-        # 格子 tag 必须是全量 items 的下标（onIconClick_ 按 tag 取 self.items），
-        # 分桶只影响展示顺序，用 id 映射还原原索引
-        id_to_idx = {id(m): i for i, m in enumerate(self.items)}
-        top = height - HEADER_H
-        if not groups:
-            empty = NSTextField.labelWithString_(
-                "没有隐藏的图标：所有图标此刻都在菜单栏上")
+    
+        if not group:
+            empty = NSTextField.labelWithString_("没有隐藏的图标")
             empty.setFont_(NSFont.systemFontOfSize_(11))
             empty.setTextColor_(NSColor.secondaryLabelColor())
-            empty.setFrame_(NSMakeRect(EDGE, top - SECTION_H,
-                                       PANEL_WIDTH - 2 * EDGE, SECTION_H))
+            empty.setAlignment_(1)  # 居中
+            empty.setFrame_(NSMakeRect(EDGE, EDGE + (EMPTY_H - 16) // 2,
+                                       PANEL_WIDTH - 2 * EDGE, 16))
             content.addSubview_(empty)
-            top -= SECTION_H
-        for title_text, group in groups:
-            title = NSTextField.labelWithString_(
-                f"{title_text} · {len(group)}")
-            title.setFont_(NSFont.boldSystemFontOfSize_(10))
-            title.setTextColor_(NSColor.secondaryLabelColor())
-            title.setFrame_(NSMakeRect(EDGE, top - SECTION_H,
-                                       PANEL_WIDTH - 2 * EDGE, SECTION_H))
-            content.addSubview_(title)
-            top -= SECTION_H
-            rows = (len(group) + GRID_COLS - 1) // GRID_COLS
+        else:
+            # 水平居中：按最宽一行的实际宽度起算，不再贴左边留大空位
+            cols = min(len(group), GRID_COLS)
+            grid_w = cols * (CELL_W + CELL_GAP) - CELL_GAP
+            x0 = (PANEL_WIDTH - grid_w) / 2
+            # 格子 tag 必须是全量 items 的下标（onIconClick_ 按 tag 取 self.items），
+            # 网格是展示顺序，用 id 映射还原原索引
+            id_to_idx = {id(m): i for i, m in enumerate(items)}
+            top = height - EDGE
             for idx, item in enumerate(group):
                 row, col = divmod(idx, GRID_COLS)
-                x = EDGE + col * (CELL_W + CELL_GAP)
+                x = x0 + col * (CELL_W + CELL_GAP)
                 y = top - CELL_H - row * (CELL_H + CELL_GAP)
                 content.addSubview_(
                     self._make_cell(item, id_to_idx[id(item)],
                                     images.get(sections.item_key(item)), x, y))
-                if item.notched:  # 角标压在格子上方（后加的子视图层级更高）
-                    badge = NSTextField.labelWithString_(NOTCH_BADGE)
-                    badge.setFont_(NSFont.boldSystemFontOfSize_(9))
-                    badge.setTextColor_(NSColor.systemOrangeColor())
-                    badge.setFrame_(NSMakeRect(x + 2, y + CELL_H - 14, 12, 12))
-                    content.addSubview_(badge)
-            top -= rows * (CELL_H + CELL_GAP)
-
-        # 底部操作行
-        footer_y = EDGE
-        stash_open = inventory.stash_revealed()
-        stash_label = "收起收纳区" if stash_open else "展开收纳区"
-        self.btn_stash = NSButton.alloc().initWithFrame_(
-            NSMakeRect(EDGE, footer_y, 130, 24))
-        self.btn_stash.setTitle_(stash_label)
-        self.btn_stash.setBezelStyle_(0)
-        self.btn_stash.setFont_(NSFont.systemFontOfSize_(11))
-        self.btn_stash.setTarget_(self)
-        self.btn_stash.setAction_("onStashClick:")
-        content.addSubview_(self.btn_stash)
-
-        btn_refresh = NSButton.alloc().initWithFrame_(
-            NSMakeRect(EDGE + 138, footer_y, 76, 24))
-        btn_refresh.setTitle_("刷新")
-        btn_refresh.setBezelStyle_(0)
-        btn_refresh.setFont_(NSFont.systemFontOfSize_(11))
-        btn_refresh.setTarget_(self)
-        btn_refresh.setAction_("onRefreshClick:")
-        content.addSubview_(btn_refresh)
-
-        hint = NSTextField.labelWithString_("左键=触发图标 · 分区编辑请进设置")
-        hint.setFont_(NSFont.systemFontOfSize_(10))
-        hint.setTextColor_(NSColor.secondaryLabelColor())
-        hint.setAlignment_(2)  # 右对齐
-        hint.setFrame_(NSMakeRect(PANEL_WIDTH - 240, footer_y + 4, 232, 18))
-        content.addSubview_(hint)
-
+    
         panel.setContentView_(content)
         self._position_panel(height)
 
@@ -363,20 +366,11 @@ class RescuePanel(NSObject):
 
         trigger.open_item_async(item, done)
 
-    def onStashClick_(self, sender):
-        """展开/收起系统收纳区，然后刷新网格（图标像素变了，同时使位图缓存失效）。"""
+    def toggle_stash(self):
+        """展开/收起系统收纳区（F12，已移到控制图标右键菜单，面板本体不留按钮）：
+        操作后作废位图缓存并刷新，面板开着就即时更新。"""
         inventory.set_stash_revealed(not inventory.stash_revealed())
-        capture.invalidate_cache()
-        self._rebuild()
-        self.panel.makeKeyAndOrderFront_(None)
-        self._arm_timeout()  # 交互续期，避免操作中突然收回
-
-    def onRefreshClick_(self, sender):
-        """手动刷新盘点（图标可能增删/位移，位图缓存一并作废）。"""
-        capture.invalidate_cache()
-        self._rebuild()
-        self.panel.makeKeyAndOrderFront_(None)
-        self._arm_timeout()  # 交互续期
+        self.refresh_now()
 
     # ---------- 超时自动收回（F5） ----------
 

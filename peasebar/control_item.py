@@ -51,6 +51,7 @@ class ControlItem(NSObject):
             return None
         self.on_left = on_left
         self.on_settings = None  # 打开设置窗口的回调（app.py 接线，F14）
+        self.on_stash = None  # 展开/收起收纳区的回调（app.py 接线，F12；面板瘦身后来到的位置）
         self.menu = None
         return self
 
@@ -66,18 +67,22 @@ class ControlItem(NSObject):
         self.menu = NSMenu.alloc().initWithTitle_("PeaseBar")
         mi_settings = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "设置…", "openSettings:", "")
+        # 收纳区开关：救援面板瘦身（照 Thaw 只留纯网格）后，按钮移到这里
+        mi_stash = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "展开收纳区", "toggleStash:", "")
         mi_about = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "关于 PeaseBar", "showAbout:", "")
         mi_perms = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "检查辅助功能权限", "checkPermission:", "")
         mi_quit = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "退出 PeaseBar", "terminate:", "q")
-        for mi in (mi_settings, mi_about, mi_perms, mi_quit):
+        for mi in (mi_settings, mi_stash, mi_about, mi_perms, mi_quit):
             # 必须 setTarget_：nil-targeted action 沿响应链查找，而 ControlItem
             # 不在响应链里，点击菜单项后 action 会落空（实测 T14 首败根因）
             mi.setTarget_(self)
             self.menu.addItem_(mi)
-        self.menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 1)
+        self.menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 2)
+        self.mi_stash = mi_stash  # 右键弹前按实时状态刷新标题，留强引用
 
         # 按下即回调（左右键都进 on_click，再按事件类型分发）
         button.setTarget_(self)
@@ -140,7 +145,13 @@ class ControlItem(NSObject):
             print("[PeaseBar] 警告：主点击回调未接线")
 
     def _popup_menu(self):
-        """右键弹菜单：临时挂 NSMenu 到状态项，借 performClick 触发弹层。"""
+        """右键弹菜单：临时挂 NSMenu 到状态项，借 performClick 触发弹层。
+
+        弹前按实时状态刷新「展开/收起收纳区」标题（一次 AX 往返，只在右键时发生）。"""
+        from peasebar import inventory
+        if getattr(self, "mi_stash", None) is not None:
+            self.mi_stash.setTitle_(
+                "收起收纳区" if inventory.stash_revealed() else "展开收纳区")
         self.item.setMenu_(self.menu)
         try:
             self.item.button().performClick_(None)
@@ -154,6 +165,14 @@ class ControlItem(NSObject):
             self.on_settings()
         else:
             print("[PeaseBar] 警告：on_settings 未接线")
+
+    def toggleStash_(self, sender):
+        """菜单「展开/收起收纳区」：联动原生收纳按钮（F12，面板瘦身后的入口）。"""
+        print("[PeaseBar] 菜单动作 toggleStash 触发")
+        if self.on_stash is not None:
+            self.on_stash()
+        else:
+            print("[PeaseBar] 警告：on_stash 未接线")
 
     def showAbout_(self, sender):
         """关于窗口。"""

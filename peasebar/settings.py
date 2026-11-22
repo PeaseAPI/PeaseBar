@@ -209,7 +209,7 @@ class SettingsController(NSObject):
         hints = []
         if self.stashed_count:
             hints.append(f"有 {self.stashed_count} 项被系统收纳：菜单栏挤不下，"
-                         f"可在面板「展开收纳区」找回，或选中后改为弹窗显示。")
+                         f"可在右键菜单「展开收纳区」找回，或选中后改为弹窗显示。")
         if self.notched_count:
             hints.append(f"有 {self.notched_count} 项被刘海遮挡：够不着，可改为弹窗显示腾位置。")
         # 有权限却一张真像素都没截到 = 菜单栏此刻没画出来（全屏 App 遮住）。

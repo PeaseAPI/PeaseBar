@@ -156,6 +156,8 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T95 | **Thaw 弹窗语义是「只列看不见的」**（用户实锤截图批评后重读 tmp/Thaw-app）：救援面板不是全量镜像，只列用户藏起来的（弹窗显示区）+ 系统藏起来的（被收纳/被刘海遮挡）；永久隐藏不展示；全空给一行空态。实现陷阱：格子 tag 必须仍是全量 self.items 下标（onIconClick_ 按 tag 取），分桶只影响展示顺序，用 id→idx 映射还原，直接拿分组下标当 tag 会触发错家 App | panel.py `_rebuild`（hidden_group+lost_group）；配套三区文案改「菜单栏显示/弹窗显示/永久隐藏」（sections.SECTION_LABELS 唯一源，探针判据字符串同步） |
 | T96 | **正式包可只替换 python314.zip 内 peasebar/*.pyc 热更新**：TCC 记账看主二进制 cdhash，Resources 里的 zip 不在判定链上 → 签名/双权限全不动，避开 T86③「重签=洗权限+认证框」全套代价；工序：py_compile 编译同名 .pyc → `zip archive.zip peasebar/*.pyc` 原地更新 → pkill+open。注意：这会破包内密封（codesign --verify 报 invalid），取证/开发轮可用，发布产物必须重新完整打包+签名 | Phase 6 取证全程走此路（tmp/t_p6b.py），未碰一次认证框；发布前回到 T86 定型工序 |
 | T97 | **半截图标两类根因（用户截图实锤，推翻 T93 剥切法）**：①图标+数字复合条——knockout 抠像把图标内部镂空也当背景抠掉，split_leading_glyph 找「透明缝」会切进图标身体（钉钉翅膀/QQ铃/搜狗S/Qoder羽毛/LaunchOS 全中招）；②AX frame 宽 < 真实绘制宽（时钟 frame 36pt 实画「22:31」约 70pt、控制中心同理）——方形比例但裁窗口装不下，右沿必半截。取证法：把 capture_icons 最终显示图逐张落盘拼 grid 目视（tmp/p6a_final_grid.png 实锤 7 项）。修法：放弃剥切，宽条（trim 后 w>h×1.4）与贴边条（touches_side_edge：抠像后墨迹贴首/末列）一律拒收走 App 图标兜底——**宁误杀宽纯图标（剪刀/微信）也不出半截**；真机 Q71 复核 18 张显示图零半截 | capture.py 删 split_leading_glyph/GAP_MIN_PX，新增 touches_side_edge；单测 TestSideEdge+TestWideReject（105→107） |
+| T98 | **面板卡顿根因=主线程同步重活**：show() 里盘点（AX 全量，最坏秒级）+全屏截图+numpy 抠图 25 张全跑在主线程 → 「点一下卡半天」；连点时事件排队叠加每份全量重建 → 「多次点击卡死」。修法：采集/渲染拆分——_collect() 纯数据（无 AppKit UI，可子线程），show() 用上一次快照立即渲染，后台线程重采（_collecting 防重入，同一时刻最多一份）采完 performSelectorOnMainThread 回来就地更新；启动 prewarm() 让首点也有快照；位图靠代际缓存命中不重截 | panel.py _collect/_render/_start_background_refresh/prewarm/refresh_now；真机 S1 0.001–0.026s、S2 六连击不卡死 |
+| T99 | **PyObjC 选择子对号坑（T41 变体）**：NSObject 子类里新增单参且名不以 `_` 结尾的方法（`_render(self, snap)`），若运行时已存在同名 0 参选择子（此处 `_render`），建类即 BadPrototypeError，启动装配全挂且 stdout 看不到（崩在日志重定向前，只能事后看 ~/Library/Logs/PeaseBar.log 的 traceback）。多参方法（_make_cell 5 参/_position_panel 1 参但选择子带冒号匹配）不炸，故旧代码一直没事——新名字撞不撞已有选择子全看运气，**一律显式 @objc.python_method 才稳**；部署后第一步看启动日志再跑探针 | panel.py _render 加 @objc.python_method；探针首跑全 FAIL 反被成为实锤通道 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -281,6 +283,16 @@ PeaseBar/
       右键菜单/tooltip/提示行同步；前两会可编辑顺序真机 Q76（⌥→ 换序+⌘Z）PASS
 - [x] Q77 回归：t_p2b 五条全 PASS（新判据字符串）+ t_p6 Q61–Q68 全 PASS + t_p4 P81/P82/P86
       全 PASS；单测 107 项；Q78 环境还原 diff CONFIG_SAME；部署走 T96 .pyc 热替换未洗权限
+
+### Phase 7 面板秒开 + Thaw 式干净网格（用户 2026-11-22 再反馈：卡顿+混乱）
+- [x] P7a 性能（T98）：快照秒开+后台采集防重入+启动预热；真机 S1 按下→出现 0.001–0.026s
+      （旧版秒级），S2 六连击不卡死、奇偶状态机不错乱
+- [x] P7b 面板瘦身：删头部/区标题/底部「展开收纳区·刷新·提示」，单张居中网格（S3 格子数==
+      按钮数零杂文本；S4 首格 x=61±4pt、行/列距 50pt）；「展开收纳区」移控制图标右键菜单
+      （S5 自动化不可达如实 SKIP，同构接线已由 openSettings_ 实证，需真鼠标人工复核）
+- [x] P7c 过程中发现并修掉 T99（PyObjC 选择子对号坑，启动装配全挂）；回归 S7（Q73 口径）
+      + S8（t_p2b P45–P47、t_p4 P81/P82/P86 共 12 条）全 PASS；S9 环境还原 CONFIG_SAME；
+      计划 tmp/test-plan-phase7.md，探针 tmp/t_p7.py；单测 107 项不变
 
 ## 9. 续作指引（重启后从这里开始）
 
@@ -431,6 +443,13 @@ PeaseBar/
   零认证框）。注意：/Applications 里现在跑的是「1.0.0 壳 + Phase 6 热替换代码」，发布 1.0.1 必须
   回到 T86 定型工序完整重打包+重授权。
   **下一步：评估发布 1.0.1（沿用发布工工序）。**
+- **2026-11-22（Phase 7 取证收官）**：用户再反馈两件事全部落地并真机取证 S1–S9
+  （计划 tmp/test-plan-phase7.md，探针 tmp/t_p7.py）：① 卡顿——T98 采集/渲染拆分+快照秒开+
+  后台刷新防重入+启动预热，按下→出现从秒级降到 0.001–0.026s，六连击不卡死；② 混乱——面板
+  瘦身成 Thaw 式单张居中纯图标网格（零标题/零按钮/零提示，p7_panel.png 目视），「展开收纳区」
+  移右键菜单；过程中修掉 T99（PyObjC 选择子对号坑，启动装配全挂）；回归 Q73 口径+12 条全绿，
+  单测 107 不变，环境还原 CONFIG_SAME；部署仍走 T96（双权限未洗）。
+  **待办：发布 1.0.1 需回 T86 完整重打包+重授权；右键菜单「展开收纳区」需真鼠标人工复核一次。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；

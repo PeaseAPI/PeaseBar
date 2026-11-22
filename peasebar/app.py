@@ -135,6 +135,7 @@ class AppDelegate(NSObject):
 
         self.rescue = RescuePanel.alloc().initWithAnchor_(self.control.button_anchor)
         self.control.on_left = self.rescue.toggle
+        self.control.on_stash = self.rescue.toggle_stash  # 收纳开关：面板瘦身后进右键菜单
         # 设置窗口（分区编辑的唯一入口，参照 Thaw：编辑在设置里而非弹窗里）
         from peasebar.settings import SettingsController
 
@@ -168,13 +169,12 @@ class AppDelegate(NSObject):
             NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSRunLoopCommonModes)
             print("[PeaseBar] 单实例唤醒监听就绪（哨兵端口 52877，0.5s 轮询）")
         print("[PeaseBar] 控制图标与救援面板就绪（左键图标/⌥⌘B 弹出，点击图标可弹其原生菜单）")
+        # 预热快照（T98）：后台采一次，第一次点开面板也能秒出
+        self.rescue.prewarm()
 
     def _refresh_panel_if_open(self):
-        """设置变更后：面板开着就立即重建（分区/超时随之生效）。"""
-        panel = getattr(self.rescue, "panel", None)
-        if panel is not None and panel.isVisible():
-            self.rescue._rebuild()
-            self.rescue._arm_timeout()
+        """设置变更后：作废位图缓存并刷新面板（重活在后台，不卡设置窗）。"""
+        self.rescue.refresh_now()
 
     def pollInstanceSocket_(self, timer):
         """哨兵 socket 轮询：收到二次启动的 connect 即弹出救援面板（F10）。"""
