@@ -57,6 +57,8 @@ from AppKit import (
     NSProcessInfo,
     NSPopUpButton,
     NSScrollView,
+    NSSegmentedControl,
+    NSSlider,
     NSSwitch,
     NSText,
     NSTextField,
@@ -72,7 +74,10 @@ from AppKit import (
     NSWorkspace,
 )
 from Foundation import (NSObject, NSMakePoint, NSMakeSize, NSString, NSURL)
-from AppKit import NSApplication
+from AppKit import (NSApplication, NSFontAttributeName,
+                    NSAppearance,
+                    NSStringDrawingUsesLineFragmentOrigin,
+                    NSStringDrawingUsesFontLeading)
 import os
 import platform
 
@@ -91,7 +96,9 @@ KEY_LEFT, KEY_RIGHT, KEY_DOWN, KEY_UP = 123, 124, 125, 126
 SIDEBAR_W = 220
 CONTENT_W = 640
 WIN_WIDTH = SIDEBAR_W + CONTENT_W
-STATIC_H = 340
+STATIC_H = 560
+# 窗口最小高：侧栏现在 12 行页签 + 两个分组小标题，得给它留够高度（否则底部页签被截）
+MIN_WIN_H = 560
 TILE_W, TILE_H = 44, 38
 TILE_GAP = 4
 EDGE = 16
@@ -121,20 +128,33 @@ _SECTION_ORDER = sections.SECTION_ORDER
 _TAG_SECTIONS = {0: sections.SECTION_VISIBLE, 1: sections.SECTION_HIDDEN,
                  2: sections.SECTION_ALWAYS_HIDDEN}
 
-# 侧栏页签（key, 显示名, 副标题）；key 也写进侧栏按钮的 AXIdentifier 供取证认页
-PAGES = (("layout", "布局", "图标分区与顺序"),
-         ("general", "通用", "开机自启与面板行为"),
-         ("shortcuts", "快捷键", "全局快捷键"),
-         ("troubleshoot", "疑难解答", "权限、图标抓取与诊断"),
-         ("about", "关于", "版本与源码"))
+# 侧栏页签（key, 显示名, 副标题）；key 也写进侧栏按钮的 AXIdentifier 供取证认页。
+# Phase 11：1:1 对标 Thaw 设置窗的 12 页结构（副标题直接抄 Thaw 各窗标题的英文短语）。
+PAGES = (("general", "通用", "Startup, language and icon"),
+         ("layout", "布局", "Visible, Hidden and Always Hidden"),
+         ("visibility", "Visibility", "How hidden items appear"),
+         ("appearance", "外观", "Colour, shape and borders"),
+         ("thawbar", "PeaseBar 工具栏", "Hidden items below the menu bar"),
+         ("display", "显示器", "Each display and Space"),
+         ("shortcuts", "Shortcuts", "Keyboard shortcuts"),
+         ("profiles", "配置管理", "Saved layouts to switch between"),
+         ("modules", "Modules", "Optional parts that run on their own"),
+         ("privacy", "Privacy", "Permissions and access"),
+         ("troubleshoot", "疑难解答", "Logs, backups and resets"),
+         ("about", "关于", "Version, updates and credits"))
 
 # 侧栏 SF Symbol 图标（对标 Thaw：纯文字页签太素）；系统取不到符号时优雅降级为纯文字
-_PAGE_ICONS = {"layout": "square.grid.2x2", "general": "gearshape",
-               "shortcuts": "keyboard", "troubleshoot": "wrench.and.screwdriver",
+_PAGE_ICONS = {"general": "gearshape", "layout": "square.grid.2x2",
+               "visibility": "eye", "appearance": "paintbrush", "thawbar": "rectangle.bottomthird.inset.filled",
+               "display": "display", "shortcuts": "keyboard", "profiles": "square.stack.3d.up",
+               "modules": "square.grid.3x2", "privacy": "lock.shield", "troubleshoot": "wrench.and.screwdriver",
                "about": "info.circle"}
-# 侧栏分组小标题（对标 Thaw 的 MODULES/MANAGE）
-_SIDEBAR_GROUPS = (("模块", ("layout", "general", "shortcuts")),
-                   ("管理", ("troubleshoot", "about")))
+# 侧栏分组（1:1 对标 Thaw）：首组无小标题，MODULES 只有配置管理，MANAGE 四项。
+# 首组用空串当标题，_build_sidebar 见空串就不画小标题行。
+_SIDEBAR_GROUPS = (("", ("general", "layout", "visibility", "appearance",
+                         "thawbar", "display", "shortcuts")),
+                   ("MODULES", ("profiles",)),
+                   ("MANAGE", ("modules", "privacy", "troubleshoot", "about")))
 
 # 拖拽：按下后移动多少点算「拖」（小于它当点击，T9 手感与系统一致）
 DRAG_SLOP = 6.0
@@ -149,6 +169,68 @@ _OPT_SWITCHES = (
 
 LOG_PATH = os.path.expanduser("~/Library/Logs/PeaseBar.log")
 REPO_URL = "https://github.com/PeaseAPI/PeaseBar"
+
+# ---------- 行/块声明工厂（1:1 对标 Thaw 设置页，供各 _spec_* 拼装） ----------
+# 返回的都是普通 dict，由 _render_blocks / _draw_ctl 解读。
+
+
+def _row_switch(key, title, help=None):
+    return {"title": title, "help": help, "ctl": ("switch", key)}
+
+
+def _row_popup(key, title, options, help=None):
+    return {"title": title, "help": help, "ctl": ("popup", key, list(options))}
+
+
+def _row_seg(key, title, options, help=None):
+    return {"title": title, "help": help, "ctl": ("segmented", key, list(options))}
+
+
+def _row_tgl(title, items, help=None):
+    # items: [(label, pref_key, tip)]，对标 Thaw CheckBox[Toggle] 组
+    return {"title": title, "help": help, "ctl": ("toggles", list(items))}
+
+
+def _row_slider(key, title, mn, mx, unit="", help=None):
+    return {"title": title, "help": help, "ctl": ("slider", key, mn, mx, unit)}
+
+
+def _row_text(key, title, placeholder="", help=None):
+    return {"title": title, "help": help, "ctl": ("text", key, placeholder)}
+
+
+def _row_buttons(title, items, help=None):
+    # items: [(label, action_sel)] / [(label, action_sel, width)] / [(label, action_sel, width, rep)]
+    return {"title": title, "help": help, "ctl": ("buttons", list(items))}
+
+
+def _row_status(title, ok, text, help=None):
+    return {"title": title, "help": help, "ctl": ("status", ok, text)}
+
+
+def _row_launch(title="登录时启动 PeaseBar", help=None):
+    return {"title": title, "help": help, "ctl": ("launch",)}
+
+
+def _row_timeout(title="面板自动收回（秒，0=不超时）", help=None):
+    return {"title": title, "help": help, "ctl": ("timeout",)}
+
+
+def _row_cicon(title="PeaseBar 图标", help=None):
+    return {"title": title, "help": help, "ctl": ("control_icon",)}
+
+
+def _block(heading, rows):
+    return {"heading": heading, "rows": rows}
+
+
+def _para(text):
+    return {"para": text}
+
+
+def _tabbar(page, options):
+    return {"tabbar": True, "page": page, "options": list(options)}
+
 
 
 def _sidebar_symbol(name, label):
@@ -557,7 +639,8 @@ class SettingsController(NSObject):
         self.field_timeout = None  # 切页即失效，_save_timeout 的空判据此生效
         self.popup_icon = None     # 同上：触发图标下拉也随旧内容丢弃
         page = getattr(self, "page", "layout")
-        height = self._page_height(page, buckets)
+        # 内容高度随分区变；窗高给侧栏 12 行页签兑底（MIN_WIN_H），不够高的页拉到此高
+        height = max(MIN_WIN_H, self._page_height(page, buckets))
 
         container = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, WIN_WIDTH, height))
         blur = NSVisualEffectView.alloc().initWithFrame_(container.frame())
@@ -600,12 +683,13 @@ class SettingsController(NSObject):
         names = {k: name for k, name, _sub in PAGES}
         y = height - 14
         for group, keys in _SIDEBAR_GROUPS:
-            cap = NSTextField.labelWithString_(group)
-            cap.setFont_(NSFont.systemFontOfSize_(11))
-            cap.setTextColor_(NSColor.tertiaryLabelColor())
-            cap.setFrame_(NSMakeRect(16, y - 16, SIDEBAR_W - 32, 14))
-            side.addSubview_(cap)
-            y -= 22
+            if group:  # 空串标题的首组不画小标题行（对标 Thaw：顶部页签前无分组名）
+                cap = NSTextField.labelWithString_(group)
+                cap.setFont_(NSFont.systemFontOfSize_(11))
+                cap.setTextColor_(NSColor.tertiaryLabelColor())
+                cap.setFrame_(NSMakeRect(16, y - 16, SIDEBAR_W - 32, 14))
+                side.addSubview_(cap)
+                y -= 22
             for key in keys:
                 # 行左缩 10pt，图标从 x≈16 起，文字再退到 x≈39（Q72 判据：缩进 ≥12）
                 btn = NSButton.alloc().initWithFrame_(NSMakeRect(10, y - 32, SIDEBAR_W - 20, 32))
@@ -639,7 +723,9 @@ class SettingsController(NSObject):
             y -= 10
 
     def _build_static_page(self, page, height):
-        """非布局页：页名 + 副标题 + 各页 builder 排内容。"""
+        """非布局页：顶部固定「页名 + 副标题」，下方一个纵向滚动区，内容
+        由通用块渲染引擎按 _spec_<page>() 返回的声明式块列表 1:1 排（对标 Thaw 的 ScrollArea）。
+        """
         view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, CONTENT_W, height))
         label, sub = next((l, s) for k, l, s in PAGES if k == page)
         t = NSTextField.labelWithString_(label)
@@ -651,7 +737,20 @@ class SettingsController(NSObject):
         s2.setTextColor_(NSColor.secondaryLabelColor())
         s2.setFrame_(NSMakeRect(EDGE, height - 54, CONTENT_W - 2 * EDGE, 18))
         view.addSubview_(s2)
-        getattr(self, "_page_" + page)(view, height - 54 - 24)
+        # 滚动区铺满标题以下区域；document 用翻转视图，块从顶部往下排
+        viewport_h = height - 62
+        sv = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, CONTENT_W, viewport_h))
+        sv.setBorderType_(0)
+        sv.setHasVerticalScroller_(True)
+        sv.setHasHorizontalScroller_(False)
+        sv.setDrawsBackground_(False)
+        sv.setAutohidesScrollers_(True)
+        doc = FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, CONTENT_W, viewport_h))
+        used = self._render_blocks(doc, getattr(self, "_spec_" + page)())
+        doc.setFrame_(NSMakeRect(0, 0, CONTENT_W, max(used, viewport_h)))
+        doc.setFrameSize_(NSMakeSize(CONTENT_W, max(used, viewport_h)))
+        sv.setDocumentView_(doc)
+        view.addSubview_(sv)
         return view
 
     # ---------- 布局页（4d 编辑本体原样搬入，宽度改为 CONTENT_W） ----------
@@ -1279,137 +1378,788 @@ class SettingsController(NSObject):
         view.addSubview_(card)
         return card
 
-    def _page_general(self, view, top):
-        """通用页（Phase 8 对标 Thaw）：每项设置一张卡片行，左标题+副说明、右控件。"""
+    # ---------- 块渲染引擎（1:1 对标 Thaw 设置页的 Form / GroupBox / ScrollArea） ----------
+
+    # 行内排版常量（对标 SwiftUI Form 的行距、卡片内边距与分隔线）
+    _PAD = 14          # 卡片左右内边距
+    _VPAD = 11         # 行上下内边距
+    _TITLE_H = 20      # 标题行高
+    _HELP_PT = 11      # 副说明字号
+    _CARD_VPAD = 8     # 卡片上下留白
+    _DIV = 1           # 行分隔线粗
+
+    @objc.python_method
+    def _subtab(self, page):
+        """某页当前的子页签序号（未记录回 0）。"""
+        return getattr(self, "_subtabs", {}).get(page, 0)
+
+    @objc.python_method
+    def _wrap_label(self, text, size, color):
+        """多行换行的只读标签（labelWithString_ 默认单行，这里改成可换行）。"""
+        lab = NSTextField.labelWithString_(text)
+        lab.setFont_(NSFont.systemFontOfSize_(size))
+        lab.setTextColor_(color)
+        lab.setBezeled_(False)
+        lab.setDrawsBackground_(False)
+        lab.setEditable_(False)
+        lab.setSelectable_(False)
+        lab.setUsesSingleLineMode_(False)
+        lab.setLineBreakMode_(0)  # NSLineBreakByWordWrapping
+        cell = lab.cell()
+        if cell is not None:
+            cell.setWraps_(True)
+            cell.setScrollable_(False)
+        return lab
+
+    @objc.python_method
+    def _measure_h(self, text, width, size):
+        """量一段文字在给定宽度下换行后的高（用于卡片随行高）。"""
+        import math
+        if not text:
+            return 0
+        font = NSFont.systemFontOfSize_(size)
+        opts = NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+        rect = (NSString.alloc().initWithString_(str(text))
+                .boundingRectWithSize_options_attributes_(
+                    NSMakeSize(width, 1000000.0), opts, {NSFontAttributeName: font}))
+        return int(math.ceil(rect.size.height))
+
+    @objc.python_method
+    def _help_on(self):
+        """是否渲染每行副说明（受「显示设置描述」偏好控制，即时生效）。"""
+        return bool(sections.get_pref(sections.load_config(), "show_help_text"))
+
+    @objc.python_method
+    def _render_blocks(self, doc, blocks, start_y=10):
+        """把声明式块列表往下排，返回用到的总高（doc 为翻转视图，y 向下）。"""
+        y = start_y
+        help_on = self._help_on()
+        for b in blocks:
+            if not isinstance(b, dict):
+                continue
+            if b.get("tabbar"):
+                y = self._blk_tabbar(doc, b, y)
+            if b.get("heading"):
+                y = self._blk_heading(doc, str(b["heading"]), y)
+            if b.get("rows"):
+                y = self._blk_card(doc, b["rows"], y, help_on)
+            if b.get("standalone"):
+                y = self._blk_standalone(doc, b["standalone"], y, help_on)
+            if b.get("para"):
+                y = self._blk_para(doc, str(b["para"]), y)
+            y += 8
+        return y + 6
+
+    @objc.python_method
+    def _blk_heading(self, doc, text, y):
+        lab = NSTextField.labelWithString_(text)
+        lab.setFont_(NSFont.boldSystemFontOfSize_(13))
+        lab.setFrame_(NSMakeRect(EDGE, y, CONTENT_W - 2 * EDGE, 20))
+        doc.addSubview_(lab)
+        return y + 25
+
+    @objc.python_method
+    def _blk_tabbar(self, doc, b, y):
+        """子页签条（对标 Thaw 页顶 TabButton 组：诊断/Repair/重置等）。"""
+        opts = list(b["options"])
+        page = b["page"]
+        seg = NSSegmentedControl.alloc().initWithFrame_(
+            NSMakeRect(EDGE, y, CONTENT_W - 2 * EDGE, 24))
+        seg.setSegmentCount_(len(opts))
+        seg.setTrackingMode_(1)  # selectOne
+        for i, lab in enumerate(opts):
+            seg.setLabel_forSegment_(lab, i)
+        seg.setSelectedSegment_(min(self._subtab(page), len(opts) - 1))
+        seg.setTarget_(self)
+        seg.setAction_("onSubTab:")
+        seg.setRepresentedObject_({"page": page})
+        seg.setAccessibilityIdentifier_("tabbar-" + page)
+        doc.addSubview_(seg)
+        return y + 34
+
+    @objc.python_method
+    def _row_h(self, row, help_on):
+        """算一行需要多高：标题带 + 副说明 + 控制件（宽控件另起一带）。"""
+        h = self._TITLE_H + 2 * self._VPAD
+        if help_on and row.get("help"):
+            w = CONTENT_W - 2 * EDGE - 2 * self._PAD
+            h += min(self._measure_h(row["help"], w, self._HELP_PT), 96) + 4
+        ctl = row.get("ctl")
+        if ctl and ctl[0] in ("toggles", "buttons"):
+            h += 34  # 宽控件另起一带放
+        return h
+
+    @objc.python_method
+    def _blk_card(self, doc, rows, y, help_on):
+        """把一组行装进一张圆角卡片（对标 Thaw GroupBox），行间画分隔线。"""
         cw = CONTENT_W - 2 * EDGE
-        y = top
-        # 开机自启：NSSwitch 画 macOS 原生拨动开关（Thaw Toggle 同款），
-        # 标题/状态行在左：开关本体不带 title，取证签名落在文本与标识上才稳
-        card = self._mk_card(view, y, 56)
-        lab = NSTextField.labelWithString_("登录时启动 PeaseBar")
+        heights = [self._row_h(r, help_on) for r in rows]
+        card_h = sum(heights) + 2 * self._CARD_VPAD + self._DIV * (len(rows) - 1)
+        card = NSView.alloc().initWithFrame_(NSMakeRect(EDGE, y, cw, card_h))
+        card.setWantsLayer_(True)
+        card.layer().setCornerRadius_(8.0)
+        card.layer().setBackgroundColor_(
+            Quartz.CGColorCreateGenericRGB(0.5, 0.5, 0.5, 0.10))
+        doc.addSubview_(card)  # 背景先入，控件后入盖在上层
+        ry = y + self._CARD_VPAD
+        for i, (row, rh) in enumerate(zip(rows, heights)):
+            self._draw_row(doc, row, EDGE + self._PAD, ry, cw - 2 * self._PAD, rh, help_on)
+            ry += rh
+            if i != len(rows) - 1:
+                line = NSView.alloc().initWithFrame_(
+                    NSMakeRect(EDGE + self._PAD, ry, cw - 2 * self._PAD, self._DIV))
+                line.setWantsLayer_(True)
+                line.layer().setBackgroundColor_(
+                    Quartz.CGColorCreateGenericRGB(0.5, 0.5, 0.5, 0.25))
+                doc.addSubview_(line)
+                ry += self._DIV
+        return y + card_h
+
+    @objc.python_method
+    def _draw_row(self, doc, row, x, y, w, h, help_on):
+        """画一行：标题在顶左，副说明在标题下，控制件靠右对齐标题带（宽控件另起带）。"""
+        title = row.get("title") or ""
+        lab = NSTextField.labelWithString_(title)
         lab.setFont_(NSFont.systemFontOfSize_(12))
-        lab.setFrame_(NSMakeRect(14, 32, 260, 18))
-        card.addSubview_(lab)
-        self.lbl_launch_status = NSTextField.labelWithString_("")
-        self.lbl_launch_status.setFont_(NSFont.systemFontOfSize_(11))
-        self.lbl_launch_status.setTextColor_(NSColor.secondaryLabelColor())
-        self.lbl_launch_status.setFrame_(NSMakeRect(14, 12, cw - 96, 16))
-        card.addSubview_(self.lbl_launch_status)
-        self.chk_launch = NSSwitch.alloc().initWithFrame_(NSMakeRect(cw - 74, 14, 60, 28))
-        self.chk_launch.setTarget_(self)
-        self.chk_launch.setAction_("onLaunchToggle:")
-        self.chk_launch.setAccessibilityLabel_("登录时启动 PeaseBar")
-        self.chk_launch.setAccessibilityIdentifier_("launch-at-login")
-        card.addSubview_(self.chk_launch)
-        y -= 66
-        # 面板自动收回：标题左，数字输入框右
-        card = self._mk_card(view, y, 44)
-        lbl_to = NSTextField.labelWithString_("面板自动收回（秒，0=不超时）")
-        lbl_to.setFont_(NSFont.systemFontOfSize_(12))
-        lbl_to.setFrame_(NSMakeRect(14, 13, 300, 18))
-        card.addSubview_(lbl_to)
+        lab.setFrame_(NSMakeRect(x, y + self._VPAD, w - 150, self._TITLE_H))
+        doc.addSubview_(lab)
+        cy = y + self._VPAD
+        if help_on and row.get("help"):
+            hh = min(self._measure_h(row["help"], w, self._HELP_PT), 96)
+            help_lab = self._wrap_label(row["help"], self._HELP_PT, NSColor.secondaryLabelColor())
+            help_lab.setFrame_(NSMakeRect(x, cy + self._TITLE_H + 2, w, hh))
+            doc.addSubview_(help_lab)
+        ctl = row.get("ctl")
+        if ctl:
+            self._draw_ctl(doc, ctl, x, cy, w, row)
+
+    @objc.python_method
+    def _draw_ctl(self, doc, ctl, x, cy, w, row):
+        """按类型画控制件；返回值无关，状态从 cfg 读。"""
+        kind = ctl[0]
         cfg = sections.load_config()
-        self.field_timeout = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(cw - 114, 9, 64, 26))
-        self.field_timeout.setStringValue_(str(int(cfg.get("panel_timeout", 8))))
-        self.field_timeout.setEditable_(True)
-        self.field_timeout.setTarget_(self)
-        self.field_timeout.setAction_("onTimeoutChanged:")
-        card.addSubview_(self.field_timeout)
-        y -= 54
-        # 菜单栏控制图标：标题左，下拉右（pullsDown=False：选中项显示在钮体内，
-        # 取证读 stringValue 即当前预设）
-        card = self._mk_card(view, y, 44)
-        lbl_ic = NSTextField.labelWithString_("菜单栏控制图标")
-        lbl_ic.setFont_(NSFont.systemFontOfSize_(12))
-        lbl_ic.setFrame_(NSMakeRect(14, 13, 300, 18))
-        card.addSubview_(lbl_ic)
-        self.popup_icon = NSPopUpButton.alloc().initWithFrame_pullsDown_(
-            NSMakeRect(cw - 194, 7, 180, 30), False)
-        for _sym, name in sections.CONTROL_ICONS:
-            self.popup_icon.addItemWithTitle_(name)
-        cur = next((i for i, (k, _) in enumerate(sections.CONTROL_ICONS)
-                    if k == cfg.get("control_icon")), 0)
-        self.popup_icon.selectItemAtIndex_(cur)
-        self.popup_icon.setTarget_(self)
-        self.popup_icon.setAction_("onControlIconChanged:")
-        self.popup_icon.setAccessibilityIdentifier_("control-icon-picker")
-        card.addSubview_(self.popup_icon)
-        self._sync_launch_state()
+        ctl_w = {"switch": 52, "popup": 180, "slider": 200, "status": 96}.get(kind, 150)
+        right_x = x + w - ctl_w
+        band_y = cy if kind not in ("toggles", "buttons") else cy + self._TITLE_H + 30
+        if kind == "switch":
+            sw = NSSwitch.alloc().initWithFrame_(NSMakeRect(right_x, band_y, 52, 22))
+            sw.setState_(1 if self._cfg_get(cfg, ctl[1]) else 0)
+            sw.setTarget_(self)
+            sw.setAction_("onPrefSwitch:")
+            sw.setRepresentedObject_({"key": ctl[1]})
+            sw.setAccessibilityIdentifier_("pref-" + ctl[1])
+            doc.addSubview_(sw)
+        elif kind == "popup":
+            pop = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                NSMakeRect(right_x, band_y, ctl_w, 24), False)
+            vals = ctl[2]  # [(value,label),...]
+            cur = self._cfg_get(cfg, ctl[1])
+            for v, name in vals:
+                pop.addItemWithTitle_(name)
+            idx = next((i for i, (v, _) in enumerate(vals) if v == cur), 0)
+            pop.selectItemAtIndex_(idx)
+            pop.setTarget_(self)
+            pop.setAction_("onPrefPopup:")
+            pop.setRepresentedObject_({"key": ctl[1], "values": [v for v, _ in vals]})
+            pop.setAccessibilityIdentifier_("pref-" + ctl[1])
+            doc.addSubview_(pop)
+        elif kind == "segmented":
+            vals = ctl[2]
+            labels = [lab for _, lab in vals]
+            seg = NSSegmentedControl.alloc().initWithFrame_(
+                NSMakeRect(right_x, band_y, ctl_w, 22))
+            seg.setSegmentCount_(len(vals))
+            seg.setTrackingMode_(1)
+            for i, lab in enumerate(labels):
+                seg.setLabel_forSegment_(lab, i)
+            cur = self._cfg_get(cfg, ctl[1])
+            seg.setSelectedSegment_(
+                next((i for i, (v, _) in enumerate(vals) if v == cur), 0))
+            seg.setTarget_(self)
+            seg.setAction_("onPrefSegmented:")
+            seg.setRepresentedObject_({"key": ctl[1], "values": [v for v, _ in vals]})
+            seg.setAccessibilityIdentifier_("pref-" + ctl[1])
+            doc.addSubview_(seg)
+        elif kind == "slider":
+            mn, mx, unit = ctl[2], ctl[3], ctl[4]
+            sld = NSSlider.alloc().initWithFrame_(
+                NSMakeRect(right_x, band_y + 2, ctl_w, 20))
+            sld.setMinValue_(mn)
+            sld.setMaxValue_(mx)
+            sld.setDoubleValue_(float(self._cfg_get(cfg, ctl[1]) or mn))
+            val_lab = NSTextField.labelWithString_(
+                f"{int(round(sld.doubleValue()))}{unit}")
+            val_lab.setFont_(NSFont.systemFontOfSize_(11))
+            val_lab.setTextColor_(NSColor.secondaryLabelColor())
+            val_lab.setFrame_(NSMakeRect(right_x, band_y - 14, ctl_w, 14))
+            doc.addSubview_(val_lab)
+            sld.setTarget_(self)
+            sld.setAction_("onPrefSlider:")
+            sld.setRepresentedObject_({"key": ctl[1], "label": val_lab, "unit": unit})
+            sld.setAccessibilityIdentifier_("pref-" + ctl[1])
+            doc.addSubview_(sld)
+        elif kind == "text":
+            fld = NSTextField.alloc().initWithFrame_(
+                NSMakeRect(right_x, band_y, ctl_w, 24))
+            fld.setStringValue_(str(self._cfg_get(cfg, ctl[1]) or ""))
+            fld.setPlaceholderString_(ctl[2])
+            fld.setEditable_(True)
+            fld.setTarget_(self)
+            fld.setAction_("onPrefText:")
+            fld.setAccessibilityIdentifier_("pref-" + ctl[1])
+            doc.addSubview_(fld)
+        elif kind == "status":
+            ok, txt = ctl[1], ctl[2]
+            st = NSTextField.labelWithString_(txt)
+            st.setFont_(NSFont.systemFontOfSize_(12))
+            st.setTextColor_(NSColor.labelColor() if ok else NSColor.systemRedColor())
+            st.setAlignment_(2)
+            st.setFrame_(NSMakeRect(right_x, band_y, ctl_w, self._TITLE_H))
+            doc.addSubview_(st)
+        elif kind == "toggles":
+            tx = x
+            for label, key, _tip in ctl[1]:
+                cb = NSButton.alloc().initWithFrame_(NSMakeRect(tx, band_y, 150, 22))
+                cb.setButtonType_(3)  # NSButtonTypeSwitch：画成 macOS 原生复选框
+                cb.setTitle_(label)
+                cb.setFont_(NSFont.systemFontOfSize_(12))
+                cb.setState_(1 if self._cfg_get(cfg, key) else 0)
+                cb.setTarget_(self)
+                cb.setAction_("onPrefSwitch:")
+                cb.setRepresentedObject_({"key": key})
+                cb.setAccessibilityIdentifier_("pref-" + key)
+                doc.addSubview_(cb)
+                tx += min(max(self._measure_h(label, 200, 12) + 22, 110), 210)
+        elif kind == "buttons":
+            bx = x
+            for item in ctl[1]:
+                label, action = item[0], item[1]
+                width = item[2] if len(item) > 2 else 120
+                b = NSButton.alloc().initWithFrame_(NSMakeRect(bx, band_y, width, 24))
+                b.setTitle_(label)
+                b.setBezelStyle_(1)
+                b.setFont_(NSFont.systemFontOfSize_(12))
+                b.setTarget_(self)
+                b.setAction_(action)
+                if len(item) > 3 and item[3] is not None:
+                    b.setRepresentedObject_(item[3])
+                b.setAccessibilityIdentifier_("btn-" + label)
+                doc.addSubview_(b)
+                bx += width + 8
+        elif kind == "launch":
+            # 开机自启走 SMAppService，不是普通 pref：建原生开关并接回旧 action，
+            # 同时把句柄存回 self.chk_launch，_sync_launch_state 才能回读系统状态
+            sw = NSSwitch.alloc().initWithFrame_(NSMakeRect(right_x, band_y, 52, 22))
+            sw.setTarget_(self)
+            sw.setAction_("onLaunchToggle:")
+            sw.setAccessibilityIdentifier_("launch-at-login")
+            doc.addSubview_(sw)
+            self.chk_launch = sw
+            self._sync_launch_state()
+        elif kind == "timeout":
+            fld = NSTextField.alloc().initWithFrame_(NSMakeRect(right_x, band_y, 90, 24))
+            fld.setStringValue_(str(int(cfg.get("panel_timeout", 8))))
+            fld.setEditable_(True)
+            fld.setTarget_(self)
+            fld.setAction_("onTimeoutChanged:")
+            fld.setAccessibilityIdentifier_("panel-timeout")
+            doc.addSubview_(fld)
+            self.field_timeout = fld
+        elif kind == "control_icon":
+            pop = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                NSMakeRect(right_x, band_y, ctl_w, 24), False)
+            for _sym, name in sections.CONTROL_ICONS:
+                pop.addItemWithTitle_(name)
+            curic = next((i for i, (k, _) in enumerate(sections.CONTROL_ICONS)
+                          if k == cfg.get("control_icon")), 0)
+            pop.selectItemAtIndex_(curic)
+            pop.setTarget_(self)
+            pop.setAction_("onControlIconChanged:")
+            pop.setAccessibilityIdentifier_("control-icon-picker")
+            doc.addSubview_(pop)
+            self.popup_icon = pop
 
-    def _page_shortcuts(self, view, top):
-        """快捷键页：每根键一张卡片行（文本保持「⌥⌘B　说明」一体，取证前缀判据不动）。"""
-        y = top
-        for text in ("⌥⌘B　开关救援面板", "⌥⌘S　打开设置窗口"):
-            card = self._mk_card(view, y, 44)
-            lab = NSTextField.labelWithString_(text)
-            lab.setFont_(NSFont.systemFontOfSize_(12))
-            lab.setFrame_(NSMakeRect(14, 13, CONTENT_W - 2 * EDGE - 28, 18))
-            card.addSubview_(lab)
-            y -= 54
-        self._mk_label(view, EDGE, y - ROW_H, "快捷键注册即全局生效（需辅助功能权限）；"
-                                      "自定义录制键排在后续版本，这里不放假按钮")
+    @objc.python_method
+    def _cfg_get(self, cfg, key):
+        """读偏好，支持点路径取嵌套 dict（如 modules.scripts）。"""
+        parts = str(key).split(".")
+        val = sections.get_pref(cfg, parts[0])
+        for p in parts[1:]:
+            val = val.get(p) if isinstance(val, dict) else None
+        return val
 
-    def _page_troubleshoot(self, view, top):
+    @objc.python_method
+    def _cfg_set(self, cfg, key, value):
+        """写偏好，支持点路径（先把顶层 dict 拷出来改完再写回，不就地改默认表）。"""
+        parts = str(key).split(".")
+        if len(parts) == 1:
+            sections.set_pref(cfg, key, value)
+            return
+        root = parts[0]
+        tree = dict(sections.get_pref(cfg, root) or {})
+        cur = tree
+        for p in parts[1:-1]:
+            nxt = dict(cur.get(p) or {}) if isinstance(cur.get(p), dict) else {}
+            cur[p] = nxt
+            cur = nxt
+        cur[parts[-1]] = value
+        sections.set_pref(cfg, root, tree)
+
+    @objc.python_method
+    def _blk_para(self, doc, text, y):
+        """整宽的段落说明（不受“显示设置描述”开关影响，永远可见）。"""
+        w = CONTENT_W - 2 * EDGE
+        hh = self._measure_h(text, w, 11)
+        lab = self._wrap_label(text, 11, NSColor.secondaryLabelColor())
+        lab.setFrame_(NSMakeRect(EDGE, y, w, hh))
+        doc.addSubview_(lab)
+        return y + hh + 4
+
+    @objc.python_method
+    def _blk_standalone(self, doc, items, y, help_on):
+        """卡片外的平铺行（如拖拽提示、底部按钮组），不画背景。"""
+        for row in items:
+            rh = self._row_h(row, help_on)
+            self._draw_row(doc, row, EDGE + self._PAD, y,
+                           CONTENT_W - 2 * EDGE - 2 * self._PAD, rh, help_on)
+            y += rh
+        return y
+
+    @objc.python_method
+    def _persist(self, key, value, rebuild=True):
+        """写一个 pref 并落盘；主题开关顺手应用；默认重建页面回显新状态。"""
+        cfg = sections.load_config()
+        self._cfg_set(cfg, key, value)
+        sections.save_config(cfg)
+        if key == "theme":
+            self._apply_theme(value)
+        if rebuild:
+            self._rebuild()
+        if self.on_changed:
+            self.on_changed()
+
+    @objc.python_method
+    def _apply_theme(self, mode):
+        """把 theme 偏好映射到 NSApplication.appearance（拿不到就静默跳过）。"""
+        try:
+            if mode == "light":
+                name = "NSAppearanceNameAqua"
+            elif mode == "dark":
+                name = "NSAppearanceNameDarkAqua"
+            elif mode == "black":
+                name = "NSAppearanceNameDarkAqua"
+            else:
+                name = None
+            app = NSApplication.sharedApplication()
+            if name is None:
+                app.setAppearance_(None)
+            else:
+                app.setAppearance_(NSAppearance.appearanceNamed_(name))
+        except Exception as exc:  # noqa: BLE001 — 主题非致命，失败不拦设置窗
+            print(f"[PeaseBar] 应用主题失败（忽略）：{exc}")
+
+    # ---------- 偏好控件的 action ----------
+
+    def onPrefSwitch_(self, sender):
+        meta = sender.representedObject()
+        key = str(meta["key"])
+        self._persist(key, int(sender.state()) == 1)
+
+    def onPrefPopup_(self, sender):
+        meta = sender.representedObject()
+        values = list(meta["values"])
+        i = int(sender.indexOfSelectedItem())
+        self._persist(str(meta["key"]), values[i] if 0 <= i < len(values) else values[0])
+
+    def onPrefSegmented_(self, sender):
+        meta = sender.representedObject()
+        values = list(meta["values"])
+        i = int(sender.selectedSegment())
+        self._persist(str(meta["key"]), values[i] if 0 <= i < len(values) else values[0])
+
+    def onPrefSlider_(self, sender):
+        meta = sender.representedObject()
+        val = float(sender.doubleValue())
+        lab = meta.get("label")
+        if lab is not None:
+            lab.setStringValue_(f"{int(round(val))}{meta.get('unit', '')}")
+        self._persist(str(meta["key"]), int(round(val)), rebuild=False)
+
+    def onPrefText_(self, sender):
+        meta = sender.representedObject()
+        self._persist(str(meta["key"]), str(sender.stringValue()), rebuild=False)
+
+    def onSubTab_(self, sender):
+        meta = sender.representedObject()
+        page = str(meta["page"])
+        if not hasattr(self, "_subtabs"):
+            self._subtabs = {}
+        self._subtabs[page] = int(sender.selectedSegment())
+        self._rebuild()
+
+    # ---------- 各页声明式规格（1:1 对标 Thaw 各设置页的 AX 树） ----------
+
+    @objc.python_method
+    def _spec_general(self):
+        return [
+            _block("App", [
+                _row_launch(help="开机后自动运行 PeaseBar（SMAppService，以系统回读为准）。"),
+                _row_timeout(help="面板失去焦点或超过该秒数自动收回；0 = 不超时。"),
+                _row_switch("minimal_mode", "精简模式",
+                            help="只显示核心设置并预览分区，其余功能照你之前的设定继续工作。"),
+                _row_switch("show_dock_settings", "设置窗开着时在 Dock 显示图标",
+                            help="关掉后 PeaseBar 不进 Dock、也不出现在最近应用里。"),
+            ]),
+            _block("Language and theme", [
+                _row_popup("app_language", "应用语言",
+                           [("system", "系统默认"), ("zh", "简体中文"), ("en", "English")],
+                           help="用与系统不同的语言显示 PeaseBar。"),
+                _row_seg("theme", "主题",
+                         [("system", "System"), ("light", "Light"), ("dark", "Dark"), ("black", "Black")],
+                         help="作用于设置窗与引导页；Black 适合 OLED 屏。"),
+                _row_switch("show_help_text", "显示设置描述",
+                            help="在每个设置项正下方说明它的作用（就是这一行文字）。"),
+            ]),
+            _block("PeaseBar 图标", [
+                _row_switch("show_control_icon", "展示 PeaseBar 图标",
+                            help="点击显示隐藏项、右键打开设置。"),
+                _row_cicon(help="选择在菜单栏显示的自定义控制图标。"),
+            ]),
+            _block("菜单栏行为", [
+                _row_tgl("收起 App 菜单", [
+                    ("显示隐藏项时", "hide_app_menus", "空间不足时收起当前 App 的菜单。"),
+                    ("在桌面上（Alpha）", "hide_app_menus_desktop", "点击桌面后盖住 Finder 菜单。"),
+                ], help="通过把 App 菜单移出菜单栏腾出空间；Apple 菜单始终保留。"),
+                _row_switch("rightclick_menubar_menu", "右键菜单栏打开 PeaseBar 菜单",
+                            help="在菜单栏空白处右键打开精简版菜单；若被系统菜单抢占，按住 Option 再右键。"),
+            ]),
+        ]
+
+    @objc.python_method
+    def _spec_visibility(self):
+        return [
+            _block("Reveal hidden items", [
+                _row_tgl("将已隐藏项目显示在", [
+                    ("点击", "reveal_click", "点击菜单栏空白处显示隐藏项。"),
+                    ("悬停", "reveal_hover", "悬停在空白处或 PeaseBar 图标上显示。"),
+                    ("滚动", "reveal_scroll", "在菜单栏滚动/滑动显示。"),
+                ], help="在菜单栏空白区域点击、悬停或滚动，以显示隐藏的菜单栏项目。"),
+            ]),
+            _block("显示之后", [
+                _row_popup("hide_again_mode", "再次隐藏项目",
+                           [("click_elsewhere", "当我点击别处"),
+                            ("switch_app", "当我切换 App"), ("never", "从不")],
+                           help="在你点击别处或切换 App 时收回；其菜单开着时不收回。"),
+                _row_slider("keep_open_seconds", "在菜单栏保持打开", 0, 60, " 秒",
+                            help="从搜索或工具栏打开的隐藏项在再次隐藏前停留的时长。"),
+            ]),
+            _block("Zen Mode", [
+                _row_tgl("开启禅模式的时机", [
+                    ("共享屏幕时", "zen_sharing", "共享/镜像时保持隐藏。"),
+                    ("摄像头或麦克风", "zen_camera", "通话等占用摄像头/麦克风时。"),
+                ], help="禅模式让隐藏项远离视线，避免杂乱栏进入通话或共享画面。"),
+                _row_switch("zen_alert", "摄像头或麦克风开启时提醒",
+                            help="菜单栏下方短暂提示正在使用麦克风的应用；macOS 不告知哪个 App 用摄像头。"),
+            ]),
+            _block("Swap shown and hidden", [
+                _row_switch("show_swap_bar", "显示 Swap Bar",
+                            help="菜单栏下方一条带，一键交换显示与隐藏项。"),
+                _row_switch("click_icon_swap", "点击 PeaseBar 图标以交换",
+                            help="点击图标改为交换显示/隐藏，而不是显示隐藏项。"),
+            ]),
+            _block("搜索菜单栏", [
+                _row_popup("panel_layout", "面板布局",
+                           [("compact", "Compact"), ("extended", "Extended")],
+                           help="Extended 总在搜索框下列出全部项目。"),
+                _row_switch("show_shortcut_bar", "显示快捷键栏",
+                            help="结果下方的那条带：设置、重命名、操作及其快捷键；不显示也照样能用。"),
+                _row_switch("remember_search", "记住上次搜索",
+                            help="打开搜索时带入你上次输入的文本。"),
+            ]),
+            _block("On hover", [
+                _row_tgl("悬停时显示", [
+                    ("名称", "hover_name", "带项目名称的提示。"),
+                    ("详情（测试版）", "hover_details", "小读数显示它报告的内容。"),
+                ], help="指针停在菜单栏项目上时显示其名称或读数。"),
+            ]),
+        ]
+
+    @objc.python_method
+    def _spec_appearance(self):
+        return [
+            _block("形状", [
+                _row_seg("bar_shape", "", [("none", "无"), ("full", "全幅"), ("split", "分隔"), ("notch", "刘海")],
+                         help="该外观覆盖整个菜单栏；编辑时你的菜单栏会随之变化。"),
+            ]),
+            _block("菜单栏", [
+                _row_popup("bar_style", "样式",
+                           [("none", "无"), ("tint", "着色背景"), ("image", "图片背景")],
+                           help="填充整个菜单栏。"),
+            ]),
+            _block("Screen corners", [
+                _row_switch("round_corners", "Round screen corners",
+                            help="在每台显示器的角落画黑，使它们看起来是圆角。"),
+            ]),
+            _block("高级", [
+                _row_switch("separate_light_dark", "为浅色/深色模式分别设置外观",
+                            help="在本页顶部选择在编辑哪一个。"),
+                _row_buttons("This Space", [("给这个 Space 独立外观", "onComingSoon:", 170)],
+                             help="拥有独立外观的 Space 只显示你在那里的编辑，其余 Space 沿用共享外观。"),
+            ]),
+            _para("在菜单栏空白处右键即可编辑外观，无需打开设置。"),
+        ]
+
+    @objc.python_method
+    def _spec_thawbar(self):
+        active = self._subtab("thawbar")
+        blocks = [_tabbar("thawbar", ["显示", "Look", "All Displays"])]
+        if active == 0:
+            blocks += [
+                _block("Applies to", [
+                    _row_popup("bar_panel_display", "显示",
+                               [("builtin", "内建视网膜显示器"), ("external", "Display 1")]),
+                ]),
+                _block("行为", [
+                    _row_switch("bar_panel_enabled", "PeaseBar 工具栏",
+                                help="开启后，隐藏项出现在本显示器菜单栏下方的工具栏里。"),
+                    _row_switch("bar_panel_always_show", "始终显示隐藏项目",
+                                help="隐藏项留在菜单栏上，而不是等你去显示。"),
+                ]),
+            ]
+        elif active == 1:
+            blocks += [_para("工具栏外观在「外观」页统一编辑（形状/背景）。")]
+        else:
+            blocks += [_para("工具栏可按显示器分别开启；这里列出所有已连接的显示器。")]
+        return blocks
+
+    @objc.python_method
+    def _spec_display(self):
+        active = self._subtab("display")
+        blocks = [
+            _block("显示", [
+                {"title": "内建视网膜显示器", "help": "刘海, Display 1",
+                 "ctl": ("buttons", [("识别", "onComingSoon:", 80)])},
+            ]),
+            _tabbar("display", ["Spacing", "Template", "Spaces", "Wide Displays"]),
+        ]
+        if active == 0:
+            blocks += [
+                _para("改变间距会重启菜单栏应用：macOS 只在 App 启动时读取间距，所以 PeaseBar 会退出并重开每个带菜单栏项的 App，未保存的工作可能丢失；每次重启前都会询问。"),
+                _block("菜单栏项目间距", [
+                    _row_popup("when_spacing_changes", "间距变化时",
+                               [("ask", "重启前询问"), ("auto", "自动重启"), ("manual", "手动")]),
+                ]),
+                _block("按显示器", [
+                    _row_slider("spacing", "菜单栏项目间距", -8, 8, " pt",
+                                help="本显示器持有菜单栏时使用；应用改动会重启菜单栏应用，各 App 还会加自己的内边距。"),
+                    _row_buttons("间距没更新？", [("重置为默认间距", "onResetSpacing:", 130)],
+                                 help="把间距恢复为默认值（真实间距重启应用排在后续版本）。"),
+                ]),
+            ]
+        elif active == 1:
+            blocks += [_para("Template：把外观模板应用到本显示器。")]
+        elif active == 2:
+            blocks += [_para("Spaces：允许每个 Space 采用不同的布局配置。")]
+        else:
+            blocks += [_para("Wide Displays：针对宽屏显示器的额外排布。")]
+        return blocks
+
+    @objc.python_method
+    def _spec_shortcuts(self):
+        active = self._subtab("shortcuts")
+        tabs = ["Visibility", "菜单栏项目", "布局", "PeaseBar 工具栏"]
+        blocks = [_tabbar("shortcuts", tabs)]
+        rows_map = {
+            0: [("显示或隐藏隐藏项", "⌥⌘B"), ("交换显示与隐藏项", ""), ("切换“再次隐藏”", ""),
+                ("切换禅模式", ""), ("隐藏或显示 App 菜单", ""), ("显示菜单栏", "")],
+            1: [("下一个项目", ""), ("上一个项目", ""), ("触发选中项", ""), ("重命名选中项", "")],
+            2: [("移到上一区", "⌥↑"), ("移到下一区", "⌥↓"), ("前移", "⌥←"), ("后移", "⌥→"), ("撤销", "⌘Z")],
+            3: [("打开工具栏", ""), ("关闭工具栏", "")],
+        }
+        rows = [{"title": label, "help": None,
+                 "ctl": ("buttons", [(combo or "录制快捷键", "onComingSoon:", 120)])}
+                for label, combo in rows_map.get(active, [])]
+        blocks.append(_block(tabs[active], rows))
+        blocks.append(_para("PeaseBar 当前内置：⌥⌘B 开关救援面板 · ⌥⌘S 打开设置窗。自定义录制排在后续版本，这里不放假按钮。"))
+        return blocks
+
+    @objc.python_method
+    def _spec_profiles(self):
+        cfg = sections.load_config()
+        profs = self._cfg_get(cfg, "profiles") or []
+        blocks = [{"heading": "已保存的配置", "rows": [
+            {"title": "还没有配置", "help": "在下方给当前设置起个名字，点“保存当前配置”存为一个配置。", "ctl": None},
+        ]}] if not profs else []
+        prof_rows = [{"title": str(p.get("name", f"配置 {i + 1}")), "help": None,
+                      "ctl": ("buttons", [("应用", "onApplyProfile:", 70, {"idx": i}),
+                                          ("删除", "onDeleteProfile:", 64, {"idx": i})])}
+                     for i, p in enumerate(profs)]
+        if prof_rows:
+            blocks.append({"heading": "已保存的配置", "rows": prof_rows})
+        blocks.append(_block("新建配置", [
+            _row_text("new_profile_name", "新建配置名称", "例如：工作 / 会议"),
+            _row_buttons("", [("保存当前配置", "onSaveProfile:", 120), ("导入配置…", "onComingSoon:", 100)]),
+        ]))
+        return blocks
+
+    @objc.python_method
+    def _spec_modules(self):
+        mods = [("profiles", "配置管理", "按显示器/Space/专注/快捷键切换已保存布局。"),
+                ("scripts", "Scripts", "在配置切换时运行你的脚本。"),
+                ("triggers", "Triggers", "某 App 运行时或图标变化时显示指定项目。"),
+                ("widgets", "Widgets", "把电量、Wi-Fi 等读数集中在一个菜单栏图标里。")]
+        rows = [_row_switch("modules." + k, name, help=desc) for k, name, desc in mods]
+        return [{"rows": rows}]
+
+    @objc.python_method
+    def _spec_privacy(self):
         ax_ok = bool(AXIsProcessTrusted())
         rec_ok = bool(capture.has_screen_permission())
-        y = self._perm_row(view, top, "辅助功能（全局快捷键/读取图标）", ax_ok)
-        y = self._perm_row(view, y, "屏幕录制（抓取图标真实像素）", rec_ok)
-        x = EDGE
-        if not ax_ok:
-            self._mk_btn(view, x, y - ROW_H, "打开辅助功能设置", "onOpenAXSettings:", 150)
-            x += 158
-        if not rec_ok:
-            self._mk_btn(view, x, y - ROW_H, "请求屏幕录制权限", "onRequestPermission:", 150)
-            x += 158
-        self._mk_btn(view, x, y - ROW_H, "重新抓取图标", "onRecapture:", 120)
-        x += 128
-        self._mk_btn(view, x, y - ROW_H, "打开日志文件", "onOpenLog:", 110)
-        y -= ROW_H + 12
-        self.lbl_diag_status = self._mk_label(view, EDGE, y - ROW_H, "", size=10)
-        y -= ROW_H + 6
-        summary = (f"图标 {len(self.items)} 项 · 被系统收纳 {self.stashed_count} · 被刘海遮挡 "
-                   f"{self.notched_count}；真实像素 {self.stats['cropped']} 张 / 兜底 "
-                   f"{self.stats['fallback']} 张")
-        self._mk_row(view, y, summary)
+        return [
+            _para("Nothing leaves this Mac、PeaseBar 不收集任何分析或使用数据；权限检测只在你 Mac 上完成，唯一的网络请求就是下面列出的，且各带开关。"),
+            _block("权限", [
+                _row_status("辅助功能", ax_ok, "已授权" if ax_ok else "未授权",
+                            help="检测 Mac 上菜单栏项目及其位置；移动项目以重排或隐藏；代表你点击项目。"),
+                _row_status("Menu Bar Layout Access", True, "已授权",
+                            help="更新 macOS 保存的菜单栏布局，这是它把项目放进各区与顺序的方式。"),
+                _row_status("屏幕录制", rec_ok, "已授权" if rec_ok else "可选",
+                            help="显示菜单栏项目的实时预览、取样颜色、并通过视觉识别查找项目。"),
+                _row_status("Notifications", False, "可选",
+                            help="关闭时 PeaseBar 无法提醒你更新或快捷键变化。"),
+                _row_buttons("", [("打开系统设置", "onOpenAXSettings:", 120)]),
+            ]),
+            _block("Apps that change settings", [
+                _row_switch("app_links_enabled", "允许 App 更改设置",
+                            help="你批准的 App 可用 peasebar:// 链接更改设置；每个新 App 首次都会询问。"),
+            ]),
+            _block("PeaseBar 可以看到", [
+                _row_switch("show_crop_regions", "显示裁剪区域",
+                            help="裁剪区域是 PeaseBar 为每个菜单栏项目读取的确切像素；画面只显示一次、从不存盘。"),
+                _row_buttons("", [("立即抓取", "onRecapture:", 100)]),
+            ]),
+            _block("Network access", [
+                _row_popup("auto_updates", "自动更新",
+                           [("off", "停用"), ("check", "仅检查"), ("download", "检查并下载")],
+                           help="检查只询问是否有新版本；下载会在后台取回。"),
+                _row_switch("whats_new_notes", "What's New 说明",
+                            help="打开 What's New 时从服务器取最新发行说明并留一份离线副本。"),
+                _row_switch("show_release_notes", "更新后显示发行说明",
+                            help="更新后首次启动自动打开 What's New。"),
+            ]),
+        ]
 
-    def _perm_row(self, view, top, name, ok):
-        """权限卡片行（Thaw 同款）：左项目名、右彩色状态文本。"""
-        cw = CONTENT_W - 2 * EDGE
-        card = self._mk_card(view, top, 44)
-        lab = NSTextField.labelWithString_(name)
-        lab.setFont_(NSFont.systemFontOfSize_(12))
-        lab.setFrame_(NSMakeRect(14, 13, cw - 140, 18))
-        card.addSubview_(lab)
-        st = NSTextField.labelWithString_("✓ 已授权" if ok else "✗ 未授权")
-        st.setFont_(NSFont.systemFontOfSize_(12))
-        st.setTextColor_(NSColor.labelColor() if ok else NSColor.systemRedColor())
-        st.setAlignment_(2)  # 右对齐
-        st.setFrame_(NSMakeRect(cw - 120, 13, 106, 18))
-        card.addSubview_(st)
-        return top - 54
+    @objc.python_method
+    def _spec_troubleshoot(self):
+        active = self._subtab("troubleshoot")
+        tabs = ["诊断", "Repair", "重置"]
+        blocks = [_tabbar("troubleshoot", tabs)]
+        if active == 0:
+            blocks += [
+                _block("诊断", [
+                    _row_switch("detailed_logging", "详细日志",
+                                help="为排障写详细日志到 ~/Library/Logs/PeaseBar/；用完请关闭以免无谓写盘。崩溃报告始终会保存。"),
+                ]),
+                _block("Files for a bug report", [
+                    {"title": "日志", "help": "导出会把日志与抓取样本打包成一个附件文件。",
+                     "ctl": ("buttons", [("在 Finder 中显示日志", "onOpenLog:", 150), ("导出日志", "onComingSoon:", 90)])},
+                    {"title": "项目列表", "help": f"PeaseBar 能看到的每个菜单栏项目（当前 {len(self.items)} 项）。",
+                     "ctl": ("buttons", [("重新抓取图标", "onRecapture:", 120)])},
+                ]),
+            ]
+        elif active == 1:
+            blocks += [
+                _block("Repair", [
+                    _row_buttons("权限", [("打开辅助功能设置", "onOpenAXSettings:", 150),
+                                     ("请求屏幕录制权限", "onRequestPermission:", 150)]),
+                    _row_buttons("图标", [("重新抓取图标", "onRecapture:", 120)]),
+                ]),
+            ]
+        else:
+            blocks += [
+                _block("重置", [
+                    {"title": "重置菜单栏布局", "help": "把除 PeaseBar 图标外的每个可移动项目移回选定区，就像全新安装；此步可用 ⌘Z 撤销。",
+                     "ctl": ("buttons", [("重置布局…", "onResetLayout:", 110)])},
+                ]),
+            ]
+        return blocks
 
-    def _page_about(self, view, top):
-        """关于页：版本+一句话介绍一张卡片，按钮在卡片下（取证靠「版本 x.y.z」文本）。"""
+    @objc.python_method
+    def _spec_about(self):
         from peasebar import __version__
-        cw = CONTENT_W - 2 * EDGE
-        card = self._mk_card(view, top, 64)
-        v = NSTextField.labelWithString_(f"版本 {__version__}")
-        v.setFont_(NSFont.boldSystemFontOfSize_(13))
-        v.setFrame_(NSMakeRect(14, 38, 200, 18))
-        card.addSubview_(v)
-        d = NSTextField.labelWithString_("把被刘海遮挡、被系统收纳的菜单栏图标找回来，并一键触发。")
-        d.setFont_(NSFont.systemFontOfSize_(11))
-        d.setTextColor_(NSColor.secondaryLabelColor())
-        d.setFrame_(NSMakeRect(14, 14, cw - 28, 18))
-        card.addSubview_(d)
-        y = top - 74
-        x = EDGE
-        self._mk_btn(view, x, y - ROW_H, "复制版本信息", "onCopyVersion:", 130)
-        x += 138
-        self._mk_btn(view, x, y - ROW_H, "打开源码仓库", "onOpenRepo:", 120)
-        y -= ROW_H + 10
-        self.lbl_about_status = self._mk_label(view, EDGE, y - ROW_H, "", size=10)
+        return [
+            {"heading": "PeaseBar", "rows": [
+                {"title": f"版本 {__version__}",
+                 "help": "The open source menu bar manager for macOS（对开源 Thaw 的移植）。", "ctl": None},
+            ]},
+            _block("更新", [
+                _row_seg("update_channel", "更新频道", [("beta", "测试版"), ("alpha", "内测版")]),
+                _row_seg("auto_updates", "自动更新", [("off", "停用"), ("check", "仅检查"), ("download", "检查并下载")]),
+                _row_buttons("", [("立即检查", "onComingSoon:", 100), ("What's New", "onComingSoon:", 100)]),
+            ]),
+            _block("源码与鸣谢", [
+                _row_buttons("", [("复制版本信息", "onCopyVersion:", 120), ("打开源码仓库", "onOpenRepo:", 120)]),
+            ]),
+            _para("Copyright © 2026 Pease。基于 Thaw（Copyright © Toni Förster et al.，GPL-3.0）。"),
+        ]
+
+    # ---------- 新增 action：配置管理、间距、诚实占位 ----------
+
+    def onComingSoon_(self, sender):
+        try:
+            label = str(sender.title())
+        except Exception:  # noqa: BLE001
+            label = "按钮"
+        print(f"[PeaseBar] 设置：“{label}”对应的功能排在后续版本")
+
+    def onSaveProfile_(self, sender):
+        """把当前分区+顺序存为一个命名配置（写入 prefs.profiles）。"""
+        cfg = sections.load_config()
+        name = str(self._cfg_get(cfg, "new_profile_name") or "").strip()
+        if not name:
+            print("[PeaseBar] 配置：名称为空，未保存")
+            return
+        prof = {"name": name, "sections": dict(cfg.get("sections") or {}),
+                "order": list(cfg.get("order") or [])}
+        profs = [p for p in (self._cfg_get(cfg, "profiles") or []) if p.get("name") != name]
+        profs.append(prof)
+        self._cfg_set(cfg, "profiles", profs)
+        sections.set_pref(cfg, "new_profile_name", "")
+        sections.save_config(cfg)
+        print(f"[PeaseBar] 配置：已保存配置“{name}”")
+        self._rebuild()
+
+    def onApplyProfile_(self, sender):
+        """应用一个配置：把它保存的分区/顺序写回主配置。"""
+        idx = int(sender.representedObject()["idx"])
+        cfg = sections.load_config()
+        profs = self._cfg_get(cfg, "profiles") or []
+        if not (0 <= idx < len(profs)):
+            return
+        p = profs[idx]
+        cfg["sections"] = dict(p.get("sections") or {})
+        cfg["order"] = list(p.get("order") or [])
+        sections.save_config(cfg)
+        print(f"[PeaseBar] 配置：应用“{p.get('name')}”")
+        self._rebuild()
+        if self.on_changed:
+            self.on_changed()
+
+    def onDeleteProfile_(self, sender):
+        """删除一个配置。"""
+        idx = int(sender.representedObject()["idx"])
+        cfg = sections.load_config()
+        profs = list(self._cfg_get(cfg, "profiles") or [])
+        if 0 <= idx < len(profs):
+            removed = profs.pop(idx)
+            self._cfg_set(cfg, "profiles", profs)
+            sections.save_config(cfg)
+            print(f"[PeaseBar] 配置：删除“{removed.get('name')}”")
+            self._rebuild()
+
+    def onResetSpacing_(self, sender):
+        """把间距重置为默认值（真实间距重启菜单栏应用排在后续版本）。"""
+        self._persist("spacing", 0.0)
+        print("[PeaseBar] 显示器：间距重置为默认")
 
     def onCopyVersion_(self, sender):
         from peasebar import __version__
@@ -1421,18 +2171,20 @@ class SettingsController(NSObject):
         pb = NSPasteboard.generalPasteboard()
         pb.clearContents()
         pb.writeObjects_([text])
-        if getattr(self, "lbl_about_status", None) is not None:
-            self.lbl_about_status.setStringValue_(f"已复制：{text}")
+        lab = getattr(self, "lbl_about_status", None)
+        if lab is not None:
+            lab.setStringValue_(f"已复制：{text}")
+        print(f"[PeaseBar] 设置：已复制版本信息——{text}")
 
     def onOpenRepo_(self, sender):
         NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(REPO_URL))
 
     def onOpenLog_(self, sender):
         if not os.path.exists(LOG_PATH):
-            self.lbl_diag_status.setStringValue_("尚无日志文件")
+            print("[PeaseBar] 设置：尚无日志文件")
             return
         NSWorkspace.sharedWorkspace().openFile_(LOG_PATH)
-        self.lbl_diag_status.setStringValue_(f"已请求打开 {LOG_PATH}")
+        print(f"[PeaseBar] 设置：已请求打开 {LOG_PATH}")
 
     def onOpenAXSettings_(self, sender):
         NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(

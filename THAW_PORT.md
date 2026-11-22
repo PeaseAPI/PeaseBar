@@ -32,6 +32,17 @@
 - 因此以本仓库分发移植版合规，前提是保留 GPL-3.0 许可、`LICENSE-EXCEPTION`、版权与 `CREDITS.md`，
   并公开对应源码（本 `swift/` 目录即对应源码）。上游：https://github.com/thaw-app/Thaw （development@69a66b9）。
 
+## 交付路线回调（Phase 11，用户 2026-11 定调）
+- **问题**：Swift 移植版以 ad-hoc 签名的 `Thaw Debug.app` 运行，未授辅助功能权限时**连菜单栏都读不到**，
+  作为交付物不可用；用户要求「照 Thaw 截图 + 读代码的认知重写」。
+- **决定**：回到能稳定读菜单栏的 **Python/PyObjC 端**作为当前交付产品，把设置窗从 5 页
+  扩到 Thaw 的 **12 页**，逐页 1:1 对标 `tmp/thaw_ref/` 的 AX 树与截图（侧栏分组、每页
+  heading/卡片/控件/help、子页签、权限状态、配置管理真实存/应用/删除）。
+- **取证**：168 单测全绿；离屏渲染全 12 页无异常；真机（源码跑真窗口）逐页截图目视核对 PASS，
+  详见 `tmp/test-plan-phase11.md` 与 `tmp/shots/p00..p11.png`。
+- **Swift 端**：`swift/` 继续保留为上游参考与后续原生引擎候选（PlatformRuntimeKit 的真实隐藏/排序机制），
+  但在解决「ad-hoc bundle 授权后即可读菜单栏」之前不作为交付形态。
+
 ## 后续（全量对标路线）
 1. 品牌化：bundle id / 产品名 / 图标由 Thaw 调整为 PeaseBar（改 `THAW_BUNDLE_ID_SUFFIX`、product name、资源）。
 2. 功能与 UI 以 Thaw 原版为准（面板、设置多页、快捷键、收纳、救援、profiles、Zen Mode、thaw:// 链接等）——移植版天然自带。

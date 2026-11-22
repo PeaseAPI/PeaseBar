@@ -52,7 +52,12 @@ DEFAULT_CONFIG = {"sections": {}, "order": [], "panel_timeout": 8,
                   # real_bar（Phase 10）：换区/改序时把动作镜像到真实菜单栏（合成 ⌘-拖）。
                   # 默认开——用户批评过「设成弹窗显示菜单栏图标却没减少、顺序拖不动」，
                   # 根因就是我们只改逻辑分区从没动过系统菜单栏；关掉则回到纯逻辑编辑（安全垫）
-                  "real_bar": True}
+                  "real_bar": True,
+                  # prefs（Phase 11，1:1 对标 Thaw 设置窗的其余 11 页）：
+                  # 一个通用偏好袋，承载主题/语言/显隐方式/收纳条/显示器间距/模块开关等。
+                  # 有真实后端的键（显示描述、主题、精简模式、收纳条…）在渲染端即时生效，
+                  # 暂无后端的键先落盘保留用户选择、后续补接线；读写都走 get_pref/set_pref。
+                  "prefs": {}}
 
 
 def config_path():
@@ -97,6 +102,9 @@ def load_config(path=None):
                 seen.add(k)
                 order.append(k)
         cfg["order"] = order
+    # prefs：只认 dict，逐项原样收进（值类型由 get_pref 的默认值兜底，脏值不至崩）
+    if isinstance(data.get("prefs"), dict):
+        cfg["prefs"] = dict(data["prefs"])
     return cfg
 
 
@@ -280,6 +288,75 @@ def select_neighbour(buckets, key, dx, dy):
 def store_order(cfg, items):
     """把当前展示顺序整体记进配置（编辑器的写侧入口）。"""
     cfg["order"] = [item_key(it) for it in items]
+    return cfg
+
+
+# ---------- prefs（Phase 11：1:1 对标 Thaw 其余设置页的偏好袋） ----------
+
+# 所有设置项的默认值：语义与取值直接照 Thaw 各页 AX 树来。
+# 有真实后端的键（show_help_text/theme/minimal_mode/控制图标…）在渲染端即时生效；
+# 暂无后端的键先落盘保留用户选择，后续逐项补接线。
+DEFAULT_PREFS = {
+    # 通用
+    "minimal_mode": False,          # 精简模式：只显示核心设置
+    "show_dock_settings": True,     # 设置窗开着时在 Dock 显示图标
+    "app_language": "system",       # 应用语言
+    "theme": "system",              # System / Light / Dark / Black
+    "show_help_text": True,         # 显示设置描述（控制每行副说明文字的渲染）
+    "show_control_icon": True,      # 展示 PeaseBar 图标
+    "hide_app_menus": True,         # 菜单栏行为：显示隐藏项时收起 App 菜单
+    "hide_app_menus_desktop": False,  # 桌面上也收起（Alpha）
+    "rightclick_menubar_menu": True,  # 右键菜单栏开 PeaseBar 菜单
+    # 布局（除 use_captured/bar_wrap/real_bar 外的选项）
+    "item_arrangement": "auto",     # 自动 / Manual
+    "always_hidden_on": True,       # 永久隐藏第三区是否启用
+    "section_divider_style": "none",  # 区域分割线样式
+    "show_sections_while_dragging": True,
+    "hiding_method": "standard",    # Native / Standard
+    "overflow_move_hidden": False,  # 放不下时把 Visible 移入 Hidden
+    "use_app_icons": False,         # 用 App 图标代替实时预览
+    # Visibility
+    "reveal_click": True, "reveal_hover": False, "reveal_scroll": True,
+    "hide_again_mode": "click_elsewhere",  # 显示之后如何再隐藏
+    "keep_open_seconds": 15,
+    "zen_sharing": False, "zen_camera": False, "zen_alert": False,
+    "show_swap_bar": False, "click_icon_swap": False,
+    "panel_layout": "extended", "show_shortcut_bar": True, "remember_search": False,
+    "hover_name": False, "hover_details": False,
+    # 外观
+    "bar_shape": "none",            # 无 / 全幅 / 分隔 / 刘海
+    "bar_style": "none",
+    "round_corners": False, "separate_light_dark": False,
+    # PeaseBar 工具栏（收纳条）
+    "bar_panel_enabled": False, "bar_panel_always_show": False, "bar_panel_display": "builtin",
+    # 显示器
+    "spacing": 0.0, "when_spacing_changes": "ask",
+    # 配置管理 / 模块
+    "profiles": [],
+    "modules": {"profiles": True, "scripts": False, "triggers": False, "widgets": False},
+    # Privacy
+    "app_links_enabled": False, "show_crop_regions": True,
+    "auto_updates": "download", "whats_new_notes": True, "show_release_notes": True,
+    # 疑难解答
+    "detailed_logging": False,
+    # 关于
+    "update_channel": "beta",
+}
+
+
+def get_pref(cfg, key):
+    """读偏好；prefs 里没有则回 DEFAULT_PREFS 默认，再没有回 None。"""
+    prefs = cfg.get("prefs") or {}
+    if key in prefs:
+        return prefs[key]
+    return DEFAULT_PREFS.get(key)
+
+
+def set_pref(cfg, key, value):
+    """写偏好（就地改 cfg['prefs']，返回 cfg 供链式调用）。"""
+    if not isinstance(cfg.get("prefs"), dict):
+        cfg["prefs"] = {}
+    cfg["prefs"][key] = value
     return cfg
 
 
