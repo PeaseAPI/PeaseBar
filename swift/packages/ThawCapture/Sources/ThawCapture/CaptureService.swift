@@ -13,11 +13,11 @@ import Foundation
 public enum CaptureService {
     /// The app's base bundle identifier, without any
     /// THAW_BUNDLE_ID_SUFFIX the build applies.
-    public static let baseAppBundleIdentifier = "com.stonerl.Thaw"
+    public static let baseAppBundleIdentifier = "com.pease.peasebar"
 
     /// The helper's base bundle identifier, without any
     /// THAW_BUNDLE_ID_SUFFIX the build applies.
-    public static let baseServiceBundleIdentifier = "com.stonerl.Thaw.MenuBarCaptureService"
+    public static let baseServiceBundleIdentifier = "com.pease.peasebar.MenuBarCaptureService"
 
     /// Append the service component after the app's debug suffix, matching the helper's bundle ID.
     /// Appending the suffix after the service component causes XPC's "No such process" failure.
