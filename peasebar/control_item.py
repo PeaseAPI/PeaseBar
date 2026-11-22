@@ -18,6 +18,7 @@ from AppKit import (
     NSAlert,
 )
 from Foundation import NSObject, NSMakeRect
+import objc
 import peasebar
 
 # 点击分发需要按下即触发（而非抬起），沿用 NSCell 的 sendActionOn_
@@ -42,7 +43,8 @@ class ControlItem(NSObject):
 
     def initWithCallbacks_(self, on_left):
         """on_left：左键回调（无参，Phase 1 由救援面板提供）。"""
-        self = super(ControlItem, self).init()
+        # PyObjC 13.0：super().init()/super(C, self).init() 均抛 AttributeError，必须用 objc.super
+        self = objc.super(ControlItem, self).init()
         if self is None:
             return None
         self.on_left = on_left
@@ -72,6 +74,9 @@ class ControlItem(NSObject):
         mi_quit = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "退出 PeaseBar", "terminate:", "q")
         for mi in (mi_about, mi_perms, mi_quit):
+            # 必须 setTarget_：nil-targeted action 沿响应链查找，而 ControlItem
+            # 不在响应链里，点击菜单项后 action 会落空（实测 T14 首败根因）
+            mi.setTarget_(self)
             self.menu.addItem_(mi)
 
         # 按下即回调（左右键都进 on_click，再按事件类型分发）
@@ -80,12 +85,29 @@ class ControlItem(NSObject):
         button.sendActionOn_(CLICK_MASKS)
         return self
 
+    def button_anchor(self):
+        """控制图标按钮的屏幕坐标 AppKit frame (x, y, w, h)（救援面板锚点）。"""
+        button = self.item.button()
+        win = button.window()
+        if win is None:
+            return None
+        # 按钮自身坐标系 → 窗口坐标系 → 屏幕坐标系（AppKit，左下原点）
+        # PyObjC：NSView 的 convertRect:fromView: 是双参方法 convertRect_fromView_
+        rect_in_win = button.convertRect_fromView_(button.bounds(), button)
+        rect_in_screen = win.convertRectToScreen_(rect_in_win)
+        return (rect_in_screen.origin.x, rect_in_screen.origin.y,
+                rect_in_screen.size.width, rect_in_screen.size.height)
+
     def onStatusClick_(self, sender):
         """状态图标点击入口：按事件类型分发左右键。"""
         event = NSApp.currentEvent()
+        print(f"[PeaseBar] onStatusClick 触发，currentEvent={event}")
         if event is None:
+            print("[PeaseBar] 警告：currentEvent 为 None，无法分发")
             return
         etype = event.type()
+        print(f"[PeaseBar] 事件类型={etype}（left={int(NSEventTypeLeftMouseDown)}，"
+              f"right={int(NSEventTypeRightMouseDown)}），on_left={'已接线' if self.on_left else '空'}")
         if etype == NSEventTypeRightMouseDown:
             self._popup_menu()
         elif etype == NSEventTypeLeftMouseDown:
@@ -114,6 +136,7 @@ class ControlItem(NSObject):
 
     def checkPermission_(self, sender):
         """手动触发权限检查并提示结果。"""
+        print("[PeaseBar] 菜单动作 checkPermission 触发")
         from peasebar.app import ensure_accessibility, _alert
         if ensure_accessibility(interactive=True):
             _alert("PeaseBar 权限正常", "辅助功能权限已授予，功能完整可用。")

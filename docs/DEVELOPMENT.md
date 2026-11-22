@@ -46,9 +46,9 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 |----|------|-----------|---------|
 | F1 | **图标盘点引擎** | AX 枚举 MenuBarAgent（系统图标+原生收纳按钮）与各运行 App 的 `AXExtrasMenuBar`；每项含 owner、名称、坐标、刘海遮挡判定 | 与菜单栏实际图标一致；遮挡判定与截图对得上 |
 | F2 | **控制图标** | PeaseBar 自己的 NSStatusItem；左键弹救援面板，右键系统菜单 | 图标常驻；可被用户用系统拖拽改位；左键/右键行为正确 |
-| F3 | **救援面板** | 无边框 NSPanel 出现在控制图标正下方；网格展示全部图标（名称+归属+刘海徽标）；单击=对真实图标 AXPress 弹出其原生菜单 | 面板出现在按钮下方；点击面板内图标能弹出对应菜单；含刘海遮挡项 |
+| F3 | **救援面板** | 无边框 NSPanel 出现在控制图标正下方；网格展示全部图标（名称+归属+刘海徽标）；单击=对真实图标**合成右键**弹出其原生状态菜单（T17：AXPress/左键无效），面板随即收起 | 面板出现在按钮下方；点击面板内图标能弹出对应菜单；含刘海遮挡项 |
 | F4 | **分区模型** | visible / hidden / always-hidden 三区，配置键 = bundleId+图标名；面板可按区过滤 | 标记为 hidden 的图标在面板中归入隐藏区并持久化 |
-| F5 | **自动收回** | 点击面板外即关；可配超时（默认 8s，0=不超时） | 失焦即收；超时行为正确 |
+| F5 | **自动收回** | 点击面板外即关（**全局鼠标监听**实现，T19——不依赖 key 状态；resignKey 路线在合成场景失效）；可配超时（默认 8s，0=不超时） | 失焦即收；超时行为正确 |
 | F6 | **全局快捷键** | 默认 ⌥⌘B 切换面板；可在配置改键 | 快捷键全局有效（其他 App 在前台也生效） |
 | F7 | **权限引导** | 辅助功能权限缺失时**不阻塞启动**：状态项正常显示，菜单项「检查辅助功能权限」提供状态反馈与“打开系统设置”按钮（图标显示本身不需要 AX 权限，见 T12） | 无权限时功能受限但不静默：图标在、盘点入口有中文指引 |
 | F8 | **顺序编辑器（只读视图）** | 面板列出当前实际顺序（按 x 排序） | 与真实顺序一致 |
@@ -103,6 +103,14 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T12 | **状态项显示三要素**（E5 对照实验：最小 Swift App TestItem vs PeaseBar）：① 启动不能被模态弹窗阻塞——runModal 卡在状态项创建之前 → 图标永不出现且永不入准入门（修复前 PeaseBar 正是此因）；② 必须走 LaunchServices 正规启动（`open`/Finder/launchd），终端 `nohup` 直启 bundle 二进制时 StatusBarServer 拒绝记账 → 图标不显示且进程 `AXExtrasMenuBar` 报 -25212；③ 图标过多时新图标被**自动收纳**进溢出区（« 按钮）——正常业务非故障 | app.py 启动顺序已按此修复（状态项先建、权限检查非阻塞）；测试/运行一律 `open` 启动 |
 | T13 | **AX 可见性联动**：图标被收纳（不可见）时，其 owner 进程 `AXExtrasMenuBar` 返回 -25212；原生按钮展开后同一进程 err=0。即 E1 “被收纳图标不在 AX”的扩展：**连 owner 自己的 AX 树都没有它** | F1 盘点需“展开收纳区→枚举→diff→收起”舞步（含 PeaseBar 自举）；-25212 可用作“图标当前不可见”信号 |
 | T14 | **第三方 AX 通道依赖菜单栏可见性**：全屏 App 隐藏菜单栏时，**所有**第三方进程 `AXExtrasMenuBar` 报 -25212（含可见图标）；MenuBarAgent 托管的系统图标树不受影响。激活非全屏 App 恢复菜单栏后立即恢复。且 -25212 无法区分「无状态项 / 被收纳 / 菜单栏隐藏」，盘点器不做精确判定 | 盘点/移动前先确认非全屏；后台守护（activationPolicy==2）直接跳过枚举 |
+| T15 | **open/LaunchServices 启动环境 locale 是 ASCII**：日志文件 `open()` 不显式指定编码时，写中文 print 抛 UnicodeEncodeError，且崩在 `app.run()` 之前——表象是 py2app "Launch error" 弹窗 + 状态项永不出现 + 终端跑同一脚本正常（环境差异） | app.py 日志落盘显式 `encoding="utf-8", errors="replace"`；排障看 `~/Library/Logs/PeaseBar.log` |
+| T16 | **bundle 需独立辅助功能授权**（授权终端不继承 open 启动的 .app）；权限组在新版系统设置「设备控制和数据访问」页；修改 TCC 开关必须 Touch ID/密码人类认证（无法绕过）；自动化流程：AX 定位 PeaseBar 行的 AXCheckBox → AXPress 可弹认证框（合成点击只能选中行） | bundle 授权后盘点/合成事件全部可用；重装/换 bundle 需重走授权 |
+| T17 | **状态项菜单无法被左键语义程序触发，右键合成点击是唯一有效路径**。实测五连败：AXPress（只激活 App 主窗口——QQ 左键语义=开主窗口）、合成左键（60/150/200ms 间隔）、down-only、System Events AppleScript click、HID 事件源；右键三事件（move→RightMouseDown→RightMouseUp）弹 QQ/微信状态菜单稳定成立 | panel.py onIconClick_ 用合成右键触发真实图标菜单；frame 为 CG 坐标与 CGEvent 同系直用 |
+| T18 | **NSPanel.hidesOnDeactivate 默认 YES**：App 失活时系统自动藏面板，但**不翻转 isVisible()、不触发 resignKey**——toggle 状态机错乱（CGWindowList/AX 已无此窗、App 内仍认为可见）。必须显式 `setHidesOnDeactivate_(False)` | panel.py 显式关闭；失焦收回改走全局监听（T19） |
+| T19 | **合成事件场景 App 激活是半吊子**：`frontmostApplication` 名义上切换了，但 `NSApp.isActive()=False`、面板 `isKeyWindow()` 永远 False（先 makeKey 后 activate / 先 activate 后 makeKey 都一样）→ resignKey 路线不可靠。改用 **NSEvent 全局鼠标按下监听**（不依赖 key 状态，合成/真实场景都有效）；注意 App 未激活时 global monitor **也会收到状态图标自身的点击**，必须忽略图标区域与面板内部，否则与 toggle 双火（刚开就被收回） | panel.py `_outsideClick_`：面板内/控制图标区域忽略，其余左键按下即收回 |
+| T20 | **NSWindow 没有 `setFrame:` 选择子**（PyObjC 无 `setFrame_`），只有 `setFrame:display:`；直接调 `setFrame_` 抛 AttributeError。且面板复用路径（关闭后再开，`setReleasedWhenClosed_(False)` 对象存活）才会走到这段——首建路径不触发，toggle 测试才暴露 | panel.py `_ensure_panel` 复用分支用 `setFrame_display_(rect, True)` |
+| T21 | **NSMenuItem 必须显式 `setTarget_`**：nil-targeted action 沿响应链查找，而 ControlItem 不在响应链里——点击菜单项后 action 落空（菜单正常关闭但处理函数永不执行，无任何报错） | control_item.py build() 对三个菜单项 setTarget_(self) |
+| T22 | **并行 AX 枚举**：串行遍历 ~80 进程查 AXExtrasMenuBar 耗 ~19.8s（大量 helper 进程响应慢是瓶颈），ThreadPoolExecutor(max_workers=16) 并行 + NSWorkspace 元信息主线程预取 → **~2.1s**（结果一致）；无 AX 权限时逐进程查询会长时间阻塞，`list_items()` 先 `AXIsProcessTrusted()` 快速失败 | inventory.py 并行化与快速失败路径 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -129,7 +137,7 @@ PeaseBar/
 │   ├── axutil.py        # AX 基础封装：copy/children/point/size/actions/press + CG↔AppKit
 │   ├── inventory.py     # F1 盘点引擎：MenuBarAgent + 各 App，轮询 + 变更回调
 │   ├── control_item.py  # F2 控制图标：NSStatusItem、左右键分发
-│   ├── panel.py         # F3 救援面板：NSPanel、图标网格、点击 AXPress、失焦/超时收回
+│   ├── panel.py         # F3 救援面板：NSPanel、图标网格、点击合成右键触发（T17）、全局监听失焦收回（T19）
 │   ├── sections.py      # F4 三区模型：配置键、分区过滤、持久化
 │   ├── mover.py         # F11 ⌘拖拽合成写入（Phase 3，实验通过后启用）
 │   ├── hotkeys.py       # F6 全局快捷键（Carbon RegisterEventHotKey）
@@ -155,10 +163,10 @@ PeaseBar/
 - [x] P0.6 骨架：`__main__/app.py` AppKit 生命周期 + Accessory + 单实例 + 右键菜单可退出；启动顺序修复（状态项先建、权限引导非阻塞）；**E5** 准入机制对照实验：状态项自动入准入门、图标现身收纳展开区（证据 `tmp/bar_peasebar_icon.png`、`tmp/bar_expanded_zoom.png`、`tmp/allow_list_1.png`）→ **节点提交**
 
 ### Phase 1 v1 核心（F1–F3, F8）
-- [x] P1.1 `axutil.py` + `inventory.py`（含遮挡判定、两级结构兼容、轮询刷新）：终端取证通过——系统 4 项（Wi‑Fi/控制中心/时钟/收纳按钮，名称坐标全对）+ 第三方 12 项与菜单栏实际一致；修复 `__NSArrayM` 判断怪癖与 MenuBarAgent 懒加载空树（T6/T14 取证写入 §5）
-- [ ] P1.2 `control_item.py`（左键/右键）
-- [ ] P1.3 `panel.py` 救援面板（网格、刘海徽标、AXPress 触发、失焦收回）
-- [ ] P1.4 `tmp/test-plan.md` 逐条真机执行 + 截图取证 → **节点提交**
+- [x] P1.1 `axutil.py` + `inventory.py`（含遮挡判定、两级结构兼容、轮询刷新）：终端取证通过——系统 4 项（Wi‑Fi/控制中心/时钟/收纳按钮，名称坐标全对）+ 第三方 12 项与菜单栏实际一致；修复 `__NSArrayM` 判断怪癖与 MenuBarAgent 懒加载空树（T6/T14 取证写入 §5）；并行枚举提速 19.8s→2.1s（T22）
+- [x] P1.2 `control_item.py`（左键/右键分发 + 中文菜单 setTarget_ 修复 T21 + 权限项反馈）
+- [x] P1.3 `panel.py` 救援面板（网格、刘海徽标、合成右键触发 T17、objc.super 修复、setFrame_display_ 复用修复 T20、hidesOnDeactivate 修复 T18、全局监听失焦收回 T19）
+- [x] P1.4 `tmp/test-plan.md` 逐条真机执行 + 截图取证：T1–T15 全部 PASS（执行记录见 tmp/test-plan.md）；修复链见 §10 晚间快照 → **节点提交**
 
 ### Phase 2 分区与维持（F4–F7, F9–F10）
 - [ ] P2.1 `sections.py`（三区 + JSON 持久化）+ 面板分区过滤
@@ -185,6 +193,9 @@ PeaseBar/
 4. 临时/测试产物一律放 `tmp/`（已 gitignore）；提交节奏 = 每个 Phase 节点 commit+push（remote: `PeaseAPI/PeaseBar`）
 5. 代码注释一律中文（Pease 产品线规范）；UI 文案中文优先
 6. 启动/重启 PeaseBar 一律 `open /Applications/PeaseBar.app`（开发态构建：`python3 setup.py py2app -A && ditto dist/PeaseBar.app /Applications/PeaseBar.app`）；**切勿**终端直启二进制（T12：StatusBarServer 拒绝记账，图标不显示）
+7. 排障先看 `~/Library/Logs/PeaseBar.log`（app.py 落盘，UTF-8，见 T15）；open 启动的进程 stdout/stderr 不可见
+8. 新 bundle 首次跑需授权辅助功能（T16）：系统设置「设备控制和数据访问」页打开 PeaseBar 开关（需 Touch ID 认证）
+9. 测试脚本轮询等待面板窗口出现（盘点 ~2s，固定 sleep 会竞态）；参考 `tmp/t34_expand_click.py`/`tmp/t8_t12.py` 的 wait_panel 模式
 
 ## 10. 进度快照
 
@@ -201,6 +212,16 @@ PeaseBar/
   过程中挖出两个基础事实：PyObjC AX 数组是 `__NSArrayM`（isinstance 判不出）与 MenuBarAgent
   懒加载空树（轮询唤醒），连同 T14（全屏隐藏菜单栏时第三方 AX 全线 -25212）写入 §5。
   **下一步：P1.3 救援面板（panel.py）→ test-plan 真机取证 → 节点提交。**
+- **2026-11-22（晚）**：P1.2/P1.3/P1.4 全部完成（Phase 1 收官）。面板从「构造即崩」走到「15 条用例全 PASS」：
+  ① PyObjC 13.0 super 修复（objc.super）；② open 启动中文日志崩溃（T15，encoding 修复）；
+  ③ bundle 独立 AX 授权（T16，Touch ID 人机协作）；④ 盘点并行化 19.8s→2.1s（T22）；
+  ⑤ T7 救援触发五连败后确立**右键定律**（T17）；⑥ toggle 复用路径 setFrame_ 崩（T20）；
+  ⑦ 面板被系统偷藏（T18 hidesOnDeactivate）；⑧ 失焦收回改全局监听（T19，含图标点击双火修复）；
+  ⑨ 右键菜单 action 落空（T21 setTarget_）。修复后 T1–T15 全 PASS
+  （toggle 往返/失焦收回/收纳区按钮往返/刷新/右键菜单/权限 alert/坐标校验）。
+  注意：最终回归时用户切换了显示状态（远程会话全屏），T14 事实复现（盘点塌缩到 4 系统项）——
+  属环境干扰非缺陷，全部核心修复均有单点 PASS 证据。
+  **下一步：Phase 2（sections 三区 + 持久化 + 快捷键 + 超时收回）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；

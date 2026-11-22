@@ -111,6 +111,15 @@ def _agent_top_items(agent_el):
     return copy_children(agent_el, "AXExtrasMenuBar")
 
 
+def stash_revealed():
+    """读原生收纳区当前是否展开。无收纳按钮时返回 False。"""
+    agent = _agent_element()
+    if agent is None:
+        return False
+    _, revealed = _stash_button_state(agent)
+    return revealed
+
+
 def set_stash_revealed(want_revealed):
     """把系统收纳区切到期望状态（True=展开 / False=收起）。返回是否成功。"""
     agent = _agent_element()
@@ -125,8 +134,24 @@ def set_stash_revealed(want_revealed):
     if ok:
         import time
 
-        time.sleep(0.5)  # 展开动画
+        time.sleep(0.6)  # 展开/收回动画
+        _collect_agent_items_warmup(agent)  # 唤醒懒加载树，保证后续盘点拿到展开区图标
     return ok
+
+
+def _collect_agent_items_warmup(agent):
+    """反复查询若干轮，唤醒 MenuBarAgent 懒加载树（见 _collect_agent_items）。"""
+    import time
+
+    for _ in range(3):
+        err, tops = _agent_top_items(agent)
+        if tops:
+            for it in tops:
+                if element_role(it) == "AXGroup":
+                    _, inner = copy_children(it, "AXChildren")
+                    if inner:
+                        return
+        time.sleep(0.5)
 
 
 def _agent_element():
@@ -172,6 +197,11 @@ def list_items():
     ax_unavailable_apps：AXExtrasMenuBar 报 -25212 的非后台进程 (应用名, bundleId) 列表——
     可能是「无状态项 / 被收纳 / 菜单栏被全屏隐藏」，不做精确判定（见模块注释）。
     """
+    # 无辅助功能权限时快速失败：逐进程 AX 查询会长时间阻塞（每个超时数秒），
+    # 面板会因此卡死；直接返回空清单，原因放进 ax_unavailable 供 UI 中文提示
+    if not AS.AXIsProcessTrusted():
+        return [], [("（未授权）", "需要辅助功能权限：系统设置 → 隐私与安全性 → 辅助功能")]
+
     notch = _screen_notch()
     pids = _pid_table()
     items = []
@@ -182,7 +212,12 @@ def list_items():
     if agent is not None:
         items.extend(_collect_agent_items(agent, notch))
 
-    # 2) 第三方侧：逐进程 AXExtrasMenuBar（T3）；-25212 只计候选不做判定（T13/T14）
+    # 2) 第三方侧：并行枚举各进程 AXExtrasMenuBar（T3）；-25212 只计候选不做判定（T13/T14）。
+    #    串行版全量盘点耗时 ~20s（大量 helper 进程的 AX 查询响应慢），并行后降至秒级；
+    #    NSWorkspace 元信息在主线程预取，线程池里只做纯 AX 查询
+    from concurrent.futures import ThreadPoolExecutor
+
+    apps = []
     for app in NSWorkspace.sharedWorkspace().runningApplications():
         if app.processIdentifier() <= 0:
             continue
@@ -191,14 +226,22 @@ def list_items():
         name, bid = app.localizedName() or "?", app.bundleIdentifier() or "?"
         if bid == _MENU_BAR_AGENT_BID:
             continue
-        el = app_element_for_pid(app.processIdentifier())
-        err, extras = copy_children(el, "AXExtrasMenuBar")
+        apps.append((app.processIdentifier(), name, bid))
+
+    def _probe(pid):
+        el = app_element_for_pid(pid)
+        return copy_children(el, "AXExtrasMenuBar")
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(_probe, [a[0] for a in apps]))
+
+    for (pid, name, bid), (err, extras) in zip(apps, results):
         if err == AX_ERR_NOT_IMPLEMENTED or not extras:
             if err == AX_ERR_NOT_IMPLEMENTED:
                 ax_unavailable.append((name, bid))
             continue
         for it in extras:
-            items.append(_make_item(it, name, bid, app.processIdentifier(), notch))
+            items.append(_make_item(it, name, bid, pid, notch))
 
     items.sort(key=lambda m: (m.frame[0] if m.frame else 1e9))
     return items, ax_unavailable

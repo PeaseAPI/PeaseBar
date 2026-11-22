@@ -83,15 +83,16 @@ class AppDelegate(NSObject):
 
     def applicationDidFinishLaunching_(self, notification):
         print(f"[PeaseBar {__version__}] 启动")
-        self.control = ControlItem.alloc().initWithCallbacks_(self.on_left_click)
+        self.control = ControlItem.alloc().initWithCallbacks_(lambda: None)
         self.control.build()
-        # 单实例唤醒监听（收到 connect 即把控制图标闪烁提示一下；Phase 1 改为弹出面板）
-        self.instance_socket = getattr(AppDelegate, "_sentinel", None)
-        print("[PeaseBar] 控制图标就绪（左键面板将在 Phase 1 接入）")
+        # 救援面板（F3）：左键控制图标弹出；锚点 = 控制图标按钮屏幕坐标
+        from peasebar.panel import RescuePanel
 
-    def on_left_click(self):
-        """左键：Phase 1 由救援面板接管。"""
-        print("[PeaseBar] 左键点击（面板占位）")
+        self.rescue = RescuePanel.alloc().initWithAnchor_(self.control.button_anchor)
+        self.control.on_left = self.rescue.toggle
+        # 单实例唤醒监听（收到 connect 即把控制图标闪烁提示一下；后续改为弹出面板）
+        self.instance_socket = getattr(AppDelegate, "_sentinel", None)
+        print("[PeaseBar] 控制图标与救援面板就绪（左键弹出，点击图标可弹其原生菜单）")
 
     def applicationShouldTerminate_(self, sender):
         # 退出前归还状态项
@@ -102,6 +103,16 @@ class AppDelegate(NSObject):
 
 
 def main():
+    # 0) 日志落盘：open/LaunchServices 启动时 stdout/stderr 不可见（/dev/null），
+    #    排障必须先把异常引导到文件（~/Library/Logs/PeaseBar.log，追加、行缓冲）。
+    #    encoding 必须显式 UTF-8：open 环境无 LANG/LC_*，默认 locale 编码是 ASCII，
+    #    写中文日志直接 UnicodeEncodeError（且崩在 app.run() 之前，状态项永远不出现）
+    import os
+    logf = open(os.path.expanduser("~/Library/Logs/PeaseBar.log"), "a",
+                buffering=1, encoding="utf-8", errors="replace")
+    sys.stdout = logf
+    sys.stderr = logf
+
     # 1) 单实例
     sentinel = check_single_instance()
     if sentinel is None:
