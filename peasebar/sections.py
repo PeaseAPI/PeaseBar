@@ -43,7 +43,12 @@ CONTROL_ICONS = (
 )
 
 DEFAULT_CONFIG = {"sections": {}, "order": [], "panel_timeout": 8,
-                  "control_icon": CONTROL_ICONS[0][0]}
+                  "control_icon": CONTROL_ICONS[0][0],
+                  # 布局页选项（Phase 9，对标 Thaw 的 Options 卡片）：
+                  # use_captured=格子优先用菜单栏真实截图像素；bar_wrap=图标条放不下就换行
+                  # 换行默认开：单行放不下会被条子裁掉，用户看到的是「图标少了一半」，
+                  # 宁可区变高，也要整区一次看全（Thaw 的 LayoutBar 就是自动折行）
+                  "use_captured": True, "bar_wrap": True}
 
 
 def config_path():
@@ -75,6 +80,10 @@ def load_config(path=None):
     # 只认预设表里的符号名：脏数据/旧版本删掉的预设回默认，渲染端不用二次校验
     if isinstance(icon, str) and any(k == icon for k, _ in CONTROL_ICONS):
         cfg["control_icon"] = icon
+    # 两个布局选项只认布尔值（json 里写别的都当没写过，回默认）
+    for flag in ("use_captured", "bar_wrap"):
+        if isinstance(data.get(flag), bool):
+            cfg[flag] = data[flag]
     raw_order = data.get("order")
     if isinstance(raw_order, list):
         # 只留字符串项，且去重保序（脏数据/重复键会让位次计算自相矛盾）
@@ -171,6 +180,24 @@ def find_pos(buckets, key):
             if item_key(it) == key:
                 return s, i
     return None
+
+
+def move_to_index(seq, key_of, key, index):
+    """把 seq 里 key_of(it)==key 那一项摘出来、插到 index（拖拽落位，纯函数）。
+
+    同区拖与跨区拖都走它：先摘后插，所以落在自己右边时要把目标位往后让一格
+    （视觉上的「两格之间」在摘掉自己之后变了一格）。index 越界就地夹住；
+    key 不在序列里时原样返回（宁可不也不凭空插个空位）。
+    """
+    out = list(seq)
+    src = next((i for i, it in enumerate(out) if key_of(it) == key), None)
+    if src is None:
+        return out
+    item = out.pop(src)
+    if src < index:
+        index -= 1
+    out.insert(max(0, min(len(out), index)), item)
+    return out
 
 
 def reorder_bucket(buckets, section, key, delta):

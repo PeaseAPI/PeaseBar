@@ -25,6 +25,9 @@
   时用兜底图标（App 图标/系统模块 SF 符号）顶上，**格子上永远只有图标、不出名字**
   （照 Thaw 的 OverflowFallbackIcon 思路）；名字只在悬停提示里；
 - 分区编辑不在本面板做（参照 Thaw），这里只负责找回并触发图标；
+- **面板尺寸按内容收缩**（Thaw ThawBar.resizeToContent：窗口尺寸 = 内容理想尺寸）：
+  旧版固定 468 宽，7 个图标摊在两侧各留 60pt 空白，用户问「弹框那么大干啥」；
+  现在列宽跟最宽的那张图走、面板宽跟实际列数走，首格 x 恒等于 EDGE；
 - borderless NSPanel 默认不能成为 key 窗口，用 KeyPanel 子类放开 canBecomeKey；
 - 失焦收回不依赖 key 窗口状态（合成事件场景激活是半吊子，T19）；
 - 坐标转换：控制图标 frame 是全局 CG 坐标（左上原点），面板定位前转 AppKit。
@@ -55,14 +58,41 @@ import time
 
 from peasebar import capture, inventory, sections, trigger
 
-# 面板几何：单张干净网格（Thaw 式），格子只放图标、四周留呼吸感；
-# PANEL_WIDTH 保持 468，测试脚本据此识别窗口
-PANEL_WIDTH = 468
-GRID_COLS = 9
-CELL_W, CELL_H = 44, 40
+# 面板几何：单张干净网格（Thaw 式），格子只放图标、四周留呼吸感。
+# Phase 9 口径：宽度不再写死，由 grid_layout() 按内容算（见文件头「面板尺寸按内容收缩」）。
+PANEL_MAX_W = 468  # 宽度上限：列宽撑到最宽时也不宽过菜单栏常用宽
+PANEL_MIN_W = 64   # 下限：只有一个图标时也该有个胶囊的样子，不窄成一条线
+EMPTY_W = 200      # 空态只有一行提示，给个固定小宽度
+GRID_COLS = 9      # 列数上限（实际列数还会被列宽再压）
+CELL_W, CELL_H = 44, 40  # 列宽下限（窄图标时保持整齐）
+CELL_MAX_W = 96    # 列宽上限：宽条（网速/温度这类）撑到这就够了
 CELL_GAP = 6
+CELL_PAD = 6       # 图标左右各留的内边距
 EDGE = 10
 EMPTY_H = 28  # 空态提示行高
+
+
+def grid_layout(count, image_widths=()):
+    """算网格尺寸：返回 (面板宽, 面板高, 列宽, 列数, 行数)。纯函数，可离线单测。
+
+    列宽取「最宽图标的点宽 + 2×内边距」，钳在 [CELL_W, CELL_MAX_W]：宽条不再被
+    挤进正方形格子（无边框 NSButton 不执行 imageScaling，挤进去就是溢出/半截），
+    窄图标也不跟着变宽；列数同时受 GRID_COLS 与「上限宽度装得下几列」约束；
+    面板宽 = 2×EDGE + 实际列数的行宽，所以首格 x 恒等于 EDGE（探针据此验贴边）。
+    """
+    widths = [int(w) for w in (image_widths or ()) if w and w > 0]
+    cell_w = CELL_W
+    if widths:
+        cell_w = max(CELL_W, min(CELL_MAX_W, max(widths) + 2 * CELL_PAD))
+    if count <= 0:
+        return EMPTY_W, EDGE * 2 + EMPTY_H, cell_w, 0, 1
+    fit = max(1, int((PANEL_MAX_W - 2 * EDGE + CELL_GAP) // (cell_w + CELL_GAP)))
+    cols = max(1, min(count, GRID_COLS, fit))
+    rows = -(-count // cols)
+    grid_w = cols * (cell_w + CELL_GAP) - CELL_GAP
+    width = max(PANEL_MIN_W, min(PANEL_MAX_W, 2 * EDGE + grid_w))
+    height = EDGE * 2 + rows * (CELL_H + CELL_GAP) - CELL_GAP
+    return width, height, cell_w, cols, rows
 
 
 class KeyPanel(NSPanel):
@@ -141,11 +171,12 @@ class RescuePanel(NSObject):
 
     # ---------- 内部：面板与网格 ----------
 
-    def _ensure_panel(self, height):
-        """懒创建面板（高度随内容变化时重建 frame）。"""
+    def _ensure_panel(self, size):
+        """懒创建面板（尺寸随内容变化，size = (宽, 高)）。"""
+        width, height = size
         if self.panel is None:
             panel = KeyPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-                NSMakeRect(0, 0, PANEL_WIDTH, height),
+                NSMakeRect(0, 0, width, height),
                 NSWindowStyleMaskBorderless,
                 2,  # backing buffered
                 False,
@@ -159,6 +190,8 @@ class RescuePanel(NSObject):
             panel.setBackgroundColor_(NSColor.clearColor())
             panel.setHasShadow_(True)
             panel.setReleasedWhenClosed_(False)
+            # 探针靠这个认面板（宽度现在随内容变，不能再拿 468 当指纹）
+            panel.setAccessibilityIdentifier_("peasebar-panel")
             panel.setDelegate_(self)
             self.panel = panel
         else:
@@ -166,7 +199,7 @@ class RescuePanel(NSObject):
             # PyObjC 对应 setFrame_display_；直接调 setFrame_ 会 AttributeError）
             f = self.panel.frame()
             self.panel.setFrame_display_(
-                NSMakeRect(f.origin.x, f.origin.y, PANEL_WIDTH, height), True)
+                NSMakeRect(f.origin.x, f.origin.y, width, height), True)
         return self.panel
 
     # ---------- 内部：采集（重活，可后台）与渲染（主线程） ----------
@@ -204,12 +237,12 @@ class RescuePanel(NSObject):
         notched = sum(1 for m in items if m.notched)
         # 单张网格：先用户藏的、再系统藏的（两类的区分留给 tooltip 说明）
         group = hidden_group + lost_group
-        # 图标位图（只显示图标）：截不到像素时 capture_icons 会用兕底图标顶上；
+        # 图标位图（只显示图标）：截不到像素时 capture_icons 会用兜底图标顶上；
         # 位置没变时代际缓存命中，后台刷新也不会重截
         images, no_perm = capture.capture_icons(items)
         print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，弹窗显示 {len(hidden_group)} 项，"
               f"被收纳 {stashed} 项，刘海 {notched} 项；网格 {len(group)} 项"
-              + ("，无屏幕录制权限→兕底图标" if no_perm else ""))
+              + ("，无屏幕录制权限→兜底图标" if no_perm else ""))
         return {"items": items, "images": images, "group": group}
     
     def _start_background_refresh(self):
@@ -250,13 +283,19 @@ class RescuePanel(NSObject):
         启动装配崩、面板快捷键全挂——日志里抓到的真因）。"""
         items, images, group = snap["items"], snap["images"], snap["group"]
         self.items = items  # onIconClick_ 按 tag 取格，必须与快照一致
-        rows = (len(group) + GRID_COLS - 1) // GRID_COLS if group else 1
-        height = EDGE * 2 + (rows * (CELL_H + CELL_GAP) - CELL_GAP
-                             if group else EMPTY_H)
-        panel = self._ensure_panel(height)
+        # 先把每格的图定下来：列宽要按最宽的那张图算，不能先定尺寸再塞图
+        cell_imgs = []
+        for item in group:
+            img = images.get(sections.item_key(item))
+            if img is None:
+                img = capture.fallback_image_for_item(item)
+            cell_imgs.append(img)
+        width, height, cell_w, cols, _rows = grid_layout(
+            len(group), [i.size().width if i is not None else 0 for i in cell_imgs])
+        panel = self._ensure_panel((width, height))
     
         # 内容视图：毛玻璃背景 + 手动布局
-        content = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, PANEL_WIDTH, height))
+        content = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
         blur = NSVisualEffectView.alloc().initWithFrame_(content.frame())
         blur.setMaterial_(NSVisualEffectMaterialPopover)
         blur.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
@@ -271,32 +310,32 @@ class RescuePanel(NSObject):
             empty.setTextColor_(NSColor.secondaryLabelColor())
             empty.setAlignment_(1)  # 居中
             empty.setFrame_(NSMakeRect(EDGE, EDGE + (EMPTY_H - 16) // 2,
-                                       PANEL_WIDTH - 2 * EDGE, 16))
+                                       width - 2 * EDGE, 16))
             content.addSubview_(empty)
         else:
-            # 水平居中：按最宽一行的实际宽度起算，不再贴左边留大空位
-            cols = min(len(group), GRID_COLS)
-            grid_w = cols * (CELL_W + CELL_GAP) - CELL_GAP
-            x0 = (PANEL_WIDTH - grid_w) / 2
+            # 面板宽就是「行宽 + 2×EDGE」，所以 x0 恒等于 EDGE（真窄到装不下才居中）
+            grid_w = cols * (cell_w + CELL_GAP) - CELL_GAP
+            x0 = (width - grid_w) / 2
             # 格子 tag 必须是全量 items 的下标（onIconClick_ 按 tag 取 self.items），
             # 网格是展示顺序，用 id 映射还原原索引
             id_to_idx = {id(m): i for i, m in enumerate(items)}
             top = height - EDGE
-            for idx, item in enumerate(group):
-                row, col = divmod(idx, GRID_COLS)
-                x = x0 + col * (CELL_W + CELL_GAP)
+            for idx, (item, img) in enumerate(zip(group, cell_imgs)):
+                row, col = divmod(idx, cols)
+                x = x0 + col * (cell_w + CELL_GAP)
                 y = top - CELL_H - row * (CELL_H + CELL_GAP)
                 content.addSubview_(
-                    self._make_cell(item, id_to_idx[id(item)],
-                                    images.get(sections.item_key(item)), x, y))
+                    self._make_cell(item, id_to_idx[id(item)], img, x, y, cell_w))
     
         panel.setContentView_(content)
-        self._position_panel(height)
+        self._position_panel((width, height))
 
-    def _make_cell(self, item, index, image, x, y):
+    def _make_cell(self, item, index, image, x, y, w=CELL_W):
         """网格格子：**只有图标**（无位图时兜底图标顶上），名字只进悬停提示。"""
-        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, CELL_W, CELL_H))
+        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, w, CELL_H))
         img = image if image is not None else capture.fallback_image_for_item(item)
+        # 同比例缩一份副本收进格子：宽条（网速/温度）不溢出压邻居，也不半截
+        img = capture.scaled_copy(img, w - 2 * CELL_PAD, CELL_H - 2 * CELL_PAD)
         if img is not None:
             btn.setImage_(img)
         btn.setTitle_("")
@@ -325,19 +364,20 @@ class RescuePanel(NSObject):
         btn.setAccessibilityIdentifier_(sections.item_key(item))
         return btn
 
-    def _position_panel(self, height):
+    def _position_panel(self, size):
         """面板定位：控制图标 AppKit frame，水平居中锚定在图标正下方 4pt。"""
+        width, height = size
         anchor = self.anchor_provider() if self.anchor_provider else None
-        print(f"[PeaseBar] 面板定位：anchor={anchor}，height={height}")
+        print(f"[PeaseBar] 面板定位：anchor={anchor}，size={size}")
         screen = NSScreen.mainScreen()
         if anchor is None or screen is None:
             self.panel.center()
             return
         ax, ay, aw, ah = anchor  # AppKit 屏幕坐标（左下原点）；菜单栏在屏幕顶部，ay 即按钮底边/菜单栏下缘
-        x = ax + aw / 2 - PANEL_WIDTH / 2
+        x = ax + aw / 2 - width / 2
         sframe = screen.frame()
         x = max(sframe.origin.x + 8,
-                min(x, sframe.origin.x + sframe.size.width - PANEL_WIDTH - 8))
+                min(x, sframe.origin.x + sframe.size.width - width - 8))
         y = ay - height - 4  # 面板顶边贴按钮底边下方 4pt（AppKit y 向上，origin 是左下角）
         self.panel.setFrameOrigin_(NSMakePoint(x, y))
 

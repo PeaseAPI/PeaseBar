@@ -17,13 +17,17 @@
 （T41：action 进去了、菜单却没出现在屏幕上），而按钮路径 100% 可控可测；
 右键菜单改用 `setMenu:`（T27：NSView 带菜单时系统自己弹），不再手写跟踪循环。
 
-拖拽跨区暂缺：布局页 Phase 8 起已改成 Thaw 同款横向图标条（胶囊滚动容器），
-但条内拖动换区是另一套 NSDraggingDestination 工程，与 Phase 3「把顺序写回真实
-菜单栏」的拖拽同源，等那边一起做；现在键盘 ⌥ 方向键 / 底部按钮 / 右键菜单三条路都全。
+拖拽（Phase 9 补上，对标 Thaw 布局编辑器）：按住格子拖 6pt 就起一次拖拽会话，
+条内拖动改顺序，拖到另一个区就换区（与键盘 ⌥←/→、⌥↑/↓、底部按钮、右键菜单
+共用同一套写入链与撤销栈）。为什么自己写 mouseDown 跟踪循环：NSButton 的
+ mouseDown 会进 cell 自己的跟踪循环，view 的 mouseDragged 根本不会被调用；
+左键自己圈事件，右键仍交给 super（T27：setMenu: 让系统自己弹，手弹不可靠）。
 
 Phase 8（对标 Thaw Settings 窗）：侧栏加宽到 220pt 带 SF Symbol 图标与分组小标题；
 布局页每区改成「区标题行（左区名 + 右排序钮）+ 横向单行图标条」，格子宽度随真实
 裁图的宽高比伸缩；静态页设置项逐行 GroupBox 卡片化（左标题+副说明、右控件）。
+Phase 9 再把拖拽提示、每区排序菜单、底部选项卡片（真实像素优先 / 图标条换行）
+一并接上；宽图标不再拒收，同比例缩着完整显示（capture.scaled_copy）。
 
 另含维持性设置：面板自动收回秒数（F5，通用页）、图标位图重抓与权限入口（疑难解答页）。
 """
@@ -33,10 +37,15 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
+    NSDragOperationGeneric,
+    NSDragOperationNone,
+    NSDraggingItem,
     NSEventModifierFlagCommand,
     NSEventModifierFlagOption,
+    NSEventTypeLeftMouseDown,
     NSFont,
     NSImage,
+    NSImageLeading,
     NSImageOnly,
     NSImageScaleProportionallyDown,
     NSLineBreakByTruncatingTail,
@@ -44,6 +53,7 @@ from AppKit import (
     NSMenu,
     NSMenuItem,
     NSPasteboard,
+    NSPasteboardTypeString,
     NSProcessInfo,
     NSPopUpButton,
     NSScrollView,
@@ -61,7 +71,7 @@ from AppKit import (
     NSWindowStyleMaskTitled,
     NSWorkspace,
 )
-from Foundation import NSObject, NSMakePoint, NSMakeSize, NSURL
+from Foundation import (NSObject, NSMakePoint, NSMakeSize, NSString, NSURL)
 from AppKit import NSApplication
 import os
 import platform
@@ -91,6 +101,11 @@ HEADER_H = 34
 GAP = 12
 # 布局页横向图标条高度（对标 Thaw 的 AXScrollArea 高 48，含胶囊上下留白）
 BAR_H = 46
+# 图标条胶囊内边距（上下 / 左右）与宽图标的格宽上限
+BAR_PAD_Y, BAR_PAD_X = 4, 6
+BAR_TILE_MAX_W = 110
+# 选项卡片高（标题行 24 + 两行开关各 34，再留点底）
+OPT_CARD_H = 96
 # 布局页底部固定行数：选中提示 + 移区按钮 + 顺序按钮 + 重置行
 BOTTOM_ROWS = 4
 # 撤销栈深度（一次编辑只存两个小列表，50 步足够找回手滑，也不会吃掉多少内存）
@@ -121,8 +136,69 @@ _PAGE_ICONS = {"layout": "square.grid.2x2", "general": "gearshape",
 _SIDEBAR_GROUPS = (("模块", ("layout", "general", "shortcuts")),
                    ("管理", ("troubleshoot", "about")))
 
+# 拖拽：按下后移动多少点算「拖」（小于它当点击，T9 手感与系统一致）
+DRAG_SLOP = 6.0
+# 图标条换行时每格占高（格子高 + 行间距）
+BAR_ROW_H = 38 + 4
+# 布局页底部选项开关（存配置，重启后照旧）
+_OPT_SWITCHES = (
+    ("use_captured", "优先用菜单栏真实像素", "关掉后格子一律用 App 图标/系统符号，截图权限没给也长得整齐"),
+    ("bar_wrap", "图标条放不下时换行", "开：整区图标一次看全（区会变高）；关：单行横向滚动"),
+)
+
 LOG_PATH = os.path.expanduser("~/Library/Logs/PeaseBar.log")
 REPO_URL = "https://github.com/PeaseAPI/PeaseBar"
+
+
+def _sidebar_symbol(name, label):
+    """侧栏图标：把 15×15 的 SF 符号画进 23×15 的透明画布，右边 8pt 就是图文间距。
+
+    NSButton 的 image/title 之间那段间距调不了（只给 2pt，看上去糊在一起），而把
+    符号本身的 size 拉宽会连图标一起变形，所以拿透明画布垫出间距。
+    取不到符号（系统降级）时返回 None，那一行就是纯文字，不比旧版差。
+    """
+    sym = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, label)
+    if sym is None:
+        return None
+    sym.setSize_(NSMakeSize(15, 15))
+    box = NSImage.alloc().initWithSize_(NSMakeSize(23, 15))
+    if box is None:
+        sym.setSize_(NSMakeSize(15, 15))
+        return sym
+    box.lockFocus()
+    sym.drawInRect_(NSMakeRect(0, 0, 15, 15))
+    box.unlockFocus()
+    box.setTemplate_(True)  # 跟着 contentTintColor 走（选中白、未选灰）
+    return box
+
+
+def _chevron_symbol():
+    """区标题行右侧那个「⌄」（更多排序）：拿不到 SF 符号时退成文字，不阻塞主流程。"""
+    sym = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+        "chevron.down", "更多排序")
+    if sym is None:
+        return None
+    sym.setSize_(NSMakeSize(10, 10))
+    return sym
+
+
+def _sort_menu(ctrl, sec):
+    """每区的更多排序菜单（对标 Thaw 的 Sort ⌄）：反转本区 / 恢复默认顺序。
+
+    tag 带两个信息：区下标×10 + 动作号（1=反转、2=恢复默认），处理端拆回；
+    菜单项显式给 target，不靠响应链（T21）。
+    """
+    menu = NSMenu.alloc().init()
+    menu.setAutoenablesItems_(False)
+    idx = sections.SECTION_ORDER.index(sec)
+    for kind, name in ((1, "反转本区顺序"), (2, "恢复默认顺序")):
+        mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            name, "onSortMore:", "")
+        mi.setTarget_(ctrl)
+        mi.setTag_(idx * 10 + kind)
+        menu.addItem_(mi)
+    return menu
+
 
 # SMAppService 状态码 → (开关是否显示为已开, 给用户的说明)
 _LOGIN_STATUS = {
@@ -136,12 +212,18 @@ _LOGIN_STATUS = {
 
 
 class GridView(NSView):
-    """布局页的页视图：只多干一件事 —— 接住键盘，把编辑动作交给控制器。
+    """布局页的页视图：接住键盘，同时是整页唯一的拖拽落点。
 
-    Thaw 的布局编辑器靠 SwiftUI 的键盘命令，我们这里用 AppKit 最直接的路：
-    内容视图做 firstResponder，`keyDown:` 里判修饰键。**没有选中项或控制器不认
+    键盘：内容视图做 firstResponder，`keyDown:` 里判修饰键。**没有选中项或控制器不认
     这根键时一律交回 super**（系统该响铃响铃、该走焦点环走焦点环），
     绝不吞键 —— 否则输入框、快捷键回退都会莫名其妙失效。
+
+    落点为什么在页视图而不是每条图标条：Phase 9 真机实测，一次拖拽会话里 AppKit
+    只认「会话开始时从源视图往上找到的那一条」——鼠标拖到别的条上，那条的
+    draggingEntered: 一次都不来（连 draggingSession:movedToPoint: 都在离开源条后停掉），
+    于是跨区拖拽永远落不了地。页视图是所有条的祖先，从会话开始到结束都是同一个
+    落点，落在哪一条、插到第几格由我们自己按坐标算（draggingLocation 在松手那一刻
+    是准的：实测窗口坐标与释放点分毫不差）。
     """
 
     def acceptsFirstResponder(self):
@@ -152,6 +234,81 @@ class GridView(NSView):
         if ctrl is None or not ctrl.handleKey_(event):
             objc.super(GridView, self).keyDown_(event)
 
+    def viewDidMoveToWindow(self):
+        # 注册落点类型要在进窗口之后：窗口未建时的注册不会报给窗口服务
+        if self.window() is not None and getattr(self, "drop_bars", None):
+            self.registerForDraggedTypes_([NSPasteboardTypeString])
+        return objc.super(GridView, self).viewDidMoveToWindow()
+
+    @objc.python_method
+    def drop_key_from(self, sender):
+        """拖拽里带的配置键；不是我们自己的格子（外部拖进来的文本）一律认作无效。"""
+        ctrl = getattr(self, "settings_ctrl", None)
+        if ctrl is None:
+            return None
+        pb = sender.draggingPasteboard()
+        key = pb.stringForType_(NSPasteboardTypeString) if pb is not None else None
+        if not key or str(key) not in ctrl.tiles:
+            return None
+        return str(key)
+
+    @objc.python_method
+    def bar_at(self, pt):
+        """页视图坐标 pt 落在哪一条图标条里：返回 (条, 条内坐标)，不在任何条上返回 (None, None)。"""
+        for frame, doc in (getattr(self, "drop_bars") or []):
+            if (frame.origin.x <= pt.x < frame.origin.x + frame.size.width
+                    and frame.origin.y <= pt.y < frame.origin.y + frame.size.height):
+                return doc, doc.convertPoint_fromView_(pt, self)
+        return None, None
+
+    @objc.python_method
+    def drop_target(self, sender):
+        """把一次拖拽翻译成「哪一条 + 第几格」；键不对或落在条外就翻译不出来。"""
+        if self.drop_key_from(sender) is None:
+            return None
+        pt = self.convertPoint_fromView_(sender.draggingLocation(), None)
+        doc, inner = self.bar_at(pt)
+        if doc is None:
+            return None
+        return doc, doc.drop_index_at_(inner)
+
+    @objc.python_method
+    def set_hot_bar(self, target):
+        for _frame, doc in (getattr(self, "drop_bars") or []):
+            doc._set_hot(target is not None and doc == target)
+
+    def draggingEntered_(self, sender):
+        target = self.drop_target(sender)
+        self.set_hot_bar(target[0] if target else None)
+        return NSDragOperationGeneric if target else NSDragOperationNone
+
+    def draggingUpdated_(self, sender):
+        target = self.drop_target(sender)
+        self.set_hot_bar(target[0] if target else None)
+        return NSDragOperationGeneric if target else NSDragOperationNone
+
+    def draggingExited_(self, sender):
+        self.set_hot_bar(None)
+        return NSDragOperationNone
+
+    def concludeDragOperation_(self, sender):
+        self.set_hot_bar(None)
+
+    def prepareForDragOperation_(self, sender):
+        return self.drop_key_from(sender) is not None
+
+    def performDragOperation_(self, sender):
+        self.set_hot_bar(None)
+        key = self.drop_key_from(sender)
+        ctrl = getattr(self, "settings_ctrl", None)
+        if key is None or ctrl is None:
+            return False
+        target = self.drop_target(sender)
+        if target is None:
+            return False
+        doc, index = target
+        return ctrl.applyDrop_key_toSection_atIndex_(key, doc.bar_section, index)
+
 
 class FlippedView(NSView):
     """图标条的内容视图：左上原点。AppKit 默认 y 朝上，横排要从底部倒数，
@@ -159,6 +316,105 @@ class FlippedView(NSView):
 
     def isFlipped(self):
         return True
+
+
+class TileButton(NSButton):
+    """图标格子：在 NSButton 的点击之外多干一件事 —— 按住拖 6pt 起一次拖拽。
+
+    为什么不在 mouseDown 里自己圈事件：nextEventMatchingMask 把后续事件从队列里
+    抽干，窗口就不会再把这些事件交给拖拽会话，跨视图的落点命中测试从此不再更新
+    —— 实测只会拖中「起点那一条」，落到别的条上一点反应都没有（同一条内改序却
+    能用，因为落点一直是起点那条）。所以走系统正常派发：mouseDown: 只记起点
+    （不进 cell 的 trackMouse，否则 mouseDragged: 永远收不到），过阈值在
+    mouseDragged: 里起会话，没拖过阈值在 mouseUp: 里当一次点击；右键不拦，
+    回系统 rightMouseDown: 弹 setMenu: 挂的移区菜单（T27/T41）。
+    """
+
+    def mouseDown_(self, event):
+        ctrl = getattr(self, "settings_ctrl", None)
+        if ctrl is None or event.type() != NSEventTypeLeftMouseDown:
+            return objc.super(TileButton, self).mouseDown_(event)
+        # 故意不调 super：进了 NSCell 的 trackMouse，mouseDragged: 就再也收不到
+        self._drag_start = event.locationInWindow()
+        self._drag_raised = False
+
+    def mouseDragged_(self, event):
+        ctrl = getattr(self, "settings_ctrl", None)
+        start = getattr(self, "_drag_start", None)
+        if ctrl is None or start is None or getattr(self, "_drag_raised", True):
+            return
+        p = event.locationInWindow()
+        if abs(p.x - start.x) + abs(p.y - start.y) < DRAG_SLOP:
+            return
+        self._drag_raised = True
+        self._drag_start = None
+        ctrl.startTileDrag_withEvent_(self, event)  # 会话接手：往后的事件归它调度
+
+    def mouseUp_(self, event):
+        ctrl = getattr(self, "settings_ctrl", None)
+        start, raised = getattr(self, "_drag_start", None), getattr(self, "_drag_raised", False)
+        self._drag_start = None
+        self._drag_raised = False
+        if ctrl is None or raised or start is None:
+            return  # 拖起来了（会话自己收尾）；或者压根不是我们从按下走到松手的
+        ctrl.select_tile_(self)  # 没拖起来 = 一次点击（选中与高亮都走控制器这条路）
+
+
+class BarDocView(FlippedView):
+    """一条图标条的内容视图：格子们的主人。
+
+    拖拽落点不在这个视图上（原因见 GridView 的注释），它只负责两件事：
+    把「条内坐标」翻译成插入位，以及拖入时把胶囊底色亮一档。
+    """
+
+    def _set_hot(self, hot):
+        scroll = self.enclosingScrollView()
+        layer = scroll.layer() if scroll is not None else None
+        if layer is None:
+            return
+        cg = (Quartz.CGColorCreateGenericRGB(0.42, 0.62, 1.0, 0.34) if hot
+              else Quartz.CGColorCreateGenericRGB(0.55, 0.55, 0.58, 0.22))
+        layer.setBackgroundColor_(cg)
+
+    @objc.python_method
+    def drop_index_at_(self, pt):
+        """条内坐标 pt 对应的插入位（行/列数学抽到 drop_index_in_rows，单测能直接跑）。"""
+        rects = [(v.frame().origin.x, v.frame().origin.y,
+                  v.frame().size.width, v.frame().size.height)
+                 for v in self.subviews() if isinstance(v, TileButton)]
+        return drop_index_in_rows(rects, pt.x, pt.y)
+
+
+# 同一行的 y 允许多大差：个别格子（Wi-Fi 那种小图标）会被报高/低 1~2pt
+ROW_TOL = 6.0
+
+
+def drop_index_in_rows(rects, x, y):
+    """图标条里的插入位：rects 是各格子的 (x, y, 宽, 高)（条内坐标、左上原点），(x, y) 是落点。
+
+    先按 y 把格子归成行（与行首 y 相差不超 ROW_TOL 算同一行），再在落点所在那一行
+    里数「中心在它左边的格子」有几个。只按 x 排会串行：换行开时第二行的 x 与第一行
+    重复，实测把第 3 格拖过去落到第 5 格就是这个坑。
+    """
+    if not rects:
+        return 0
+    rows = []
+    for r in sorted(rects, key=lambda r: r[1]):
+        if not rows or r[1] - rows[-1][0][1] > ROW_TOL:
+            rows.append([r])
+        else:
+            rows[-1].append(r)
+    base = 0
+    for row in rows:
+        top, h = min(r[1] for r in row), row[0][3]
+        if y > top + h:
+            base += len(row)  # 落点在这一行下面，整行跳过
+            continue
+        for i, r in enumerate(sorted(row, key=lambda r: r[0])):
+            if x < r[0] + r[2] / 2.0:
+                return base + i
+        return base + len(row)  # 落在本行右侧末尾
+    return base
 
 
 class SettingsController(NSObject):
@@ -178,6 +434,9 @@ class SettingsController(NSObject):
         self.stats = dict(capture.last_stats)  # 最近一次取图构成（真实像素/兜底）
         self.tiles = {}       # 配置键 → 格子按钮（选中态/反查用）
         self.selected_key = None  # 当前选中的图标（编辑动作的作用对象）
+        self.drag_key = None      # 正在拖的图标配置键（没拖时 None）
+        self.use_captured = True  # 布局页选项：格子优先用真实截图像素
+        self.bar_wrap = True      # 布局页选项：图标条装不下就换行而不是横向滚动
         self.buckets = {}     # 最近一次 _rebuild 的分桶结果（键盘编辑读它，不二次盘点）
         self._undo = []       # 撤销栈：每格是 {sections, order} 快照
         self.on_changed = None  # 分区/超时变更后回调（app 用来刷新面板）
@@ -271,7 +530,9 @@ class SettingsController(NSObject):
         for sec in _SECTION_ORDER:
             if not buckets[sec]:
                 continue
-            h += SECTION_H + BAR_H + GAP
+            h += SECTION_H + self._bar_height(buckets[sec]) + GAP
+        # 拖拽提示行 + 选项卡片（Phase 9 新增，与 _build_layout_page 的排版一一对应）
+        h += ROW_H + 4 + OPT_CARD_H + 8
         h += (BOTTOM_ROWS + len(self._hints())) * (ROW_H + 8) + EDGE
         return int(h)
 
@@ -284,6 +545,9 @@ class SettingsController(NSObject):
         cfg = sections.load_config()
         buckets = sections.plan_sections(self.items, cfg)
         self.buckets = buckets  # 键盘编辑（⌥方向键/前移后移）就在这份分桶上动手
+        # 两个布局选项同步成标记：格子宽/高与取图都看它，一处读盘多处用
+        self.use_captured = bool(cfg.get("use_captured", True))
+        self.bar_wrap = bool(cfg.get("bar_wrap", True))
         self.tiles = {}
         self.move_buttons = []
         self.order_buttons = []
@@ -316,8 +580,15 @@ class SettingsController(NSObject):
         self._sync_selection()
 
     def _build_sidebar(self, container, height, page):
-        """左侧页签列（Phase 8 对标 Thaw）：220pt 宽、SF Symbol 图标、
-        分组小标题、32pt 行高 + 选中圆角垫底。"""
+        """左侧页签列（对标 Thaw）：220pt 宽、SF Symbol 图标、
+        分组小标题、32pt 行高 + 选中圆角垫底。
+
+        图文排版就靠两件事（Phase 9 修好那个「文字贴左边、图标不知道跑哪去了」）：
+        ① imagePosition 用 NSImageLeading（旧代码写了 6 = NSImageOverlaps，
+           图标与文字重叠画在一起，看上去就是排版坏了）；
+        ② 图文间距 NSButton 自己调不了（只给 2pt），所以把 15pt 的符号画进 23pt
+           宽、右边透空的画布，那 8pt 就是间距（直接改符号尺寸会把图标拉变形）。
+        """
         side = NSVisualEffectView.alloc().initWithFrame_(NSMakeRect(0, 0, SIDEBAR_W, height))
         side.setMaterial_(NSVisualEffectMaterialSidebar)
         side.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
@@ -333,8 +604,8 @@ class SettingsController(NSObject):
             side.addSubview_(cap)
             y -= 22
             for key in keys:
-                # 左缩进 14pt（Q72 判据 ≥12）；行高 32pt 与 Thaw 侧栏一致
-                btn = NSButton.alloc().initWithFrame_(NSMakeRect(14, y - 32, SIDEBAR_W - 28, 32))
+                # 行左缩 10pt，图标从 x≈16 起，文字再退到 x≈39（Q72 判据：缩进 ≥12）
+                btn = NSButton.alloc().initWithFrame_(NSMakeRect(10, y - 32, SIDEBAR_W - 20, 32))
                 btn.setTitle_(names[key])
                 btn.setBordered_(False)
                 btn.setAlignment_(3)  # 左对齐（默认居中会像按钮组不像页签列）
@@ -347,12 +618,11 @@ class SettingsController(NSObject):
                 bg = (Quartz.CGColorCreateGenericRGB(1.0, 1.0, 1.0, 0.16) if key == page
                       else Quartz.CGColorCreateGenericRGB(0.0, 0.0, 0.0, 0.0))
                 btn.layer().setBackgroundColor_(bg)
-                sym = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-                    _PAGE_ICONS[key], names[key])
+                sym = _sidebar_symbol(_PAGE_ICONS[key], names[key])
                 if sym is not None:
-                    sym.setSize_(NSMakeSize(15, 15))
                     btn.setImage_(sym)
-                    btn.setImagePosition_(6)  # NSImageLeading：图标在左、文字在右
+                    btn.setImagePosition_(NSImageLeading)  # 图标在左、文字在右
+                    btn.setImageHugsTitle_(True)           # 图文不留一段空白，挨着排
                     btn.setImageScaling_(NSImageScaleProportionallyDown)
                     btn.setContentTintColor_(NSColor.labelColor() if key == page
                                              else NSColor.secondaryLabelColor())
@@ -387,9 +657,10 @@ class SettingsController(NSObject):
         # 页视图用 GridView：它是窗口的 firstResponder，方向键才能进到我们手里
         content = GridView.alloc().initWithFrame_(NSMakeRect(0, 0, CONTENT_W, height))
         content.settings_ctrl = self  # 方向键转发给控制器（不起 controller 这个名字，避开与 AppKit 同名属性撞车）
+        content.drop_bars = []        # 拖拽落点：[(胶囊在页视图坐标下的矩形, 条内容视图), …]
 
         title = NSTextField.labelWithString_(
-            "菜单栏布局 · 单击选中，⌥←/→ 改顺序，⌥↑/↓ 换区")
+            "菜单栏布局 · 单击选中，拖动改位置，⌥←/→ 改顺序")
         title.setFont_(NSFont.boldSystemFontOfSize_(13))
         title.setFrame_(NSMakeRect(EDGE, height - HEADER_H, CONTENT_W - 2 * EDGE, ROW_H))
         content.addSubview_(title)
@@ -417,14 +688,38 @@ class SettingsController(NSObject):
                 sb.setAction_("onSortSection:")
                 sb.setRepresentedObject_(sec)
                 content.addSubview_(sb)
+                # Thaw 的 Sort ⌄ ：多几个排序玩法（反转/恢复默认），同样写 order 可撤销
+                mb = NSButton.alloc().initWithFrame_(
+                    NSMakeRect(CONTENT_W - EDGE - 26, top - SECTION_H + 1, 26, 20))
+                mb.setTitle_("")
+                mb.setBezelStyle_(0)
+                mb.setImage_(_chevron_symbol())
+                mb.setImagePosition_(NSImageOnly)
+                mb.setMenu_(_sort_menu(self, sec))
+                mb.setAccessibilityLabel_(f"{sections.SECTION_LABELS[sec]}的更多排序")
+                mb.setAccessibilityIdentifier_("sort-menu-" + sec)
+                content.addSubview_(mb)
             top -= SECTION_H
-            # Thaw 同款横向单行图标条（胶囊滚动容器，真实裁图宽度可变）
-            top -= BAR_H
-            self._build_section_bar(content, group, sec, top)
+            # Thaw 同款横向图标条（胶囊容器，真实裁图宽度可变，选项开则换行）
+            bar_h = self._bar_height(group)
+            top -= bar_h
+            self._build_section_bar(content, group, sec, top, bar_h)
             top -= GAP
 
-        # ---------- 底部（自上而下）：提示行 / 选中提示 / 移区按钮 / 顺序按钮 / 重置 ----------
+        # ---------- 底部（自上而下）：拖拽提示 / 提示行 / 选中提示 / 移区 / 顺序 / 选项 / 重置 ----------
         # 权限提醒与重抓、超时都搬到对应页（疑难解答/通用），这页只留编辑相关
+
+        # 拖拽提示（对标 Thaw LayoutBarsSection 的 dragHint，翻成中文）：
+        # 新界面得告诉用户「能拖」，不然没人知道鼠标按住图标可以动
+        hint = NSTextField.labelWithString_(
+            "把图标在区之间拖动即可换区，条内拖动改顺序；"
+            "也可用 ⌥←/→ 改顺序、⌥↑/↓ 换区，⌘Z 撤销。")
+        hint.setFont_(NSFont.systemFontOfSize_(11))
+        hint.setTextColor_(NSColor.secondaryLabelColor())
+        hint.setFrame_(NSMakeRect(EDGE, top - ROW_H, CONTENT_W - 2 * EDGE, ROW_H))
+        hint.cell().setLineBreakMode_(NSLineBreakByTruncatingTail)
+        content.addSubview_(hint)
+        top -= ROW_H + 4
 
         # 挤不下/够不着提示（Thaw OutOfRoomWarning/.outOfReach 的位置选择，T72）
         for text in self._hints():
@@ -484,7 +779,7 @@ class SettingsController(NSObject):
         content.addSubview_(btn_undo)
         btn_undo.setToolTip_("回上一步分区/顺序改动（⌘Z）")
         self.btn_undo = btn_undo
-        kb = NSTextField.labelWithString_("⌥←/→ 改顺序 · ⌥↑/↓ 换区 · ⌘1/2/3 移区 · ⌘Z 撤销")
+        kb = NSTextField.labelWithString_("拖动改位置 · ⌥←/→ 改顺序 · ⌥↑/↓ 换区 · ⌘Z 撤销")
         kb.setFont_(NSFont.systemFontOfSize_(10))
         kb.setTextColor_(NSColor.tertiaryLabelColor())
         kb.setAlignment_(2)  # 右对齐
@@ -492,6 +787,37 @@ class SettingsController(NSObject):
         kb.cell().setLineBreakMode_(NSLineBreakByTruncatingTail)
         content.addSubview_(kb)
         top -= ROW_H + 8
+
+        # 选项卡片（对标 Thaw 布局页的 Options）：能真的写进配置、影响渲染的开关才进来
+        card = self._mk_card(content, top, OPT_CARD_H)
+        cap = NSTextField.labelWithString_("选项")
+        cap.setFont_(NSFont.boldSystemFontOfSize_(11))
+        cap.setTextColor_(NSColor.secondaryLabelColor())
+        cap.setFrame_(NSMakeRect(14, OPT_CARD_H - 24, 120, 16))
+        card.addSubview_(cap)
+        self.opt_switches = []
+        for i, (flag, name, tip) in enumerate(_OPT_SWITCHES):
+            row_y = OPT_CARD_H - 24 - (i + 1) * 34 + 6
+            lab = NSTextField.labelWithString_(name)
+            lab.setFont_(NSFont.systemFontOfSize_(12))
+            lab.setFrame_(NSMakeRect(14, row_y + 6, 240, 18))
+            card.addSubview_(lab)
+            sub = NSTextField.labelWithString_(tip)
+            sub.setFont_(NSFont.systemFontOfSize_(10))
+            sub.setTextColor_(NSColor.tertiaryLabelColor())
+            sub.setFrame_(NSMakeRect(14, row_y - 8, 380, 14))
+            card.addSubview_(sub)
+            sw = NSSwitch.alloc().initWithFrame_(
+                NSMakeRect(CONTENT_W - 2 * EDGE - 74, row_y, 60, 28))
+            sw.setState_(1 if self.opt(flag) else 0)
+            sw.setTarget_(self)
+            sw.setAction_("onOptionSwitch:")
+            sw.setRepresentedObject_(flag)
+            sw.setAccessibilityLabel_(name)
+            sw.setAccessibilityIdentifier_("option-" + flag)
+            card.addSubview_(sw)
+            self.opt_switches.append(sw)
+        top -= OPT_CARD_H + 8
 
         # 重置布局（Thaw Reset Layout）：确认后才动，动完留一步可撤销
         btn_reset = NSButton.alloc().initWithFrame_(
@@ -506,18 +832,22 @@ class SettingsController(NSObject):
         return content
 
     @objc.python_method
-    def _build_section_bar(self, content, group, sec, top):
-        """Thaw LayoutBar 同款横向图标条：圆角胶囊滚动容器 + 单行排布格子。
+    def _build_section_bar(self, content, group, sec, top, bar_h=None):
+        """Thaw LayoutBar 同款横向图标条：圆角胶囊容器 + 格子（单行或换行）。
 
-        格子宽度随图标真实宽高比伸缩（菜单栏宽图标不再挤进正方形格子里留大片
-        空隙，Thaw 靠这个把间距做得舒服）；超出条宽走横向滚动，不弹滚动条。
+        格子宽度按图标真实宽伸缩（菜单栏宽图标不再挤进正方形格子里留大片
+        空隙，Thaw 靠这个把间距做得舒服）；换行关时超出条宽走横向滚动，不弹滚动条；
+        换行开时按条宽拆成多行，整区一次看全（高随行数长，与 _bar_height 同源）。
+        内容视图是 BarDocView：它同时是拖拽落点（同区改序 / 跨区换区）。
         """
         bar_w = CONTENT_W - 2 * EDGE
-        pad = 6
-        tile_h = BAR_H - 12
-        widths = [self._bar_tile_width(sections.item_key(item), tile_h) for item in group]
-        doc_w = max(bar_w, sum(widths) + TILE_GAP * (len(widths) - 1) + 2 * pad)
-        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(EDGE, top, bar_w, BAR_H))
+        pad = BAR_PAD_X
+        rows = self._bar_rows(group)
+        bar_h = bar_h or self._bar_height(group)
+        doc_w = bar_w if self.bar_wrap else max(
+            bar_w, max((sum(w for _, w in row) + TILE_GAP * (len(row) - 1) for row in rows),
+                       default=0) + 2 * pad)
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(EDGE, top, bar_w, bar_h))
         scroll.setWantsLayer_(True)
         scroll.layer().setCornerRadius_(10.0)
         # 胶囊底色比窗口背景亮一档（Thaw 的 LayoutBar 对比度；0.10/0.16 在深色下几乎看不出）
@@ -527,35 +857,88 @@ class SettingsController(NSObject):
         scroll.setHasVerticalScroller_(False)
         scroll.setHasHorizontalScroller_(False)  # 项数不多，滚轮/触控板够用，不弹滚动条
         scroll.setAutomaticallyAdjustsContentInsets_(False)
-        doc = FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, doc_w, BAR_H))
-        x = pad
-        for item, w in zip(group, widths):
-            doc.addSubview_(self._make_tile(item, sec, x, 6, w))
-            x += w + TILE_GAP
+        doc = BarDocView.alloc().initWithFrame_(NSMakeRect(0, 0, doc_w, bar_h))
+        doc.settings_ctrl = self
+        doc.bar_section = sec
+        # 落点登记到页视图（整页只有一个落点，原因见 GridView）：页视图坐标下
+        # 的胶囊矩形 + 它的内容视图，拖拽时按坐标反查「落在哪一条」
+        getattr(content, "drop_bars", []).append((scroll.frame(), doc))
+        for r, row in enumerate(rows):
+            x = pad
+            y = BAR_PAD_Y + r * (TILE_H + TILE_GAP)
+            for item, w in row:
+                doc.addSubview_(self._make_tile(item, sec, x, y, w))
+                x += w + TILE_GAP
         scroll.setDocumentView_(doc)
         content.addSubview_(scroll)
 
     @objc.python_method
-    def _bar_tile_width(self, key, tile_h):
-        """图标条格子宽度：按真实裁图像素的宽高比伸缩，钳在合理区间里；
-        没有位图（兜底 App 图标/系统符号）时用默认格宽。"""
-        img = self.images.get(key)
+    def _bar_rows(self, group):
+        """图标条的行拆分：每行是 [(item, 格宽), …]。
+
+        换行关：一行到底（装不下就横向滚动）；换行开：按条宽折行，单个图标再宽
+        也独占一行（不会因格子比条还宽而进死循环）。
+        """
+        avail = CONTENT_W - 2 * EDGE - 2 * BAR_PAD_X
+        out, row, used = [], [], 0.0
+        for item in group:
+            w = self._bar_tile_width(sections.item_key(item))
+            if self.bar_wrap and row and used + TILE_GAP + w > avail:
+                out.append(row)
+                row, used = [], 0.0
+            row.append((item, w))
+            used += w + TILE_GAP
+        if row:
+            out.append(row)
+        return out or []
+
+    @objc.python_method
+    def _bar_height(self, group):
+        """图标条高度（行高一算就定）：单行恰好等于旧版 BAR_H，不改变未换行时的外观。"""
+        rows = self._bar_rows(group)
+        if not rows:
+            return BAR_H
+        return 2 * BAR_PAD_Y + len(rows) * TILE_H + (len(rows) - 1) * TILE_GAP
+
+    @objc.python_method
+    def _bar_tile_width(self, key):
+        """图标条格子宽度：按真实像素的宽伸缩，钳在合理区间里；
+        没有位图（App 图标/系统符号兜底）时用默认格宽。
+
+        旧版按「格高×宽高比」算，但图标本体只有 18pt 高、格子高 34，宽图标因此
+        被估得很宽；Phase 9 直接用图自身的点宽加内边距，多少图占多少位。
+        """
+        img = self._tile_image_key(key)
         if img is None:
             return TILE_W
-        size = img.size()
-        if size.height <= 0:
-            return TILE_W
-        return max(26, min(72, int(round(tile_h * (size.width / size.height))) + 6))
+        return max(30, min(BAR_TILE_MAX_W, int(round(img.size().width)) + 12))
+
+    @objc.python_method
+    def _tile_image_key(self, key):
+        """取图入口：选项「真实像素优先」关掉时当作没截到，直接走兜底链。"""
+        if not self.use_captured:
+            return None
+        return self.images.get(key)
+
+    @objc.python_method
+    def _tile_image(self, item, max_w, max_h):
+        """格子里那张图：真实像素优先，没截到用兜底，永远有图；
+        再按格子大小同比例缩一份副本（不删像素、不改缓存原件，宽图也不半截）。"""
+        key = sections.item_key(item)
+        img = self._tile_image_key(key) or capture.fallback_image_for_item(item)
+        return capture.scaled_copy(img, max_w, max_h)
 
     @objc.python_method
     def _make_tile(self, item, sec, x, y, w=None):
         """一个图标格子：**只有图标**（截取像素缺失时用兜底图标，绝不显示名字）。
 
-        单击 = 选中（按钮切换态高亮）；右键 = 系统自动弹 setMenu: 挂的移区菜单（T27）。
+        单击 = 选中（按钮切换态高亮）；右键 = 系统自动弹 setMenu: 挂的移区菜单（T27）；
+        按住拖 6pt = 起拖拽会话（TileButton 自己圈事，落点由 BarDocView 接）。
         """
-        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, w or TILE_W, TILE_H))
+        btn = TileButton.alloc().initWithFrame_(NSMakeRect(x, y, w or TILE_W, TILE_H))
+        btn.settings_ctrl = self
         key = sections.item_key(item)
-        img = self.images.get(key) or capture.fallback_image_for_item(item)
+        img = self._tile_image(item, (w or TILE_W) - 10, TILE_H - 10)
         if img is not None:
             btn.setImage_(img)
         btn.setTitle_("")
@@ -613,7 +996,11 @@ class SettingsController(NSObject):
     # ---------- 交互 ----------
 
     def onTileClick_(self, sender):
-        """单击图标 = 选中（底部提示与移区按钮随之可用）。不再在这里手弹菜单。"""
+        """单击图标 = 选中（底部提示与移区按钮随之可用）。不再在这里手弹菜单。
+
+        这条路现在主要给 AX 用（取证 AXPress 格子会直接发 action），
+        鼠标点击走 TileButton.mouseDown:（它要兼顾「是不是拖」）。
+        """
         item = self._item_at(sender)
         if item is None:
             print("[PeaseBar] 设置：格子点击但未反查到 item（representedObject 丢失）")
@@ -624,6 +1011,132 @@ class SettingsController(NSObject):
         sec = _SECTION_ORDER[sender.tag()] if 0 <= sender.tag() < len(_SECTION_ORDER) \
             else sections.SECTION_VISIBLE
         print(f"[PeaseBar] 设置：选中 {item.label!r}（当前 {sections.SECTION_LABELS[sec]}）")
+
+    @objc.python_method
+    def select_tile_(self, tile):
+        """鼠标左键在格子上松手（没拖起来）：与 action 同一条选中路。"""
+        self.onTileClick_(tile)
+
+    # ---------- 拖拽（源与落点共用一套写入链） ----------
+
+    @objc.python_method
+    def startTileDrag_withEvent_(self, tile, event):
+        """把按住的格子变成一次拖拽会话：pasteboard 里只放配置键。
+
+        只放键不放自定义类型：外部 App 拖一段文本进来时 _drag_key_from 对不上我们的格子，
+        自然就接不了（不会因为收到野字符串就把图标搬走）。会话自带RunLoop，
+        返回时拖拽已经结束，这里只需把拖动中的格子恢复平静。
+        """
+        key = str(tile.representedObject())
+        drag_item = NSDraggingItem.alloc().initWithPasteboardWriter_(
+            NSString.stringWithString_(key))
+        img = tile.image()
+        if drag_item is None:
+            return
+        try:
+            drag_item.setDraggingFrame_contents_(tile.bounds(), img)
+        except Exception:  # 旧系统签名不一致时退位：没拖影也能拖，不能因它报错
+            pass
+        self.drag_key = key
+        session = tile.beginDraggingSessionWithItems_event_source_([drag_item], event, self)
+        # 日志是取证唯一能看出「拖到底没起会话」的地方（探针看不到拖影）
+        print(f"[PeaseBar] 起拖：{key} 会话={'有' if session is not None else '无'}")
+        if session is not None:
+            session.setAnimatesRelease_(True)
+        self.drag_key = None
+
+    def draggingSession_sourceOperationMaskForDraggingContext_(self, session, context):
+        """拖拽源：只在自家窗口内搬（拖到桌面/其他 App 不给落点）。"""
+        return NSDragOperationGeneric
+
+    def draggingSession_endedAtPoint_operation_(self, session, location, operation):
+        """会话结束（NSDraggingSource 的回调）：只用来收掉拖动中的键。"""
+        self.drag_key = None
+
+    @objc.python_method
+    def applyDrop_key_toSection_atIndex_(self, key, target, index):
+        """拖拽落位：一次写定「换哪个区 + 插到第几格」，同样进撤销栈。
+
+        与 applyMove_to_ 的分工：那个只把项抻到目标区末尾（按钮/⌥↑↓/⌘123 用），
+        拖拽多了「落在哪两格之间」这一维；算完新分桶与原桶完全一致就当没动过，
+        不写盘也不记撤销点（否则原地拖一下就把 ⌘Z 堵了一层）。
+        """
+        if not key or target is None:
+            return False
+        cfg = sections.load_config()
+        buckets = sections.plan_sections(self.items, cfg)
+        pos = sections.find_pos(buckets, key)
+        item = self._item_by_key(key)
+        if pos is None or item is None:
+            return False
+        new = {s: list(buckets[s]) for s in _SECTION_ORDER}
+        src_sec, _idx = pos
+        if src_sec == target:
+            new[target] = sections.move_to_index(buckets[target], sections.item_key, key, index)
+        else:
+            new[src_sec] = [it for it in buckets[src_sec] if sections.item_key(it) != key]
+            joined = list(buckets[target]) + [item]  # 不在目标区时先挂尾，再按落点插
+            new[target] = sections.move_to_index(joined, sections.item_key, key, index)
+        if all(new[s] == buckets[s] for s in _SECTION_ORDER):
+            return False  # 落回原位：不算改动
+        self._push_undo(cfg)
+        sections.set_section(cfg, key, target)
+        sections.store_order(cfg, sections.flatten(new))
+        sections.save_config(cfg)
+        self.selected_key = key  # 拖完就是选中，底部提示与按钮立即可用
+        self.buckets = new
+        self._rebuild()
+        if self.on_changed:
+            self.on_changed()
+        print(f"[PeaseBar] 设置：拖动 {key} → {sections.SECTION_LABELS[target]} "
+              f"第 {min(index, len(new[target]))} 格")
+        return True
+
+    # ---------- 布局页选项（真实像素优先 / 图标条换行） ----------
+
+    @objc.python_method
+    def opt(self, flag):
+        """读布局选项（只在 _rebuild 同步下来的两个标记上取值，不二次读盘）。"""
+        return bool(getattr(self, flag, True))
+
+    def onOptionSwitch_(self, sender):
+        """选项开关：写盘后整窗重建（换行会改窗高，真实像素会改格子里的图）。"""
+        flag = str(sender.representedObject())
+        on = sender.state() == 1
+        cfg = sections.load_config()
+        cfg[flag] = on
+        sections.save_config(cfg)
+        if flag == "use_captured" and on and not self.images:
+            self._reload_items()  # 开关拉回真实像素但手上没货：补一次取图
+        print(f"[PeaseBar] 设置：选项 {flag} = {on}")
+        self._rebuild()
+        if self.on_changed:
+            self.on_changed()
+
+    def onSortMore_(self, sender):
+        """排序菜单项：反转本区 / 恢复默认顺序（都走 order 写入，⌘Z 可撤）。"""
+        sec = _TAG_SECTIONS.get(sender.tag() // 10)
+        kind = sender.tag() % 10
+        if sec is None:
+            return
+        cfg = sections.load_config()
+        buckets = sections.plan_sections(self.items, cfg)
+        group = buckets[sec]
+        if len(group) < 2:
+            return
+        self._push_undo(cfg)
+        if kind == 1:      # 反转本区
+            buckets[sec] = list(reversed(group))
+        else:              # 恢复默认：清掉本区记录的顺序，回到盘点时的菜单栏序
+            keys = {sections.item_key(it) for it in group}
+            cfg["order"] = [k for k in cfg.get("order") or [] if k not in keys]
+            buckets = sections.plan_sections(self.items, cfg)
+        sections.store_order(cfg, sections.flatten(buckets))
+        sections.save_config(cfg)
+        self.buckets = buckets
+        self._rebuild()
+        if self.on_changed:
+            self.on_changed()
 
     def onMoveButton_(self, sender):
         """底部「移到 X 区」按钮：作用于当前选中项。"""

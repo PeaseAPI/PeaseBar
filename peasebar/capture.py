@@ -8,9 +8,14 @@
 还有磁盘缓存、重捕获调度、污染判定，我们 v1 只做必要四步：
 
     截条带 → 按 frame 裁剪（裁进条带高度）→ 抠掉近似统一的背景 → 裁掉透明边距
-    → 宽条（图标+数字/文字复合）与贴边条（裁窗口装不下）一律拒收走兜底：
-      显示层只出完整的近方形字形，绝不显示半截图或消息数字（用户定调）
+      → 贴边条（AX frame 窄于真实绘制宽）先向邻居借空白把窗口撑大再裁一次；
+      宽条（图标+数字/文字复合）不拒收，整体同比例收进显示框（Thaw
+      MenuBarItemRowImage.drawnSize 的做法：宽超上限就连带高度一起缩）
     → 单色字形判定，成立则标记 template（跟随界面明暗着色）
+
+    Phase 9 口径变更（用户定调：「显示一半图标的，就完整显示同比例缩小」）：
+    旧版把宽条一律拒收换成 App 图标兜底，用户看到的是「我的图标没了/半截」，
+    现在宁可图小一点，也要把抓到的像素完整地按比例画出来。
 
 权限：截屏需「屏幕录制」授权（与辅助功能相互独立，同 T16 按 bundle 记账）。
 无权限时截不到像素，但 UI 不能因此显示名字——本模块提供**图标兜底链**
@@ -23,13 +28,14 @@ from AppKit import (
     NSBitmapImageRep,
     NSImage,
     NSRunningApplication,
+    NSScreen,
     NSWorkspace,
 )
 from Foundation import NSSize
 
 from peasebar import sections
 
-# 菜单栏逻辑高度（27 上仍为 24pt）；AX frame 常报 h=24 且 y=7.5，超出条带
+# 菜单栏逻辑高度兜底值（非刘海屏的老尺寸）；真实高度一律走 menu_bar_height()
 MENU_BAR_HEIGHT = 24.0
 
 # 抠像阈值：与 Thaw separatedFromNearUniformBackground(maxColorDistance: 36) 一致
@@ -44,10 +50,17 @@ TRIM_PAD = 2
 # 那种全透明图交给按钮就是空白格子（P42 实测 16 格空白），必须当成截不到走兜底。
 MIN_GLYPH_PIXELS = 20
 
-# 宽图块判定阈值：宽高比超过它按「图标+数字/文字」复合条处理，直接拒收走兜底
-# （用户定调：我们的 UI 只显示图标本体；抠像会把图标内部镂空也抠掉，
-# 剥切只会切出半截图标——宁误杀宽纯图标也不出半截，T97）
-WIDE_ASPECT = 1.4
+# 离谱宽高比上限：超过它说明裁窗口串到了别的图标（整条误裁），才拒收走兜底。
+# 注意这不再是「宽图标拒收」的阈值——Phase 9 起宽条照样收，只是同比例缩小。
+MAX_ASPECT = 10.0
+
+# 贴边时向邻居借空白的上下限（点）：AX frame 常窄于真实绘制宽，邻居左边界以内的
+# 像素必然不属于邻居，借过来重裁就能拿到完整图标（借太多会裁进邻居字形）。
+ROOM_MAX = 90.0
+# 拿不到邻居信息时的保底借宽：就算 frame 紧挨着也总能借到几个像素的空白
+ROOM_MIN = 12.0
+# 同一字形内部允许的最大空白（点）：小于图标间距，大于数字/字符间隙
+INK_GAP_PT = 4.0
 
 # 抓取结果缓存：{item_key: (NSImage, 代际)}；盘点刷新时代际递增使旧缓存失效
 _cache = {}
@@ -61,10 +74,13 @@ last_stats = {"cropped": 0, "fallback": 0, "permission": True, "bar_drawn": True
 
 # App 图标绘制上限（Thaw MenuBarItemDisplayImage.appIconHeight = 18pt）
 APP_ICON_MAX_H = 18.0
-# 系统模块符号的绘制上限（比 App 图标略高，贴近菜单栏字形）
+# 裁图点尺寸上限（比菜单栏字形略高，宽度对齐 Thaw MenuBarItemRowImage.maxWidth
+# 120pt）：宽高各自收口、比例不变（fit_box），显示端再按格子大小二次同比例缩放。
 GLYPH_MAX_H = 18.0
-# 裁图点尺寸宽度上限（面板格子 44 宽，留边不溢出；宽文字条靠它收口，见 fit_box）
-GLYPH_MAX_W = 40.0
+GLYPH_MAX_W = 120.0
+# 抓取像素的高度上限：比兜底符号的 18pt 宽松，给两行文字图标（网速那类）留出可读尺寸；
+# 显示端（面板格/布局条）再按自己格子用 scaled_copy 同比例二次收小
+CAPTURE_MAX_H = 28.0
 # 谁都对不上时的占位符号（Thaw MenuBarItemPlaceholderStyle.symbolName）
 GENERIC_SYMBOL = "menubar.rectangle"
 
@@ -309,10 +325,12 @@ def trim_transparent(arr, pad=TRIM_PAD):
 
 
 def touches_side_edge(arr):
-    """抠像后的墨迹是否贴到裁剪窗口的左/右沿：贴沿 = 裁窗口没装下整个图标。
+    """抠像后的墨迹是否贴到裁剪窗口的左/右沿：贴沿 = 这个窗口没装下整个图标。
 
-    AX frame 宽常小于真实绘制宽（时钟 frame 36pt、实际画「22:31」约 70pt），
-    继续裁必然半截，直接交给兜底链（T97：半截图标第二类根因）。"""
+    Phase 9 起 image_for_item 不再靠它直接拒收（它改成「撑宽窗口重试」的信号），
+    留下它供单测与诊断使用；判据本身仍成立：AX frame 宽常小于真实绘制宽
+    （时钟 frame 36pt、实际画「22:31」约 70pt），贴沿就是还能被裁出半截。
+    """
     import numpy as np
 
     alpha = arr[:, :, 3]
@@ -320,6 +338,34 @@ def touches_side_edge(arr):
         return True
     cols = (alpha > 0).any(axis=0)
     return bool(cols[0] or cols[-1])
+
+
+def ink_run(arr, lo, hi, gap):
+    """在抠好像的数组里找出与列区间 [lo,hi) 相交的字形段，返回 (起列, 止列开区间)。
+
+    菜单栏图标之间总有几列空白，字形内部空隙（数字之间、冒号两侧）又小得多，
+    于是「空隙 ≤ gap 列就算同一段」把墨迹拼成段。没相交时返回 None（不猜隔壁），
+    让调用方走兜底，而不是把邻居的图标当成自己的（Phase 9：半截图标根治点）。
+    """
+    import numpy as np
+
+    if arr is None or arr.size == 0:
+        return None
+    ink = (arr[:, :, 3] > 0).any(axis=0)
+    idx = np.where(ink)[0]
+    if idx.size == 0:
+        return None
+    runs, start, prev = [], int(idx[0]), int(idx[0])
+    for col in (int(c) for c in idx[1:]):
+        if col - prev > gap:
+            runs.append((start, prev + 1))
+            start = col
+        prev = col
+    runs.append((start, prev + 1))
+    hit = [(a, b) for (a, b) in runs if b > lo and a < hi]
+    if not hit:
+        return None
+    return (min(a for a, _ in hit), max(b for _, b in hit))
 
 
 def is_single_ink(arr):
@@ -359,6 +405,29 @@ def image_from_array(arr, scale, template):
 
 # ---------- 面向盘点的抓取入口 ----------
 
+def menu_bar_height():
+    """菜单栏实际逻辑高度（点）：拿带菜单栏那块屏的 frame 高减 visibleFrame 高。
+
+    非刘海屏 24~25pt，刘海屏 32~39pt。早先到处写死 24 这个常量，刘海屏上
+    两行文字的图标（网速那类）下半行就被这个常量裁掉了 —— Phase 9 目视取证
+    抓到的「显示一半图标」真根因（不是格子裁的，是抓取阶段就没截到）。
+    """
+    try:
+        screens = NSScreen.screens()
+        # 全局原点 (0,0) 所在的那块屏就是带菜单栏的屏；找不到就用第一块（AppKit 约定）
+        screen = next((s for s in screens
+                       if s.frame().origin.x == 0.0 and s.frame().origin.y == 0.0),
+                      screens[0] if len(screens) else None)
+        if screen is not None:
+            f, vf = screen.frame(), screen.visibleFrame()
+            h = float(f.size.height) - float(vf.origin.y) - float(vf.size.height)
+            if 20.0 <= h <= 64.0:
+                return h
+    except Exception:
+        pass
+    return MENU_BAR_HEIGHT
+
+
 def capture_strip():
     """截整条菜单栏顶部条带。返回 (CGImage, scale)，无权限/失败返回 (None, 1.0)。"""
     bounds = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
@@ -370,7 +439,7 @@ def capture_strip():
     px_w = Quartz.CGImageGetWidth(full)
     scale = px_w / bounds.size.width if bounds.size.width else 1.0
     strip = Quartz.CGImageCreateWithImageInRect(
-        full, Quartz.CGRectMake(0, 0, px_w, int(MENU_BAR_HEIGHT * scale)))
+        full, Quartz.CGRectMake(0, 0, px_w, int(menu_bar_height() * scale)))
     return strip, scale
 
 
@@ -390,35 +459,109 @@ def fit_box(img, max_w=GLYPH_MAX_W, max_h=GLYPH_MAX_H):
     return img
 
 
-def image_for_item(strip, scale, item):
-    """按 item.frame 从条带裁出单个图标并处理成 NSImage；失败返回 None。"""
+def scaled_copy(img, max_w, max_h):
+    """同一张图的同比例缩小副本（收进 max_w×max_h，只缩不放，小图直接回原件）。
+
+    显示端专用：抓取缓存里那张图尺寸是共享的，谁也不能为了自己格子去改它的
+    size_（一改就把面板、布局条、缓存里的图全改了），所以拿副本再缩。
+    副本只新建 NSImage 外壳、位图表示与原件共用，不费内存也不走 CPU 重绘。
+    """
+    if img is None:
+        return None
+    s = img.size()
+    k = min(1.0, max_w / max(s.width, 1.0), max_h / max(s.height, 1.0))
+    if k >= 1.0:
+        return img
+    dup = NSImage.alloc().initWithSize_(NSSize(s.width * k, s.height * k))
+    if dup is None:
+        return img
+    dup.addRepresentations_(list(img.representations()))
+    dup.setTemplate_(bool(img.isTemplate()))
+    return dup
+
+
+def _crop_strip(strip, scale, x, w, top, bottom):
+    """从条带裁一块（点坐标 → 像素）；拿不到像素返回 None。"""
+    px_w = Quartz.CGImageGetWidth(strip) / scale
+    x0 = max(0.0, float(x))
+    x1 = min(px_w, float(x) + float(w))
+    if x1 - x0 < 2:
+        return None
+    rect = Quartz.CGRectMake(int(x0 * scale), int(top * scale),
+                             max(1, int((x1 - x0) * scale)),
+                             max(1, int((bottom - top) * scale)))
+    return numpy_from_cgimage(Quartz.CGImageCreateWithImageInRect(strip, rect))
+
+
+def _crop_glyph(strip, scale, x, w, top, bottom, left, right):
+    """按撑宽的窗口裁一次字形；返回 NSImage，或 None（装不下/无墨/离谱比例）。
+
+    None 只说明「这个窗口不行」，能不能补救由调用方决定（它会换更大的窗口重试）。
+    """
+    wx, ww = float(x) - left, float(w) + left + right
+    arr = _crop_strip(strip, scale, wx, ww, top, bottom)
+    if arr is None:
+        return None
+    px_w = Quartz.CGImageGetWidth(strip) / max(scale, 1.0)
+    arr = knockout(arr)
+    # frame 在撑大的窗口里的列区间（像素），拿它去认「哪一段墨是我们的图标」
+    lo = int((x - wx) * scale)
+    hi = max(lo + 1, int((x + w - wx) * scale))
+    run = ink_run(arr, lo, hi, max(2, int(INK_GAP_PT * scale)))
+    if run is None:
+        return None  # 这个 frame 里没画上图标（全黑条带/被遮）→ 兜底
+    cropped_left = run[0] <= 0 and wx > 0.0
+    cropped_right = run[1] >= arr.shape[1] and (wx + ww) < px_w - 1.0
+    if cropped_left or cropped_right:
+        return None  # 还贴沿且不是屏幕边 = 这个窗口仍装不下（换大窗口再试）
+    arr = trim_transparent(arr[:, run[0]:run[1], :])
+    if int((arr[:, :, 3] > 0).sum()) < MIN_GLYPH_PIXELS:
+        return None  # 无墨 = 这里没画上图标，不是「图标是透明的」→ 交给兜底链
+    h, w = arr.shape[:2]
+    if h <= 0 or w > h * MAX_ASPECT:
+        return None  # 离谱比例：多半是把整条/多个图标拼进来了，不是单个图标
+    return fit_box(image_from_array(arr, scale, is_single_ink(arr)), GLYPH_MAX_W, CAPTURE_MAX_H)
+
+
+def image_for_item(strip, scale, item, room=None):
+    """按 item.frame 从条带裁出单个图标并处理成 NSImage；失败返回 None。
+
+    Phase 9 重写「半截图标」两处口径（用户定调：显示一半的，就同比例缩着完整显示）：
+
+    1. 不再只裁 AX frame：先把窗口左右各撑宽 room（点），再用 ink_run 把与 frame
+       相接的那一段字形整段取回来——画到 frame 外的像素不再被切掉，邻居的图形
+       隔着空白自然被剔掉；第一轮回提（邻居 frame 算出的借宽）不够就再撑到
+       ROOM_MAX 重试一次，宁多裁一点也不交半截；
+    2. 宽条（图标+数字/文字复合）不再一律拒收：取到的像素整体同比例收进
+       fit_box，宁可小一点也不剥切。
+
+    只有「撑到 ROOM_MAX 仍被切」与「无墨/离谱比例」才交给兜底链
+    （T97：宁可换一个完整可辨识的兜底图，也不给半截）。
+    """
     if strip is None or item.frame is None:
         return None
     x, y, w, h = item.frame
     if w <= 0 or h <= 0:
         return None
-    # 只裁条带范围内的像素（AX 的 y/h 常超出菜单栏实际高度）
-    top = max(0.0, min(float(y), MENU_BAR_HEIGHT - 1))
-    bottom = min(MENU_BAR_HEIGHT, float(y) + float(h))
+    # 纵向按 AX frame（刘海屏上它报 y=7.5/h=24，正是图标居中绘制的那 24pt），
+    # 但收口必须按条带真实高而不是 24 常量：从 7.5 起算时 24 常量只能裁到 24pt，
+    # 两行文字图标的下半行（第二行）刚好被吃掉 —— Phase 9 目视取证的真半截根因。
+    # 条带最底下 1pt 是菜单栏分隔线（整行都是墨），留着会让 ink_run 把整个窗口
+    # 当成一个字形，反过来判「仍被切」→ 全部退到兜底图（改第一版就踩过这个）。
+    strip_h = max(0.0, Quartz.CGImageGetHeight(strip) / max(scale, 1.0) - 1.0)
+    top = max(0.0, min(float(y), strip_h - 1))
+    bottom = min(strip_h, float(y) + float(h))
     if bottom - top < 2:
         return None
-    rect = Quartz.CGRectMake(int(x * scale), int(top * scale),
-                             max(1, int(w * scale)), max(1, int((bottom - top) * scale)))
-    cg = Quartz.CGImageCreateWithImageInRect(strip, rect)
-    arr = numpy_from_cgimage(cg)
-    if arr is None:
-        return None
-    arr = knockout(arr)
-    if touches_side_edge(arr):
-        return None  # 图标被裁剪窗口切到边（frame 窄于实画）→ 兜底，绝不半截（T97）
-    arr = trim_transparent(arr)
-    if int((arr[:, :, 3] > 0).sum()) < MIN_GLYPH_PIXELS:
-        return None  # 无墨 = 这里没画上图标，不是「图标是透明的」→ 交给兜底链
-    h, w = arr.shape[:2]
-    if h <= 0 or w > h * WIDE_ASPECT:
-        return None  # 图标+数字/文字复合条：不剥切（抠像会把图标身体切坏），
-                     # App 图标兜底完整可辨识，显示层永远不出数字（用户定调）
-    return fit_box(image_from_array(arr, scale, is_single_ink(arr)))
+    left, right = room if room else (ROOM_MIN, ROOM_MIN)
+    windows = [(max(0.0, float(left)), max(0.0, float(right)))]
+    if windows[0] < (ROOM_MAX, ROOM_MAX):
+        windows.append((ROOM_MAX, ROOM_MAX))  # 借不够就撑满再试（ink_run 会切掉邻居）
+    for (l, r) in windows:
+        img = _crop_glyph(strip, scale, x, w, top, bottom, l, r)
+        if img is not None:
+            return img
+    return None
 
 
 def strip_has_content(strip):
@@ -434,6 +577,33 @@ def strip_has_content(strip):
         return False
     rgb = arr.reshape(-1, arr.shape[2])[:, :3].astype(int)
     return int(rgb.max() - rgb.min()) > 8
+
+
+def neighbour_room(items, target):
+    """目标图标左右各能借多少空白（点）：邻居 frame 边界以内的像素不属于邻居。
+
+    AX 报的宽常小于真实绘制宽（时钟 frame 36pt、实际画「22:31」约 70pt），
+    不借宽就永远裁成半截。只用「同样画在菜单栏上、且 frame 能用」的项算邻居；
+    邻居紧贴着没间隙时也给保底借宽（frame 挨着不代表图形挨着，隔开的活由
+    ink_run 干）。上限 ROOM_MAX，下限 ROOM_MIN。
+    """
+    tf = getattr(target, "frame", None)
+    if not tf:
+        return (ROOM_MIN, ROOM_MIN)
+    tx, tw = float(tf[0]), float(tf[2])
+    left, right = 0.0, 0.0
+    for it in items:
+        if it is target or getattr(it, "stashed", False):
+            continue
+        f = getattr(it, "frame", None)
+        if not f or float(f[2]) <= 0:
+            continue
+        x0, x1 = float(f[0]), float(f[0]) + float(f[2])
+        if x1 <= tx:
+            left = max(left, min(ROOM_MAX, tx - x1))
+        elif x0 >= tx + tw:
+            right = max(right, min(ROOM_MAX, x0 - tx - tw))
+    return (max(ROOM_MIN, left), max(ROOM_MIN, right))
 
 
 def capture_icons(items, force=False):
@@ -474,7 +644,8 @@ def capture_icons(items, force=False):
             else:
                 bar_drawn = strip_has_content(strip)
             for it in missing:
-                img = image_for_item(strip, scale, it) if strip is not None else None
+                img = (image_for_item(strip, scale, it, neighbour_room(items, it))
+                       if strip is not None else None)
                 if img is not None:
                     _cache[(sections.item_key(it), _generation)] = img
                     captures[sections.item_key(it)] = img

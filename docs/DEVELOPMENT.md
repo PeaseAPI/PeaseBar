@@ -160,6 +160,13 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T99 | **PyObjC 选择子对号坑（T41 变体）**：NSObject 子类里新增单参且名不以 `_` 结尾的方法（`_render(self, snap)`），若运行时已存在同名 0 参选择子（此处 `_render`），建类即 BadPrototypeError，启动装配全挂且 stdout 看不到（崩在日志重定向前，只能事后看 ~/Library/Logs/PeaseBar.log 的 traceback）。多参方法（_make_cell 5 参/_position_panel 1 参但选择子带冒号匹配）不炸，故旧代码一直没事——新名字撞不撞已有选择子全看运气，**一律显式 @objc.python_method 才稳**；部署后第一步看启动日志再跑探针 | panel.py _render 加 @objc.python_method；探针首跑全 FAIL 反被成为实锤通道 |
 | T100 | **设置窗对标 Thaw 的保留面工程**：侧栏图标化/布局页横向图标条/静态页卡片化三大变中，可寻性判据一个不能动——页签 AXButton+AXTitle 精确+page- 标识、格子 PushOnPushOff→AXCheckBox+AXIdentifier=配置键+AXHelp 含「当前：」、窗口标题前缀「PeaseBar 设置 · 页名」。变的是几何（格子进 AXScrollArea 子树、宽度随图伸缩），不变的是接线；探针判据随之从「几何包含」改「子树归属」（横向溢出格子的坐标本就超出可见条宽） | settings.py _build_sidebar/_build_section_bar/_mk_card；真机 U1–U7 全 PASS+回归 14 条 |
 | T101 | **PyObjC 属性 setter 不能猜**：NSScrollView 的 bordered 属性没有 setBorder_（ObjC 侧是 isBordered/setBorderType:），猜出来的 setter 在运行到那行才 AttributeError；若异常落在快捷键 action 里会被 AppKit 吞进系统日志，现场只见「窗口打不开」。用 setBorderType_(0)（NSNoBorder）；拿不准先 dir(obj) grep | settings.py _build_section_bar；首轮回探全 FAIL 即此因，启动日志抓栈定位 |
+| T102 | **一次拖拽会话只有一个落点**（Phase 9 跨区拖拽真因）：`beginDraggingSessionWithItems:event:source:` 开局时 AppKit 只从源视图往上找到「那一条」当落点，鼠标拖到别的注册视图上，那条的 `draggingEntered:` 一次都不来，`draggingSession:movedToPoint:` 也在离开源条后停掉（`draggingExited_` 仍会来）；把 `registerForDraggedTypes_` 挪到 `viewDidMoveToWindow` 无效。解法：**落点角色上移到所有图标条的祖先页视图**（GridView），落在哪条、插到第几格自己按 `draggingLocation` 反查（松手那一刻该坐标与释放点分毫不差，实测 raw=325,479） | settings.py GridView drop_target/bar_at + drop_bars；真机 V6 三种拖法（下/上/同条）全落地 |
+| T103 | **mouseDown 里自己圈事件会把拖拽弄残**：`nextEventMatchingMask_untilDate_inMode_dequeue_` 把后续事件从队列抽干，窗口不再把它们交给拖拽会话 → 跨视图命中测试从此不更新（只剩「起点那一条」能用）；`untilDate=None` 还会钉死主线程。改走系统正常派发：mouseDown_ 只记起点（**故意不调 super**，进了 NSCell 的 trackMouse 就再也收不到 mouseDragged_）、mouseDragged_ 过阈值起会话、mouseUp_ 没拖起来当一次点击；右键不拦，回系统 rightMouseDown_ 弹 setMenu_ 菜单 | settings.py TileButton；配合 T102 后跨区拖拽才成立 |
+| T104 | **PyObjC 猜 ObjC 方法名第二次踩**（T101 同类）：`draggingSession:endedAtPoint:operation:` 被写成 `draggingSession_endedAtLocation_operation_`，名字对不上就是永不触发且无任何报错——一度被误判成「会话没结束」。纪律：回调名从文档逐字抄，写完用一条必打印的日志实证一次再拆 | settings.py 取证期间临时诊断已拆；错名那轮所有「落点」日志失踪 |
+| T105 | **多行图标条的插入位不能只按 x 排**：bar_wrap 开时第二行的 x 与第一行重复，按 x 数格子会把「第 3 格」拖到「第 5 格」。修法：先按 y 归行（ROW_TOL=6.0，同行允许 1~2pt 抖动），再在本行内数「中心在落点左边的格子」；行列数学抽成纯函数 `drop_index_in_rows` 进单测（tests/test_drop_index.py 7 例） | settings.py drop_index_in_rows；日志「本视图=89,23 却落到第 5 格」是铁证 |
+| T106 | **菜单栏真实高必须按屏算**：刘海屏 32~39pt（本机 39），写死 24 常量会把两行文字图标（网速那类）的下半行**在抓取阶段**就裁掉——不是格子裁的，目视很容易误判到显示端。两个附带坑：①AX frame 在刘海屏报 y=7.5/h=24（图标居中绘制），收口只能按条带高不能按常量；②条带最底 1pt 是菜单栏分隔线（整行都是墨），当成字形会让 ink_run 把整个窗口认成一个字形 → 反过来判「仍被切」→ **所有图标全退到兜底图**（改第一版就踩，整页变成 App 图标） | capture.py menu_bar_height()/image_for_item 纵向收口 + CAPTURE_MAX_H=28；tests/test_capture.py 刘海两行用例+分隔线用例 |
+| T107 | **设计一变旧判据就是误报源，判据必须跟着新语义重写（不放宽）**：Phase 9 回归里四个假 FAIL 全属此类——①侧栏「缩进 ≥12pt」已被「贴边显示文字」推翻（Q72 改 ≤12pt，左右关系交 V1）；②图标条「单行 y 极差 ≤4」在可换行后作废（U2 改「分行后行内 x 不重复」）；③面板格子数门槛 ≥10 与「只列被藏项」语义矛盾（P64 改逐格判定）；④整表比 config 把产品新键（use_captured/bar_wrap）当成探针漂移（S9 改为只比备份里存在的键）。同类：拖拽样本押在单个第三方 App 上（Little Snitch Agent 本就没窗口，P44 改按名单逐个试）；菜单栏图标增减打断整表序比较（只比共同键） | tmp/t_p6b.py Q72/Q73、tmp/t_p8.py U2、tmp/t_p4.py P64、tmp/t_p7.py S9、tmp/t_p2b.py P44；修后四套探针回归全绿 |
+| T108 | **探针自己要把窗口按回目标页签**：设置窗只在「从关到开」时重置页签（`show()` 里 `if not self.window.isVisible()`），窗口一直开着时上一条用例留在「通用」页，下一条的 `ensure_settings()` 拿到的是静态页 → 「设置窗口里没有格子」「选中放不到可见区首格」全是假 FAIL（S7/S8 那轮就是这么来的）。修法与既有纪律一致：**用例不许依赖上一条留下的窗口状态**——读 `AXTitle` 后缀不对就 `AXPress` 侧栏「布局」再 `wait_for` 标题回来 | tmp/t_p2b.py ensure_settings；修后 S7/S8 转 PASS |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -306,7 +313,25 @@ PeaseBar/
       launch-at-login/control-icon-picker 标识与页签名文本判据不动
 - [x] P8d 窗口 150+610→220+640（宽 860）；STATIC_H 300→340；过程中修掉 T101；
       计划 tmp/test-plan-phase8.md，探针 tmp/t_p8.py（U1–U7 全 PASS）；单测 107 项不变
-- [ ] 微调项：图标条胶囊底色对比度比 Thaw 略弱（0.22 alpha 仍偏暗）；拖拽跨区未做（留下一轮）
+- [ ] 微调项：图标条胶囊底色对比度比 Thaw 略弱（0.22 alpha 仍偏暗）；拖拽跨区已在 Phase 9 补上（T102）
+
+### Phase 9 拖拽编辑 + 半截图标根治 + 布局页补齐（用户 2026-11-22 截图批评四件事）
+- [x] P9a 侧栏贴边（T107）：图标左/文字右、行左起 2pt + 2 簇 + 缝 12pt，V1 五行全 PASS；
+      旧「缩进 ≥12pt」判据作废（用户定调「贴着边显示文字」）
+- [x] P9b 半截图标（T97/T106）：抓取链路改「撑宽借边 + ink_run 整段取回 + 宽条同比例收口」，
+      并修掉刘海屏 24pt 常量把两行文字图标下半行在抓取阶段吃掉；V8 目视无半截（格宽 32–96pt 随图伸缩）
+- [x] P9c 拖拽编辑（T102/T103/T105）：条内移序 + 跨区换区（落点上移到页视图 GridView），
+      全链路 ⌘Z 可撤销；真机 V6 三种拖法（拖下/拖上/同条）+ V7 条内移序落地
+- [x] P9d 布局页对标 Thaw：Sort ⌄ 菜单（反转本区顺序/恢复默认顺序）、两行拖拽提示、选项卡片
+      （优先用菜单栏真实像素 / 放不下时换行，都真落盘真影响渲染）、重置布局；V3/V4/V5 PASS
+- [x] P9e 面板尺寸收敛：按内容自适应宽 364（旧固定 468），V2 左右两侧空白 9.0/9.0
+- [x] P9f 回归：单测 141 项全绿（新增 drop_index 7 例 + 刘海两行/分隔线/真实高 3 例）；
+      t_p2b/t_p4/t_p7/t_p8 四套探针按 T107 重写失效判据后全绿（S5 仍如实 SKIP，需真鼠标右键复核）；
+      计划 tmp/test-plan-phase9.md，探针 tmp/t_p9.py（V1–V8 全 PASS）；部署仍走 T96
+- [x] P9g 探针判据二轮修（T108）：t_p7 S7/S8 的「可见格子不够 / 没有菜单栏显示格子」
+      不是产品问题，是 `ensure_settings()` 不管窗口停在哪个页；补「自己按回布局页」后
+      S1–S4/S6–S9 全 PASS（日志 tmp/p9_reg_p7b.log）；环境已还原（config 与备份零漂移）
+- [ ] 待办：发布 1.0.1 需回 T86 完整重打包+重授权；「展开收纳区」右键菜单需真鼠标人工复核一次（S5）
 
 ## 9. 续作指引（重启后从这里开始）
 

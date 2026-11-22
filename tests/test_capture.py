@@ -210,7 +210,8 @@ class TestDeadMenuBar(unittest.TestCase):
 
 class TestSideEdge(unittest.TestCase):
     """贴边判定（T97 半截图标第二类根因）：AX frame 窄于真实绘制宽时，
-    裁窗口右沿一定吃到墨迹——这种条必须整条拒收走兜底，绝不交出半截图。"""
+    裁窗口右沿一定吃到墨迹。Phase 9 起这个信号不再意味着拒收，而是
+    「窗口太小、撑宽重试」（image_for_item 里接的 ink_run 会切掉邻居）。"""
 
     @staticmethod
     def _mask(h, w, spans):
@@ -235,9 +236,45 @@ class TestSideEdge(unittest.TestCase):
         self.assertTrue(capture.touches_side_edge(np.zeros((0, 0, 4), dtype=np.uint8)))
 
 
-class TestWideReject(unittest.TestCase):
-    """宽条与贴边条在 image_for_item 处一律拒收（T97：剥切会把图标身体切坏，
-    钉钉/QQ/搜狗 的半截图标就是这么来的；拒收后 App 图标兜底完整可辨识）。"""
+class TestInkRun(unittest.TestCase):
+    """字形分段（Phase 9 半截图标的根治）：与 frame 相接的那一段整段拿回来，
+    隔着空白的邻居自然被剔掉。"""
+
+    @staticmethod
+    def _mask(h, w, spans):
+        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        for c0, c1, r0, r1 in spans:
+            arr[r0:r1, c0:c1, 3] = 255
+        return arr
+
+    def test_把frame外的自家像素一并拿回(self):
+        # frame 只占 10..20 列，墨迹从 4 一路画到 30（典型：时钟 frame 窄于实画）
+        arr = self._mask(20, 60, [(4, 30, 4, 16)])
+        self.assertEqual(capture.ink_run(arr, 10, 20, 4), (4, 30))
+
+    def test_隔得远的邻居不算同一段(self):
+        # 两段墨之间空 18 列（> gap 4）：只取与 frame 相接的那段
+        arr = self._mask(20, 80, [(4, 20, 4, 16), (38, 60, 4, 16)])
+        self.assertEqual(capture.ink_run(arr, 10, 16, 4), (4, 20))
+
+    def test_数字之间的小空隙算同一段(self):
+        # 「22:31」这类：字符间隙 2 列 ≤ gap 4，应该是一整段
+        arr = self._mask(20, 40, [(4, 8, 4, 16), (10, 14, 4, 16), (16, 20, 4, 16)])
+        self.assertEqual(capture.ink_run(arr, 4, 20, 4), (4, 20))
+
+    def test_无墨与不相交返回None(self):
+        blank = np.zeros((20, 40, 4), dtype=np.uint8)
+        self.assertIsNone(capture.ink_run(blank, 10, 20, 4))
+        arr = self._mask(20, 40, [(30, 36, 4, 16)])
+        self.assertIsNone(capture.ink_run(arr, 4, 12, 4))  # frame 里没墨，不猜隔壁
+
+
+class TestWideGlyph(unittest.TestCase):
+    """宽条与超出 frame 的字形（Phase 9 口径）：撑宽窗口 + 整段取回，完整收下、
+    同比例缩小，绝不交半截；只有真装不下/离谱比例才走兜底。
+
+    旧版在这里把宽条一律拒收（换成 App 图标），用户看到的是「我的图标怎么不对」；
+    Thaw 的做法是整体同比例缩着画（MenuBarItemImage.drawnSize），现在照这个口径。"""
 
     class Item:
         def __init__(self, frame, label="测试项", bundle="com.example.wide"):
@@ -249,29 +286,127 @@ class TestWideReject(unittest.TestCase):
     def _strip(self, arr):
         return capture.cgimage_from_numpy(arr)
 
-    def test_图标加数字宽条拒收(self):
-        # 黑底条带上画 12pt 高 × 41pt 宽的「图标+数字」复合横条，裁窗口比墨迹宽（不贴边）
+    def test_图标加数字宽条完整收下(self):
+        # 黑底条带上画 12pt 高 × 41pt 宽的「图标+数字」复合横条（frame 50pt 装得下）
         arr = tile(bg=(0, 0, 0), size=(24, 400))
         arr[6:18, 100:141, :3] = 240
         arr[6:18, 100:141, 3] = 255
-        self.assertIsNone(capture.image_for_item(self._strip(arr), 1.0,
-                                                 self.Item((96, 0, 50, 24))))
+        img = capture.image_for_item(self._strip(arr), 1.0, self.Item((96, 0, 50, 24)))
+        self.assertIsNotNone(img)          # 不再拒收
+        s = img.size()
+        self.assertGreater(s.width, 35.0)  # 41pt 宽的横条完整保留（+裁边留白）
+        self.assertGreater(s.height, 10.0)
+        self.assertAlmostEqual(s.width / s.height, 41 / 12, delta=1.0)  # 比例不变
 
-    def test_墨迹顶到裁窗口右沿拒收(self):
-        # 时钟类：frame 只有 20pt 宽，墨迹从 100 一路画过 116 顶出裁窗口
+    def test_墨迹超出frame时借宽后完整收下(self):
+        # 时钟类：frame 只有 20pt 宽，墨迹从 100 一路画过 116 顶出 frame 与裁窗口
         arr = tile(bg=(0, 0, 0), size=(24, 400))
         arr[6:18, 100:130, :3] = 240
         arr[6:18, 100:130, 3] = 255
+        img = capture.image_for_item(self._strip(arr), 1.0, self.Item((96, 0, 20, 24)))
+        self.assertIsNotNone(img)
+        s = img.size()
+        self.assertGreater(s.width, 28.0)  # 拿到完整 30pt 墨迹，而不是被切的 20pt
+        self.assertLessEqual(s.width, capture.GLYPH_MAX_W)
+
+    def test_邻居字形不被偷进来(self):
+        # 我们的图标 100..112，18pt 外另一个图标 130..150：撑宽窗口也不能把邻居带进来
+        arr = tile(bg=(0, 0, 0), size=(24, 400))
+        arr[6:18, 100:112, :3] = 240
+        arr[6:18, 100:112, 3] = 255
+        arr[6:18, 130:150, :3] = 240
+        arr[6:18, 130:150, 3] = 255
+        img = capture.image_for_item(self._strip(arr), 1.0, self.Item((100, 0, 12, 24)))
+        self.assertIsNotNone(img)
+        self.assertLess(img.size().width, 30.0)  # 只算上自己的 12pt（+裁边留白）
+
+    def test_离谱比例整条误裁仍拒收(self):
+        # 240pt 宽×12pt 高：比例超过 MAX_ASPECT，宁可兜底也不能把整条当一个图标
+        arr = tile(bg=(0, 0, 0), size=(24, 400))
+        arr[6:18, 100:340, :3] = 240
+        arr[6:18, 100:340, 3] = 255
         self.assertIsNone(capture.image_for_item(self._strip(arr), 1.0,
-                                                 self.Item((96, 0, 20, 24))))
+                                                self.Item((96, 0, 250, 24))))
 
     def test_近方形纯图标仍收下(self):
-        # 拒收口径只杀宽条/贴边条，正常纯图标必须还能裁出来（剪刀/微信这类）
+        # 新口径只修「宽条/贴边条被错杀」，正常纯图标当然还得裁得出来（剪刀/微信这类）
         arr = tile(bg=(0, 0, 0), size=(24, 400))
         arr[5:19, 100:114, :3] = 240
         arr[5:19, 100:114, 3] = 255
         self.assertIsNotNone(capture.image_for_item(self._strip(arr), 1.0,
-                                                    self.Item((96, 0, 20, 24))))
+                                                   self.Item((96, 0, 20, 24))))
+
+    def test_刘海屏两行图标下半行不被裁(self):
+        # 刘海屏条带高 39pt，图标居中画在 7.5~31.5（AX frame 就这么报），网速那类
+        # 两行文字的下半行落在 24pt 以下；旧口径把 bottom 收口到 24 常量，
+        # 第二行就在抓取阶段被切掉（Phase 9 目视取证抓到的真半截）。
+        arr = tile(bg=(0, 0, 0), size=(39, 400))
+        arr[12:31, 100:160, :3] = 240
+        arr[12:31, 100:160, 3] = 255
+        img = capture.image_for_item(self._strip(arr), 1.0, self.Item((96, 7.5, 70, 24)))
+        self.assertIsNotNone(img)
+        s = img.size()
+        # 墨迹本身 19pt 高（12~30）：旧口径裁到 24pt 只剩 12pt，加裁边留白也不到 15
+        self.assertGreaterEqual(s.height, 19.0)
+        # 同比例：宽 60pt 墨全部拿到，宽高比停在墨迹比例附近（只收裁边留白的浮动）
+        self.assertGreater(s.width, 55.0)
+        self.assertTrue(2.4 <= s.width / s.height <= 3.4, f"比例走形：{s.width}x{s.height}")
+
+    def test_菜单栏分隔线不算字形(self):
+        # 条带最底一行是菜单栏分隔线（整行都是墨）。一旦把它当字形，ink_run 会
+        # 把整个窗口认成一个字形 → 反过来判「仍被切」→ 所有图标全退到兜底图。
+        arr = tile(bg=(100, 120, 140), size=(39, 400))
+        arr[38:39, :, :3] = 20
+        arr[38:39, :, 3] = 255
+        arr[12:26, 100:114, :3] = 240
+        arr[12:26, 100:114, 3] = 255
+        img = capture.image_for_item(self._strip(arr), 1.0, self.Item((96, 7.5, 24, 24)))
+        self.assertIsNotNone(img)
+        self.assertLess(img.size().width, 30.0)  # 只算自己的 14pt 图标，不是整窗
+
+
+class TestScaledCopy(unittest.TestCase):
+    """显示端同比例缩放副本：不能去改抓取缓存里那张图的 size（一改全跟着变）。"""
+
+    def _img(self, w, h, template=False):
+        from AppKit import NSImage
+        from Foundation import NSSize
+        img = NSImage.alloc().initWithSize_(NSSize(w, h))
+        img.setTemplate_(template)
+        return img
+
+    def test_缩副本不动原件(self):
+        src = self._img(100, 18, template=True)
+        got = capture.scaled_copy(src, 40, 18)
+        self.assertAlmostEqual(src.size().width, 100.0, places=2)  # 原件不动
+        s = got.size()
+        self.assertLessEqual(s.width, 40.01)
+        self.assertAlmostEqual(s.height / s.width, 18 / 100, places=3)  # 同比例
+        self.assertTrue(got.isTemplate())  # 着色属性跟着副本走
+
+    def test_够小就不复制(self):
+        src = self._img(20, 14)
+        self.assertIs(capture.scaled_copy(src, 40, 18), src)
+
+    def test_无图返回None(self):
+        self.assertIsNone(capture.scaled_copy(None, 40, 18))
+
+
+class TestMenuBarHeight(unittest.TestCase):
+    """菜单栏真实高：刘海屏 32~39pt，非刘海 24~25pt，写死 24 会吃掉两行图标的下半行。"""
+
+    def test_落在合理区间(self):
+        h = capture.menu_bar_height()
+        self.assertGreaterEqual(h, 20.0)
+        self.assertLessEqual(h, 64.0)
+
+    def test_条带高度跟着真实高走(self):
+        strip, scale = capture.capture_strip()
+        if strip is None:  # 没给屏幕录制权限（CI/新机器）：跳过，不假绿
+            self.skipTest("无屏幕录制权限，截不到条带")
+        import Quartz
+        got = Quartz.CGImageGetHeight(strip) / max(scale, 1.0)
+        self.assertAlmostEqual(got, capture.menu_bar_height(), delta=1.5)
 
 
 if __name__ == "__main__":

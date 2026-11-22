@@ -244,6 +244,73 @@ class TestOrder(unittest.TestCase):
         self.assertEqual(cfg["sections"]["a|A"], "hidden")
 
 
+class TestMoveToIndex(unittest.TestCase):
+    """拖拽落位（Phase 9）：先摘后插，所以下标自己右边要让回一格。"""
+
+    def setUp(self):
+        self.items = [item("a", "A"), item("b", "B"), item("c", "C")]
+
+    def keys(self, seq):
+        return [sections.item_key(i) for i in seq]
+
+    def test_同区往后拖让一格(self):
+        # 视觉上拖到「b 与 c 之间」（index 2）：摘掉 a 后那就是 index 1
+        self.assertEqual(self.keys(
+            sections.move_to_index(self.items, sections.item_key, "a|A", 2)),
+            ["b|B", "a|A", "c|C"])
+
+    def test_往前拖直接插到落点(self):
+        self.assertEqual(self.keys(
+            sections.move_to_index(self.items, sections.item_key, "c|C", 0)),
+            ["c|C", "a|A", "b|B"])
+
+    def test_拖到末尾与拖过头都夹住(self):
+        self.assertEqual(self.keys(
+            sections.move_to_index(self.items, sections.item_key, "a|A", 99)),
+            ["b|B", "c|C", "a|A"])
+        self.assertEqual(self.keys(
+            sections.move_to_index(self.items, sections.item_key, "c|C", -5)),
+            ["c|C", "a|A", "b|B"])
+
+    def test_原地落回等于没动(self):
+        # 调用方拿这个结果与原桶比，相等就不写盘不记撤销点
+        self.assertEqual(self.keys(
+            sections.move_to_index(self.items, sections.item_key, "b|B", 1)),
+            ["a|A", "b|B", "c|C"])
+
+    def test_键不在表里原样返回且不毁入参(self):
+        out = sections.move_to_index(self.items, sections.item_key, "z|Z", 1)
+        self.assertEqual(self.keys(out), ["a|A", "b|B", "c|C"])
+        out.append(item("d", "D"))
+        self.assertEqual(len(self.items), 3)  # 返回的是副本，不就地改入参
+
+
+class TestLayoutFlags(unittest.TestCase):
+    """布局页两个选项（Phase 9 的 Options 卡片）：存得住，脏值回默认。"""
+
+    def test_布尔往返(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.json")
+            cfg = dict(sections.load_config(path), use_captured=False, bar_wrap=True)
+            sections.save_config(cfg, path)
+            back = sections.load_config(path)
+            self.assertFalse(back["use_captured"])
+            self.assertTrue(back["bar_wrap"])
+
+    def test_默认值与非布尔脏值(self):
+        # 默认：真实像素优先开、换行也开（单行裁切会被当成「图标少一半」）；
+        # json 里写字符串/数字都当没写过，回默认
+        self.assertTrue(sections.DEFAULT_CONFIG["use_captured"])
+        self.assertTrue(sections.DEFAULT_CONFIG["bar_wrap"])
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"use_captured": "yes", "bar_wrap": 1}, f)
+            cfg = sections.load_config(path)
+            self.assertTrue(cfg["use_captured"])
+            self.assertTrue(cfg["bar_wrap"])
+
+
 class TestSortAndReset(unittest.TestCase):
     """Phase 4e：每区「按名称排序」与「重置布局」（对应 Thaw Sort by Name / Reset Layout）。"""
 
