@@ -137,5 +137,7 @@ def rect_intersects(frame, x0, x1):
     if frame is None:
         return False
     ix0, _, iw, _ = frame
+    if iw <= 0:  # 零宽/异常宽度（AX 偶发异常 frame）不构成相交，否则空集误报
+        return False
     ix1 = ix0 + iw
     return ix0 < x1 and ix1 > x0

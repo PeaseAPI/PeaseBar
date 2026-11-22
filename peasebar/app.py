@@ -20,9 +20,9 @@ from AppKit import (
     NSStatusBar,
     NSWorkspace,
 )
-from Foundation import NSObject, NSURL
+from Foundation import (NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer, NSURL)
 
-from peasebar import __version__
+from peasebar import __version__, hotkeys
 from peasebar.control_item import ControlItem
 
 # 单实例哨兵端口（仅本机回环，无安全边界，只用于判重）
@@ -90,12 +90,40 @@ class AppDelegate(NSObject):
 
         self.rescue = RescuePanel.alloc().initWithAnchor_(self.control.button_anchor)
         self.control.on_left = self.rescue.toggle
-        # 单实例唤醒监听（收到 connect 即把控制图标闪烁提示一下；后续改为弹出面板）
+        # 全局快捷键（F6）：⌥⌘B 切换面板（CGEventTap，只需辅助功能权限，T23）
+        self._uninstall_hotkey = hotkeys.install(self.rescue.toggle)
+        # 单实例唤醒（F10）：哨兵 socket 收到二次启动的 connect → 弹出救援面板。
+        # 非阻塞轮询（0.5s NSTimer），accept 空转开销可忽略，主线程安全
         self.instance_socket = getattr(AppDelegate, "_sentinel", None)
-        print("[PeaseBar] 控制图标与救援面板就绪（左键弹出，点击图标可弹其原生菜单）")
+        if self.instance_socket is not None:
+            timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                0.5, self, "pollInstanceSocket:", None, True)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSRunLoopCommonModes)
+            print("[PeaseBar] 单实例唤醒监听就绪（哨兵端口 52877，0.5s 轮询）")
+        print("[PeaseBar] 控制图标与救援面板就绪（左键图标/⌥⌘B 弹出，点击图标可弹其原生菜单）")
+
+    def pollInstanceSocket_(self, timer):
+        """哨兵 socket 轮询：收到二次启动的 connect 即弹出救援面板（F10）。"""
+        srv = self.instance_socket
+        if srv is None:
+            return
+        try:
+            conn, _ = srv.accept()
+        except (BlockingIOError, OSError):
+            return
+        try:
+            conn.recv(64)  # 内容不关心，读掉即可
+        except OSError:
+            pass
+        finally:
+            conn.close()
+        print("[PeaseBar] 收到二次启动唤醒 → 弹出救援面板")
+        self.rescue.show()
 
     def applicationShouldTerminate_(self, sender):
-        # 退出前归还状态项
+        # 退出前归还状态项 + 摘除快捷键 tap
+        if getattr(self, "_uninstall_hotkey", None) is not None:
+            self._uninstall_hotkey()
         item = getattr(self.control, "item", None)
         if item is not None:
             NSStatusBar.systemStatusBar().removeStatusItem_(item)

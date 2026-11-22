@@ -2,17 +2,19 @@
 # -*- coding: utf-8 -*-
 """救援面板（F3）：PeaseBar 的核心 UI。
 
-交互（验收标准见 docs/DEVELOPMENT.md F3）：
-- 左键控制图标 → 面板出现在控制图标正下方（居中锚定）；
-- 网格展示全部可见图标：名称 + 归属 + 刘海遮挡徽标「▨」；
+交互（验收标准见 docs/DEVELOPMENT.md F3/F4/F5）：
+- 左键控制图标或全局快捷键 ⌥⌘B → 面板出现在控制图标正下方（居中锚定）；
+- 网格按三区（F4：可见/隐藏/永久隐藏，配置在 config.json）分组展示：
+  名称 + 归属 + 刘海遮挡徽标「▨」；空区不展示；
 - 单击面板内图标 → 对真实图标合成右键（弹出其原生状态菜单，T17），面板随即收起；
+- 右键面板内图标 → 菜单移分区（回到可见区/移到隐藏区/移到永久隐藏区），即时持久化；
 - 「展开/收起收纳区」按钮联动原生收纳按钮（F12 提前接入，核心场景：
   被刘海遮挡/被收纳的图标从这里找回——展开后再点图标即可弹出菜单）；
-- 失焦自动收回（windowDidResignKey）。
+- 失焦自动收回（全局鼠标监听，T19）+ 超时自动收回（F5，默认 8s，config.json 可改，0=不超时）。
 
 实现要点：
 - borderless NSPanel 默认不能成为 key 窗口，用 KeyPanel 子类放开 canBecomeKey；
-- 失焦收回依赖面板成为 key（Nonactivating 样式收不到 resign，故不用）；
+- 失焦收回不依赖 key 窗口状态（合成事件场景激活是半吊子，T19）；
 - 坐标转换：控制图标 frame 是全局 CG 坐标（左上原点），面板定位前转 AppKit。
 """
 from AppKit import (
@@ -23,6 +25,8 @@ from AppKit import (
     NSEventMaskLeftMouseDown,
     NSFont,
     NSMakeRect,
+    NSMenu,
+    NSMenuItem,
     NSPanel,
     NSScreen,
     NSTextField,
@@ -32,11 +36,11 @@ from AppKit import (
     NSVisualEffectView,
     NSWindowStyleMaskBorderless,
 )
-from Foundation import NSObject, NSMakePoint
+from Foundation import (NSMakePoint, NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer)
 import objc
 import Quartz
 
-from peasebar import inventory
+from peasebar import inventory, sections
 
 # 面板几何
 PANEL_WIDTH = 468
@@ -45,7 +49,22 @@ CELL_W, CELL_H = 110, 42
 CELL_GAP = 6
 EDGE = 8
 HEADER_H = 26
+SECTION_H = 22  # 区标题行高（F4）
 FOOTER_H = 36
+
+# 区名 → 右键菜单 tag（NSMenuItem 只能靠 tag/representedObject 传参）
+_SECTION_TAGS = {
+    sections.SECTION_VISIBLE: 0,
+    sections.SECTION_HIDDEN: 1,
+    sections.SECTION_ALWAYS_HIDDEN: 2,
+}
+# 右键移分区菜单文案（统一动词风格，且与区标题文本区分开）
+_MOVE_TITLES = {
+    sections.SECTION_VISIBLE: "回到可见区",
+    sections.SECTION_HIDDEN: "移到隐藏区",
+    sections.SECTION_ALWAYS_HIDDEN: "移到永久隐藏区",
+}
+_TAG_SECTIONS = {v: k for k, v in _SECTION_TAGS.items()}
 
 # 刘海遮挡徽标（置于名称前）
 NOTCH_BADGE = "\u25a8 "  # ▨
@@ -75,6 +94,7 @@ class RescuePanel(NSObject):
         self.items = []
         self.panel = None
         self._monitor = None  # 全局鼠标按下监听（失焦收回，不依赖 key 状态）
+        self._timeout_timer = None  # 超时自动收回（F5）
         return self
 
     # ---------- 对外接口 ----------
@@ -103,6 +123,7 @@ class RescuePanel(NSObject):
             if self._monitor is None:
                 self._monitor = NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
                     NSEventMaskLeftMouseDown, self._outsideClick_)
+            self._arm_timeout()  # 超时自动收回（F5）
             print(f"[PeaseBar] 面板已显示：visible={self.panel.isVisible()}，"
                   f"key={self.panel.isKeyWindow()}，active={NSApp.isActive()}")
         except Exception:
@@ -111,6 +132,7 @@ class RescuePanel(NSObject):
 
     def close(self):
         print("[PeaseBar] close 调用")
+        self._disarm_timeout()
         if self._monitor is not None:
             NSEvent.removeMonitor_(self._monitor)
             self._monitor = None
@@ -148,15 +170,29 @@ class RescuePanel(NSObject):
         return self.panel
 
     def _rebuild(self):
-        """盘点并重建面板内容（每次弹出/刷新调用）。"""
+        """盘点 → 按三区分桶（F4）→ 重建面板内容（每次弹出/刷新调用）。"""
         # 收纳按钮不在网格重复出现（底部有专用按钮）；其余全量展示
         all_items, _ = inventory.list_items()
         self.items = [m for m in all_items if not m.is_stash_button]
         notched = sum(1 for m in self.items if m.notched)
-        print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，网格 {len(self.items)} 项，刘海 {notched} 项")
+        cfg = sections.load_config()
+        buckets = sections.plan_sections(self.items, cfg)
+        print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，网格 {len(self.items)} 项，刘海 {notched} 项；"
+              f"分区：可见 {len(buckets[sections.SECTION_VISIBLE])}"
+              f" / 隐藏 {len(buckets[sections.SECTION_HIDDEN])}"
+              f" / 永久隐藏 {len(buckets[sections.SECTION_ALWAYS_HIDDEN])}")
 
-        rows = (len(self.items) + GRID_COLS - 1) // GRID_COLS
-        height = EDGE + HEADER_H + rows * (CELL_H + CELL_GAP) + FOOTER_H + EDGE
+        # 高度：头部 + Σ(非空区标题 + 该区网格行) + 底部；空区整段不占位
+        groups = []  # (区名, [item])，按展示顺序
+        height = EDGE + HEADER_H + FOOTER_H + EDGE
+        for s in (sections.SECTION_VISIBLE, sections.SECTION_HIDDEN,
+                  sections.SECTION_ALWAYS_HIDDEN):
+            group = buckets[s]
+            if not group:
+                continue
+            rows = (len(group) + GRID_COLS - 1) // GRID_COLS
+            height += SECTION_H + rows * (CELL_H + CELL_GAP)
+            groups.append((s, group))
 
         panel = self._ensure_panel(height)
 
@@ -178,26 +214,42 @@ class RescuePanel(NSObject):
         header.setFrame_(NSMakeRect(EDGE, height - HEADER_H, PANEL_WIDTH - 2 * EDGE, HEADER_H))
         content.addSubview_(header)
 
-        # 图标网格（从顶部往下排；AppKit y 轴向上，先算每行顶部 y）
-        grid_top = height - HEADER_H
-        for idx, item in enumerate(self.items):
-            row, col = divmod(idx, GRID_COLS)
-            x = EDGE + col * (CELL_W + CELL_GAP)
-            y = grid_top - HEADER_H - CELL_H - row * (CELL_H + CELL_GAP)
-            badge = NOTCH_BADGE if item.notched else ""
-            owner = "系统" if item.owner_app == "系统" else item.owner_app
-            title = f"{badge}{_truncate(item.label)}\n{_truncate(owner, 16)}"
-            btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, CELL_W, CELL_H))
-            btn.setTitle_(title)
-            btn.setBezelStyle_(0)  # rounded
-            btn.setUsesSingleLineMode_(False)
-            btn.setImagePosition_(2)  # NSNoImage：只显示文字（标题含两行）
-            btn.setFont_(NSFont.systemFontOfSize_(10))
-            btn.setTag_(idx)
-            btn.setToolTip_(f"{owner}（{item.owner_bundle_id}）\n点击弹出该图标的原生菜单")
-            btn.setTarget_(self)
-            btn.setAction_("onIconClick:")
-            content.addSubview_(btn)
+        # 分区绘制（从顶部往下：区标题 + 该区网格；AppKit y 轴向上，逐区下移）。
+        # 格子 tag 必须是全量 items 的下标（onIconClick_ 按 tag 取 self.items），
+        # 分桶只影响展示顺序，用 id 映射还原原索引
+        id_to_idx = {id(m): i for i, m in enumerate(self.items)}
+        top = height - HEADER_H
+        for sec, group in groups:
+            title = NSTextField.labelWithString_(
+                f"{sections.SECTION_LABELS[sec]} · {len(group)}")
+            title.setFont_(NSFont.boldSystemFontOfSize_(10))
+            title.setTextColor_(NSColor.secondaryLabelColor())
+            title.setFrame_(NSMakeRect(EDGE, top - SECTION_H,
+                                       PANEL_WIDTH - 2 * EDGE, SECTION_H))
+            content.addSubview_(title)
+            top -= SECTION_H
+            rows = (len(group) + GRID_COLS - 1) // GRID_COLS
+            for idx, item in enumerate(group):
+                row, col = divmod(idx, GRID_COLS)
+                x = EDGE + col * (CELL_W + CELL_GAP)
+                y = top - CELL_H - row * (CELL_H + CELL_GAP)
+                badge = NOTCH_BADGE if item.notched else ""
+                owner = "系统" if item.owner_app == "系统" else item.owner_app
+                title_text = f"{badge}{_truncate(item.label)}\n{_truncate(owner, 16)}"
+                btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, CELL_W, CELL_H))
+                btn.setTitle_(title_text)
+                btn.setBezelStyle_(0)  # rounded
+                btn.setUsesSingleLineMode_(False)
+                btn.setImagePosition_(2)  # NSNoImage：只显示文字（标题含两行）
+                btn.setFont_(NSFont.systemFontOfSize_(10))
+                btn.setTag_(id_to_idx[id(item)])
+                btn.setToolTip_(f"{owner}（{item.owner_bundle_id}）\n"
+                                f"左键：弹出该图标的原生菜单；右键：移分区")
+                btn.setTarget_(self)
+                btn.setAction_("onIconClick:")
+                btn.setMenu_(self._cell_menu(sections.item_key(item), sec))
+                content.addSubview_(btn)
+            top -= rows * (CELL_H + CELL_GAP)
 
         # 底部操作行
         footer_y = EDGE
@@ -221,7 +273,7 @@ class RescuePanel(NSObject):
         btn_refresh.setAction_("onRefreshClick:")
         content.addSubview_(btn_refresh)
 
-        hint = NSTextField.labelWithString_("点击图标 = 弹出它的原生菜单")
+        hint = NSTextField.labelWithString_("左键=弹菜单 · 右键=移分区")
         hint.setFont_(NSFont.systemFontOfSize_(10))
         hint.setTextColor_(NSColor.secondaryLabelColor())
         hint.setAlignment_(2)  # 右对齐
@@ -230,6 +282,23 @@ class RescuePanel(NSObject):
 
         panel.setContentView_(content)
         self._position_panel(height)
+
+    def _cell_menu(self, key, cur_section):
+        """格子的右键菜单（F4 移分区）；跳过当前区项。NSView.menu 由 AppKit
+        在右键时自动弹出，不影响左键 action。"""
+        menu = NSMenu.alloc().init()
+        menu.setAutoenablesItems_(False)
+        for sec in (sections.SECTION_VISIBLE, sections.SECTION_HIDDEN,
+                    sections.SECTION_ALWAYS_HIDDEN):
+            if sec == cur_section:
+                continue
+            mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                _MOVE_TITLES[sec], "onMoveSection:", "")
+            mi.setTarget_(self)  # nil-target 会沿响应链查找，ControlItem 不在链上（T21）
+            mi.setTag_(_SECTION_TAGS[sec])
+            mi.setRepresentedObject_(key)
+            menu.addItem_(mi)
+        return menu
 
     def _position_panel(self, height):
         """面板定位：控制图标 AppKit frame，水平居中锚定在图标正下方 4pt。"""
@@ -273,16 +342,57 @@ class RescuePanel(NSObject):
                 Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
         self.close()
 
+    def onMoveSection_(self, sender):
+        """右键菜单移分区（F4）：立即持久化并重建面板让分组生效。"""
+        key = str(sender.representedObject())
+        target = _TAG_SECTIONS[sender.tag()]
+        cfg = sections.load_config()
+        sections.set_section(cfg, key, target)
+        sections.save_config(cfg)
+        print(f"[PeaseBar] 分区变更：{key} → {target}")
+        self._rebuild()
+        self.panel.makeKeyAndOrderFront_(None)
+        self._arm_timeout()  # 用户主动交互，重新计时
+
     def onStashClick_(self, sender):
         """展开/收起系统收纳区，然后刷新网格。"""
         inventory.set_stash_revealed(not inventory.stash_revealed())
         self._rebuild()
         self.panel.makeKeyAndOrderFront_(None)
+        self._arm_timeout()  # 交互续期，避免操作中突然收回
 
     def onRefreshClick_(self, sender):
         """手动刷新盘点。"""
         self._rebuild()
         self.panel.makeKeyAndOrderFront_(None)
+        self._arm_timeout()  # 交互续期
+
+    # ---------- 超时自动收回（F5） ----------
+
+    def _arm_timeout(self):
+        """按 config.json 的 panel_timeout（秒）设定超时收回；0/负值 = 不超时。"""
+        self._disarm_timeout()
+        timeout = sections.load_config().get("panel_timeout", 8)
+        if not timeout or timeout <= 0:
+            print("[PeaseBar] 超时收回：已禁用（panel_timeout=0）")
+            return
+        self._timeout_timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            float(timeout), self, "onTimeout:", None, False)
+        NSRunLoop.mainRunLoop().addTimer_forMode_(self._timeout_timer, NSRunLoopCommonModes)
+        print(f"[PeaseBar] 超时收回：{timeout:.0f}s 后自动关面板")
+
+    def _disarm_timeout(self):
+        """撤销超时计时器（幂等）。"""
+        t = self._timeout_timer
+        if t is not None and t.isValid():
+            t.invalidate()
+        self._timeout_timer = None
+
+    def onTimeout_(self, timer):
+        """超时到期：面板还开着则收回。"""
+        print("[PeaseBar] 面板超时 → 自动收回")
+        self._disarm_timeout()
+        self.close()
 
     # ---------- 失焦收回（F5） ----------
 

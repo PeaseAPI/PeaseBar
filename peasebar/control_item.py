@@ -57,7 +57,10 @@ class ControlItem(NSObject):
         self.item = bar.statusItemWithLength_(NSVariableStatusItemLength)
         button = self.item.button()
 
-        image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(SYMBOL_NAME, None)
+        # accessibilityDescription 会成为状态项的 AXDescription（盘点 label 的来源）：
+        # 传 None 时回落 SF Symbol 系统默认描述（实测是「更多」），面板里自己的图标
+        # 会显示成「更多」，用户看不懂；必须显式给出（P22 实测教训）
+        image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(SYMBOL_NAME, "PeaseBar")
         if image is not None:
             image.setTemplate_(True)  # 随系统深浅色自动反色
             button.setImage_(image)

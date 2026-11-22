@@ -47,13 +47,13 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | F1 | **图标盘点引擎** | AX 枚举 MenuBarAgent（系统图标+原生收纳按钮）与各运行 App 的 `AXExtrasMenuBar`；每项含 owner、名称、坐标、刘海遮挡判定 | 与菜单栏实际图标一致；遮挡判定与截图对得上 |
 | F2 | **控制图标** | PeaseBar 自己的 NSStatusItem；左键弹救援面板，右键系统菜单 | 图标常驻；可被用户用系统拖拽改位；左键/右键行为正确 |
 | F3 | **救援面板** | 无边框 NSPanel 出现在控制图标正下方；网格展示全部图标（名称+归属+刘海徽标）；单击=对真实图标**合成右键**弹出其原生状态菜单（T17：AXPress/左键无效），面板随即收起 | 面板出现在按钮下方；点击面板内图标能弹出对应菜单；含刘海遮挡项 |
-| F4 | **分区模型** | visible / hidden / always-hidden 三区，配置键 = bundleId+图标名；面板可按区过滤 | 标记为 hidden 的图标在面板中归入隐藏区并持久化 |
-| F5 | **自动收回** | 点击面板外即关（**全局鼠标监听**实现，T19——不依赖 key 状态；resignKey 路线在合成场景失效）；可配超时（默认 8s，0=不超时） | 失焦即收；超时行为正确 |
-| F6 | **全局快捷键** | 默认 ⌥⌘B 切换面板；可在配置改键 | 快捷键全局有效（其他 App 在前台也生效） |
+| F4 | **分区模型** | visible / hidden / always-hidden 三区，配置键 = bundleId+图标名；面板按区分组展示（空区不占位），格子**右键菜单移区**（NSView.menu，T27）即时持久化 | ✅ 真机 P21–P25 全 PASS：移区即时生效、重启保持、回可见区删键 |
+| F5 | **自动收回** | 点击面板外即关（**全局鼠标监听**实现，T19——不依赖 key 状态）；超时自动关（默认 8s，config.json `panel_timeout` 可改，0=不超时；交互续期） | ✅ 失焦即收（T9）；超时 3.0s 精确取证（P27） |
+| F6 | **全局快捷键** | 默认 ⌥⌘B 切换面板；**CGEventTap 实现**（T23：Carbon 不可用，事件 tap 只需已有辅助功能权限）；改键设置留 Phase 4 | ✅ 真机 P26 PASS：其他 App 前台时合成 ⌥⌘B 开/关往返成立 |
 | F7 | **权限引导** | 辅助功能权限缺失时**不阻塞启动**：状态项正常显示，菜单项「检查辅助功能权限」提供状态反馈与“打开系统设置”按钮（图标显示本身不需要 AX 权限，见 T12） | 无权限时功能受限但不静默：图标在、盘点入口有中文指引 |
 | F8 | **顺序编辑器（只读视图）** | 面板列出当前实际顺序（按 x 排序） | 与真实顺序一致 |
 | F9 | **状态持久化** | 配置存 `~/Library/Application Support/PeaseBar/config.json` | 重启 PeaseBar 分区/设置保留 |
-| F10 | **单实例 + 退出** | 二次启动唤起已有实例；右键菜单可退出 | 双开不出现两个控制图标 |
+| F10 | **单实例 + 退出** | 二次启动唤起已有实例（哨兵端口 52877，0.5s 轮询 accept → 弹面板）；右键菜单可退出。注意：普通 `open` 对已运行应用被 LaunchServices 合并、不产生第二进程（T26），哨兵主要服务 CLI/`open -n`/崩溃僵尸场景 | ✅ 真机 P28 PASS：`open -n` 双开 → 第二实例退出、首实例弹面板 |
 
 ### 3.2 v1.x（顺序写入与真隐藏，依赖 Phase 0 实验 E1–E3 结论）
 
@@ -111,6 +111,11 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T20 | **NSWindow 没有 `setFrame:` 选择子**（PyObjC 无 `setFrame_`），只有 `setFrame:display:`；直接调 `setFrame_` 抛 AttributeError。且面板复用路径（关闭后再开，`setReleasedWhenClosed_(False)` 对象存活）才会走到这段——首建路径不触发，toggle 测试才暴露 | panel.py `_ensure_panel` 复用分支用 `setFrame_display_(rect, True)` |
 | T21 | **NSMenuItem 必须显式 `setTarget_`**：nil-targeted action 沿响应链查找，而 ControlItem 不在响应链里——点击菜单项后 action 落空（菜单正常关闭但处理函数永不执行，无任何报错） | control_item.py build() 对三个菜单项 setTarget_(self) |
 | T22 | **并行 AX 枚举**：串行遍历 ~80 进程查 AXExtrasMenuBar 耗 ~19.8s（大量 helper 进程响应慢是瓶颈），ThreadPoolExecutor(max_workers=16) 并行 + NSWorkspace 元信息主线程预取 → **~2.1s**（结果一致）；无 AX 权限时逐进程查询会长时间阻塞，`list_items()` 先 `AXIsProcessTrusted()` 快速失败 | inventory.py 并行化与快速失败路径 |
+| T23 | **PyObjC 无 Carbon 绑定**（`from Carbon.HIToolbox import RegisterEventHotKey` → ModuleNotFoundError）；NSEvent 全局键盘监听又需要「输入监控」新授权。正解：**CGEventTap**（kCGSessionEventTap + listen-only + keyDown mask）——只依赖已有的辅助功能权限，不拦截事件，回调经 CFRunLoopSource 挂主 runloop 与 UI 同线程 | hotkeys.py ⌥⌘B；真机 P26 验证成立 |
+| T24 | **`imageWithSystemSymbolName_accessibilityDescription_` 第二参传 None → 状态项 AXDescription 回落 SF Symbol 系统默认描述**（"ellipsis.circle.fill" → 「更多」），盘点 label、配置键、面板格子全被污染且无任何报错 | control_item.py 显式传 "PeaseBar"；状态项图标必须自带可读 accessibilityDescription |
+| T25 | **NSWorkspace.runningApplications 列表秒级滞后**：已死 pid 不移除、新 pid 不收录（实测 pkill+open 后 15s 仍只返回僵尸 pid）——做进程重启/双开交接验证会误判 | 测试脚本验证进程存活/交接一律用 `pgrep -f`（内核进程表，无缓存） |
+| T26 | **`open App.app` 对已运行应用被 LaunchServices 合并，不产生第二进程**（实测无任何哨兵/已有实例日志）——二次启动唤醒路径在普通 open 下永远走不到；真实用户从 Dock/Finder 再开同样被合并 | 双开测试用 `open -n` 强制新实例；哨兵价值在 CLI/崩溃僵尸场景 |
+| T27 | **NSView.menu（setMenu_）右键自动弹出且不干扰左键 action**；菜单项同样必须 setTarget_（T21），合成左键点菜单项有效（延续 T14 模式）；测试中点击落空会残留菜单吞掉下一轮右键（菜单 tracking 捕获所有鼠标事件），需 Escape 兜底 | panel.py `_cell_menu` 格子右键移分区 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -137,10 +142,10 @@ PeaseBar/
 │   ├── axutil.py        # AX 基础封装：copy/children/point/size/actions/press + CG↔AppKit
 │   ├── inventory.py     # F1 盘点引擎：MenuBarAgent + 各 App，轮询 + 变更回调
 │   ├── control_item.py  # F2 控制图标：NSStatusItem、左右键分发
-│   ├── panel.py         # F3 救援面板：NSPanel、图标网格、点击合成右键触发（T17）、全局监听失焦收回（T19）
-│   ├── sections.py      # F4 三区模型：配置键、分区过滤、持久化
+│   ├── panel.py         # F3 救援面板：三区网格（F4）、合成右键触发（T17）、格子右键移区（T27）、全局监听失焦收回（T19）、超时收回（F5）
+│   ├── sections.py      # F4 三区模型：纯逻辑分桶 + config.json 原子读写（含 panel_timeout）
 │   ├── mover.py         # F11 ⌘拖拽合成写入（Phase 3，实验通过后启用）
-│   ├── hotkeys.py       # F6 全局快捷键（Carbon RegisterEventHotKey）
+│   ├── hotkeys.py       # F6 全局快捷键 ⌥⌘B（CGEventTap listen-only，T23；Carbon 在 PyObjC 不可用）
 │   ├── settings.py      # F9 配置读写
 │   └── ui/              # F14 设置窗口（Phase 4）
 ├── docs/DEVELOPMENT.md  # 本文档
@@ -169,10 +174,10 @@ PeaseBar/
 - [x] P1.4 `tmp/test-plan.md` 逐条真机执行 + 截图取证：T1–T15 全部 PASS（执行记录见 tmp/test-plan.md）；修复链见 §10 晚间快照 → **节点提交**
 
 ### Phase 2 分区与维持（F4–F7, F9–F10）
-- [ ] P2.1 `sections.py`（三区 + JSON 持久化）+ 面板分区过滤
-- [ ] P2.2 自动收回（失焦/超时）+ `hotkeys.py`（⌥⌘B）
-- [ ] P2.3 权限引导窗 + 单实例
-- [ ] P2.4 tests/ 纯逻辑单测（分区规划、遮挡判定）→ **节点提交**
+- [x] P2.1 `sections.py`（三区纯逻辑 + JSON 原子持久化）+ 面板按区分组 + 格子右键移区（T27）：真机 P21–P25 全 PASS（修菜单文案反转、T24 label「更多」→「PeaseBar」）
+- [x] P2.2 超时自动收回（默认 8s，config `panel_timeout`，交互续期；P27 3.0s 精确取证）+ `hotkeys.py` ⌥⌘B（T23 CGEventTap；P26 PASS；含 NSRunLoopCommonModes 未导入 NameError 修复）
+- [x] P2.3 单实例唤醒接线（哨兵 0.5s 轮询 accept → show；P28 `open -n` PASS，T26 事实同记）；权限引导已有（菜单项 alert，T14），引导窗升级留 Phase 4
+- [x] P2.4 tests/ 纯逻辑单测 29 项全 PASS（分区规划 + 遮挡判定；拓出并修复 rect_intersects 零宽误报）；Phase 1 回归 T7–T12 全绿 → **节点提交**
 
 ### Phase 3 顺序写入（F11–F12，视 E2/E1 结论）
 - [ ] P3.1 `mover.py` ⌘拖拽写入 + 编辑器上移/下移/拖拽
@@ -195,7 +200,8 @@ PeaseBar/
 6. 启动/重启 PeaseBar 一律 `open /Applications/PeaseBar.app`（开发态构建：`python3 setup.py py2app -A && ditto dist/PeaseBar.app /Applications/PeaseBar.app`）；**切勿**终端直启二进制（T12：StatusBarServer 拒绝记账，图标不显示）
 7. 排障先看 `~/Library/Logs/PeaseBar.log`（app.py 落盘，UTF-8，见 T15）；open 启动的进程 stdout/stderr 不可见
 8. 新 bundle 首次跑需授权辅助功能（T16）：系统设置「设备控制和数据访问」页打开 PeaseBar 开关（需 Touch ID 认证）
-9. 测试脚本轮询等待面板窗口出现（盘点 ~2s，固定 sleep 会竞态）；参考 `tmp/t34_expand_click.py`/`tmp/t8_t12.py` 的 wait_panel 模式
+9. 测试脚本轮询等待面板窗口出现（盘点 ~2s，固定 sleep 会竞态）；参考 `tmp/t34_expand_click.py`/`tmp/t8_t12.py` 的 wait_panel 模式；进程存活/交接验证用 `pgrep`（T25）；双开唤醒测试用 `open -n`（T26）
+10. 纯逻辑单测：项目根目录 `python3 -m unittest discover -s tests -t .`（29 项，不需 GUI/AX 权限）
 
 ## 10. 进度快照
 
@@ -222,6 +228,14 @@ PeaseBar/
   注意：最终回归时用户切换了显示状态（远程会话全屏），T14 事实复现（盘点塌缩到 4 系统项）——
   属环境干扰非缺陷，全部核心修复均有单点 PASS 证据。
   **下一步：Phase 2（sections 三区 + 持久化 + 快捷键 + 超时收回）。**
+- **2026-11-22（夜）**：Phase 2 收官（P2.1–P2.4）。新事实 T23–T27 写入 §5：
+  ① Carbon 不可用 → ⌥⌘B 改 CGEventTap（P26 PASS）；② SF Symbol 默认描述污染状态项 label（T24 修复）；
+  ③ NSRunLoopCommonModes 未导入 NameError 被 show() 大 try/except 吞——面板照常显示但超时静默失效
+  （教训：交付前 grep 日志 traceback）；④ 分区闭环 P21–P25 PASS（右键移区+重启持久化+回区删键）；
+  ⑤ 单实例唤醒接线 P28 PASS（`open -n`；普通 open 被 LaunchServices 合并，T26）；
+  ⑥ 超时收回 P27 3.0s 精确 PASS；⑦ tests/ 29 项纯逻辑单测全绿（拓出 rect_intersects 零宽误报并修复）。
+  Phase 1 回归 T7–T12 全绿（分区改造未破坏左键/toggle/收纳区链路）。
+  **下一步：Phase 3（mover.py ⌘拖拽顺序写入 + 编辑器；原生收纳联动 F12）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
