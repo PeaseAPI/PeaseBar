@@ -20,6 +20,7 @@ from AppKit import (
 from Foundation import NSObject, NSMakeRect
 import objc
 import peasebar
+from peasebar import sections
 
 # 点击分发需要按下即触发（而非抬起），沿用 NSCell 的 sendActionOn_
 try:
@@ -33,8 +34,9 @@ from AppKit import (
     NSEventTypeRightMouseDown,
 )
 
-# 控制图标默认用 SF Symbol「更多」语义；找不到时退化为文字「···」
-SYMBOL_NAME = "ellipsis.circle.fill"
+# 控制图标默认符号（预设表见 sections.CONTROL_ICONS，用户可在设置→通用页换）；
+# 找不到符号时退化为文字「···」
+SYMBOL_NAME = sections.CONTROL_ICONS[0][0]
 FALLBACK_TITLE = "···"
 
 
@@ -57,16 +59,7 @@ class ControlItem(NSObject):
         bar = NSStatusBar.systemStatusBar()
         self.item = bar.statusItemWithLength_(NSVariableStatusItemLength)
         button = self.item.button()
-
-        # accessibilityDescription 会成为状态项的 AXDescription（盘点 label 的来源）：
-        # 传 None 时回落 SF Symbol 系统默认描述（实测是「更多」），面板里自己的图标
-        # 会显示成「更多」，用户看不懂；必须显式给出（P22 实测教训）
-        image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(SYMBOL_NAME, "PeaseBar")
-        if image is not None:
-            image.setTemplate_(True)  # 随系统深浅色自动反色
-            button.setImage_(image)
-        else:
-            button.setTitle_(FALLBACK_TITLE)
+        self.refresh_icon()  # 按配置画触发图标（图标/文字分支在 refresh_icon 里统一）
         button.setToolTip_("PeaseBar：查看全部菜单栏图标")
 
         # 主菜单（右键用；左键行为由回调接管）
@@ -90,6 +83,26 @@ class ControlItem(NSObject):
         button.setTarget_(self)
         button.setAction_("onStatusClick:")
         button.sendActionOn_(CLICK_MASKS)
+        return self
+
+    def refresh_icon(self):
+        """按配置重画触发图标（设置页改预设后即时生效，无需重启）。
+
+        accessibilityDescription 会成为状态项的 AXDescription（盘点 label 的来源）：
+        传 None 时回落 SF Symbol 系统默认描述（实测是「更多」），面板里自己的图标
+        会显示成「更多」，用户看不懂；必须显式给出（P22 实测教训）。
+        """
+        symbol = sections.load_config().get("control_icon", SYMBOL_NAME)
+        button = self.item.button()
+        image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol, "PeaseBar")
+        if image is not None:
+            image.setTemplate_(True)  # 随系统深浅色自动反色
+            button.setImage_(image)
+            button.setTitle_("")
+        else:
+            # 预设符号加载失败（系统没有该符号）：退回到文字三点，不留空白钮
+            button.setImage_(None)
+            button.setTitle_(FALLBACK_TITLE)
         return self
 
     def button_anchor(self):

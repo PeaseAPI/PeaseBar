@@ -8,6 +8,7 @@
 还有磁盘缓存、重捕获调度、污染判定，我们 v1 只做必要四步：
 
     截条带 → 按 frame 裁剪（裁进条带高度）→ 抠掉近似统一的背景 → 裁掉透明边距
+    → 宽条剥离前导图标（图标+数字这类复合条只留图标，剥不出就走兜底）
     → 单色字形判定，成立则标记 template（跟随界面明暗着色）
 
 权限：截屏需「屏幕录制」授权（与辅助功能相互独立，同 T16 按 bundle 记账）。
@@ -41,6 +42,12 @@ TRIM_PAD = 2
 # 菜单栏被全屏 App 遮住时整条条带都是黑的，裁出来是纯背景 → 抠像后一个不剩，
 # 那种全透明图交给按钮就是空白格子（P42 实测 16 格空白），必须当成截不到走兜底。
 MIN_GLYPH_PIXELS = 20
+
+# 宽图块判定阈值：宽高比超过它按「图标+数字/文字」复合条处理（用户定调：
+# 我们的 UI 只显示图标，不显示消息数字；半截文字条也不算图标）
+WIDE_ASPECT = 1.4
+# 图标与文字之间缝隙的最小透明列数：低于它当作文字内部字距，不是分缝
+GAP_MIN_PX = 3
 
 # 抓取结果缓存：{item_key: (NSImage, 代际)}；盘点刷新时代际递增使旧缓存失效
 _cache = {}
@@ -301,6 +308,49 @@ def trim_transparent(arr, pad=TRIM_PAD):
     return arr[y0 : y1 + 1, x0 : x1 + 1]
 
 
+def split_leading_glyph(arr):
+    """宽图块（图标+数字/流量文字复合条）剥出前导图标；剥不出返回 None。
+
+    依据：状态项图文组合固定是「图左字右」，去背后中间空隙是全透明缝。
+    前导块校验（任一不满足 → None，调用方交给兜底链，绝不显示半截文字）：
+    - 缝隙宽 ≥ GAP_MIN_PX 且出现在前 2×高度范围内（图标没这么宽）；
+    - 前导块宽近似方形（0.55–1.7×高），排除「902」这类窄字头；
+    - 前导块墨迹高度 ≥ 整图墨迹高的 75%：菜单栏图标字形比数字/小文字高，
+      两行流量文字的首词只占一行，据此被拒。
+    近方形图块原样返回（纯图标，不用剥）。
+    """
+    import numpy as np
+
+    h, w = arr.shape[:2]
+    if h <= 0 or w <= h * WIDE_ASPECT:
+        return arr
+    alpha = arr[:, :, 3]
+    empty_col = (alpha == 0).all(axis=0)
+    ink_cols = np.where(~empty_col)[0]
+    if len(ink_cols) == 0:
+        return None
+    x0 = int(ink_cols[0])
+    run, seam_end = 0, None
+    for x in range(x0, min(w, int(2 * h))):
+        if empty_col[x]:
+            run += 1
+            if run >= GAP_MIN_PX:
+                seam_end = x - run + 1
+                break
+        else:
+            run = 0
+    if seam_end is None:
+        return None  # 一路贴死没缝 = 纯文字条
+    lead_w = seam_end - x0
+    if not (0.55 * h <= lead_w <= 1.7 * h):
+        return None
+    lead_rows = np.where((alpha[:, x0:seam_end] > 0).any(axis=1))[0]
+    full_rows = np.where((alpha > 0).any(axis=1))[0]
+    if len(lead_rows) < 0.75 * (int(full_rows[-1]) - int(full_rows[0]) + 1):
+        return None
+    return trim_transparent(arr[:, x0:seam_end])
+
+
 def is_single_ink(arr):
     """是否为「单色字形」图标（菜单栏绝大多数是），成立则适合标 template 着色。
     判据同 Thaw：可见像素里高饱和色占比 ≤ MAX_VIVID_SHARE，且不是一整块不透明贴图。
@@ -390,6 +440,9 @@ def image_for_item(strip, scale, item):
     arr = trim_transparent(knockout(arr))
     if int((arr[:, :, 3] > 0).sum()) < MIN_GLYPH_PIXELS:
         return None  # 无墨 = 这里没画上图标，不是「图标是透明的」→ 交给兜底链
+    arr = split_leading_glyph(arr)
+    if arr is None:
+        return None  # 剥不出干净图标的宽条（纯文字）：App 图标/系统符号兜底，不显示半截字
     return fit_box(image_from_array(arr, scale, is_single_ink(arr)))
 
 

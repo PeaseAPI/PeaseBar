@@ -171,8 +171,12 @@ class TestDeadMenuBar(unittest.TestCase):
         self.assertIsNone(capture.image_for_item(strip, 1.0, self.Item((10, 0, 24, 24))))
 
     def test_有字形仍能裁到图(self):
-        strip = self._strip(draw_glyph(tile(bg=(0, 0, 0), size=(24, 200))))
-        self.assertIsNotNone(capture.image_for_item(strip, 1.0, self.Item((0, 0, 200, 24))))
+        # 画一个近似方形的小图标（宽条会被 split_leading_glyph 剥/拒，这里要的是纯图标路径）
+        arr = tile(bg=(0, 0, 0), size=(24, 200))
+        arr[6:18, 100:112, :3] = 240
+        arr[6:18, 100:112, 3] = 255
+        self.assertIsNotNone(capture.image_for_item(self._strip(arr), 1.0,
+                                                    self.Item((96, 0, 20, 24))))
 
     def test_条带有无内容(self):
         self.assertFalse(capture.strip_has_content(self._strip(tile(bg=(0, 0, 0), size=(24, 200)))))
@@ -202,6 +206,42 @@ class TestDeadMenuBar(unittest.TestCase):
             got = bytes(images[key].TIFFRepresentation())
             want = bytes(capture.fallback_image_for_item(it).TIFFRepresentation())
             self.assertEqual(got, want)  # 兜底图就是应得的那张，不是一张全透明
+
+
+class TestLeadingGlyph(unittest.TestCase):
+    """宽条剥前导图标（用户定调：格子只显图标不显数字，半截文字不算图标）。"""
+
+    @staticmethod
+    def _mask(h, w, spans):
+        """按 (列起, 列止, 行起, 止) 列表造 alpha 图（split 只看通道 3）。"""
+        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        for c0, c1, r0, r1 in spans:
+            arr[r0:r1, c0:c1, 3] = 255
+        return arr
+
+    def test_近方形原样返回(self):
+        arr = self._mask(20, 24, [(0, 24, 0, 20)])
+        self.assertIs(capture.split_leading_glyph(arr), arr)
+
+    def test_图标加缝隙加数字切出图标(self):
+        arr = self._mask(20, 34, [(0, 18, 0, 20), (22, 34, 0, 20)])
+        out = capture.split_leading_glyph(arr)
+        self.assertIsNotNone(out)
+        self.assertLessEqual(out.shape[1], 20)  # 只剩前导图标，数字被丢弃
+
+    def test_无缝纯文字条拒收(self):
+        arr = self._mask(20, 60, [(0, 60, 0, 20)])
+        self.assertIsNone(capture.split_leading_glyph(arr))
+
+    def test_窄字头不当图标(self):
+        # 「902」这种窄首词（宽 < 0.55×高）切出来不是图标 → 走兜底
+        arr = self._mask(20, 40, [(0, 9, 0, 20), (13, 40, 0, 20)])
+        self.assertIsNone(capture.split_leading_glyph(arr))
+
+    def test_两行文字首词只占一行拒收(self):
+        # 流量条两行文字：首词墨迹高度只有整图一半 → 不是图标
+        arr = self._mask(20, 30, [(0, 15, 0, 10), (18, 30, 10, 20)])
+        self.assertIsNone(capture.split_leading_glyph(arr))
 
 
 if __name__ == "__main__":

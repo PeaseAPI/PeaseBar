@@ -140,6 +140,7 @@ class AppDelegate(NSObject):
 
         self.settings = SettingsController.alloc().init()
         self.settings.on_changed = self._refresh_panel_if_open
+        self.settings.on_control_icon_changed = self.control.refresh_icon  # 触发图标预设即时重画
         self.control.on_settings = self.settings.show
         self.control.build()
         try:

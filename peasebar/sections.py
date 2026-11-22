@@ -31,7 +31,18 @@ SECTION_LABELS = {
 # 区的上下顺序（⌥↑/⌥↓ 换区、↑/↓ 跳选都按这个序列走）
 SECTION_ORDER = (SECTION_VISIBLE, SECTION_HIDDEN, SECTION_ALWAYS_HIDDEN)
 
-DEFAULT_CONFIG = {"sections": {}, "order": [], "panel_timeout": 8}
+# 控制图标预设（菜单栏触发钮可定义，用户定调：比如三个点之类）：
+# (SF Symbol 名, 设置页显示名)；存 key，渲染端找不到符号时退回文字「···」
+CONTROL_ICONS = (
+    ("ellipsis.circle.fill", "圆圈三点（默认）"),
+    ("ellipsis", "三点"),
+    ("eye", "眼睛"),
+    ("command", "命令键"),
+    ("square.grid.2x2", "四格"),
+)
+
+DEFAULT_CONFIG = {"sections": {}, "order": [], "panel_timeout": 8,
+                  "control_icon": CONTROL_ICONS[0][0]}
 
 
 def config_path():
@@ -59,6 +70,10 @@ def load_config(path=None):
     timeout = data.get("panel_timeout")
     if isinstance(timeout, (int, float)) and timeout >= 0:
         cfg["panel_timeout"] = timeout
+    icon = data.get("control_icon")
+    # 只认预设表里的符号名：脏数据/旧版本删掉的预设回默认，渲染端不用二次校验
+    if isinstance(icon, str) and any(k == icon for k, _ in CONTROL_ICONS):
+        cfg["control_icon"] = icon
     raw_order = data.get("order")
     if isinstance(raw_order, list):
         # 只留字符串项，且去重保序（脏数据/重复键会让位次计算自相矛盾）

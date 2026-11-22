@@ -39,6 +39,7 @@ from AppKit import (
     NSMenuItem,
     NSPasteboard,
     NSProcessInfo,
+    NSPopUpButton,
     NSSwitch,
     NSText,
     NSTextField,
@@ -154,6 +155,7 @@ class SettingsController(NSObject):
         self.buckets = {}     # 最近一次 _rebuild 的分桶结果（键盘编辑读它，不二次盘点）
         self._undo = []       # 撤销栈：每格是 {sections, order} 快照
         self.on_changed = None  # 分区/超时变更后回调（app 用来刷新面板）
+        self.on_control_icon_changed = None  # 触发图标预设变更后回调（app 接 ControlItem.refresh_icon）
         return self
 
     # ---------- 打开与刷新 ----------
@@ -263,6 +265,7 @@ class SettingsController(NSObject):
         self.move_buttons = []
         self.order_buttons = []
         self.field_timeout = None  # 切页即失效，_save_timeout 的空判据此生效
+        self.popup_icon = None     # 同上：触发图标下拉也随旧内容丢弃
         page = getattr(self, "page", "layout")
         height = self._page_height(page, buckets)
 
@@ -667,6 +670,23 @@ class SettingsController(NSObject):
         self.field_timeout.setTarget_(self)
         self.field_timeout.setAction_("onTimeoutChanged:")
         view.addSubview_(self.field_timeout)
+        y -= ROW_H + 8
+        lbl_ic = NSTextField.labelWithString_("菜单栏控制图标")
+        lbl_ic.setFont_(NSFont.systemFontOfSize_(11))
+        lbl_ic.setFrame_(NSMakeRect(EDGE, y - ROW_H, 220, ROW_H))
+        view.addSubview_(lbl_ic)
+        # pullsDown=False：选中项显示在钮体内，取证读 stringValue 即当前预设
+        self.popup_icon = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            NSMakeRect(EDGE + 224, y - ROW_H - 2, 160, ROW_H + 4), False)
+        for _sym, name in sections.CONTROL_ICONS:
+            self.popup_icon.addItemWithTitle_(name)
+        cur = next((i for i, (k, _) in enumerate(sections.CONTROL_ICONS)
+                    if k == cfg.get("control_icon")), 0)
+        self.popup_icon.selectItemAtIndex_(cur)
+        self.popup_icon.setTarget_(self)
+        self.popup_icon.setAction_("onControlIconChanged:")
+        self.popup_icon.setAccessibilityIdentifier_("control-icon-picker")
+        view.addSubview_(self.popup_icon)
         self._sync_launch_state()
 
     def _page_shortcuts(self, view, top):
@@ -981,6 +1001,19 @@ class SettingsController(NSObject):
 
     def onTimeoutChanged_(self, sender):
         self._save_timeout()
+
+    def onControlIconChanged_(self, sender):
+        """通用页换触发图标预设：落盘 + 回调即时重画菜单栏上的控制图标。"""
+        idx = sender.indexOfSelectedItem()
+        if not (0 <= idx < len(sections.CONTROL_ICONS)):
+            return
+        key, name = sections.CONTROL_ICONS[idx]
+        cfg = sections.load_config()
+        cfg["control_icon"] = key
+        sections.save_config(cfg)
+        if self.on_control_icon_changed is not None:
+            self.on_control_icon_changed()
+        print(f"[PeaseBar] 菜单栏控制图标已切换：{name}（{key}）")
 
     def _save_timeout(self):
         if getattr(self, "field_timeout", None) is None:

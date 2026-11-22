@@ -151,6 +151,8 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T90 | **拿到辅助功能授权后，未弹出的 NSMenu 也会以幽灵形态挂在 App 的 AX 树上**（size=(0,0)、位置 (0,屏底)），只看角色=误报「菜单弹了」（P48 假 FAIL 真因）；另：PyObjC 的 AXSize 是 AXValueRef，`.width` 直接取会 AttributeError（判据静默全假），必须 axutil.decode_value(…, kAXValueCGSizeType)。意外发现：授权后合成 HID 右键能真投递到自家状态项（T41 的「自家收不到」是没授权时代的现象） | find_menu 判据加 size>0；菜单弹出也可用 layer 101 窗口交叉验证 |
 | T91 | **屏幕录制权限同 T86 坑：重签=洗权限**，且列表残留开关=1 的旧记录会骗人；恢复流全程零人工：`tccutil reset ScreenCapture <bid>` → 重启 App → 疑难解答页「请求屏幕录制权限」（CGRequestScreenCaptureAccess）→ 系统自动把新条目加进列表且=开 → 再重启 App 生效（不像辅助功能那样要碰开关） | P42/P97 取证；辅助功能则走 T87 的「+添加」流 |
 | T92 | **设置格子的右键菜单要先左键点一下才弹得出**（T27 补充）：合成场景窗口常非 key（T19），裸右键弹不出 view 的 setMenu_，左键带活后才弹——批量跑时上一条用例的左键一直在暗中代劳，单跑就露馅（P52 假 FAIL 真因） | 取证右键前先左键热窗；§11「不依赖上一条」纪律再实锤一例 |
+| T93 | **显示图的「数字混入」与「半截文字」同根因**：capture 按状态项 AX frame 从菜单栏条带裁像素，图标+数字复合条连数字裁进来，宽文字条被 fit_box（GLYPH_MAX_W=40）压扁成半截。修法=split_leading_glyph 纯函数：宽条（w>1.4h）在前 2×高内找第一段 ≥3px 全透明缝，前导块须宽 0.55–1.7×高且墨迹高≥整图 75%（两行流量文字首词只占一行据此被拒），任一不满足返回 None 走兜底链（App 图标/系统符号），绝不显示半截文字。菜单栏本体不受影响——移回的是真状态项，不是我们的裁图（Q68：PeaseClash 流量条 208px 移回后仍带数值） | 显示层去数字只改 capture/兜底链；任何「剥图」判据要先在真缺陷构建上标定（§11 T74 纪律） |
+| T94 | **无 runloop 的探针进程里 NSWorkspace.runningApplications() 是陈旧快照**：它靠主运行循环通知刷新，纯轮询进程重启后新 PID 永远看不到、inventory.list_items（内部同走 NSWorkspace）盘不到新实例条目——Q66 假 FAIL 真因，表面症状是「rebind 不上/自家图标裁图永 None」。另：刚 kill 后 `open` 偶发 rc=1（LaunchServices 状态未稳），需 check=False+重敲 | 判活用 pgrep 子进程；盘点前泵运行循环（NSRunLoop.runUntilDate_ 0.3s）；重启后换绑要 exclude_pid=旧 PID，否则绑到退场中的实例全是悬空引用 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
@@ -254,6 +256,18 @@ PeaseBar/
       回归拦出三件真事（T90 幽灵菜单、T91 录屏权限被重签洗掉、T92 右键菜单要左键热窗），
       P43 判据改相对基线（本机 notched 环境前提已变，T72 加注）；README 重写为使用说明
 
+### Phase 5 显示层纯图标化 + 触发图标可定义（用户 2026-11-22 定调）
+- [x] P5a 显示层去数字：capture.split_leading_glyph 剥前导图标，剥不出走兜底，
+      绝不半截（T93）；单测 TestLeadingGlyph 五例；真机 Q61–Q63 PASS（含截图复核）
+- [x] P5b 触发图标可定义：sections.CONTROL_ICONS 五预设（圆圈三点/三点/眼睛/命令键/四格），
+      通用页下拉即时生效（control-icon-picker → on_control_icon_changed → refresh_icon），
+      config 白名单校验重启保持；真机 Q64–Q67/Q69 PASS
+- [x] P5c 数值条目保原样：菜单栏本体不受显示层改动影响（Q68 PASS，PeaseClash 流量条
+      隐藏→移回后仍带数值）；真机 Q69（AXPress 控制面板于图标下方展开）PASS
+- [x] Q70 回归冒烟：t_p2b P45/P46/P47/P48/P41 全 PASS（P47 需与 P46 成对跑，隐藏区为空
+      属前置缺失非回归；P50 有权限时按设计 SKIP）+ t_p5 P91–P99 全 PASS（含 P98 真机复验）；
+      单测 105 项；取证探针 tmp/t_p6.py（T94 新坑在这轮挖出）
+
 ## 9. 续作指引（重启后从这里开始）
 
 1. `cd /Users/daydream/Project/PeaseBar`
@@ -267,7 +281,7 @@ PeaseBar/
 8. 新 bundle 首次跑需授权辅助功能（T16）：**必须排在签名定稿之后**（重签=洗授权，T86）；首选「+添加」流一次到位、
    不需认证（T87，脚本 tmp/grant_ax2.py）；验收看日志「全局快捷键已注册」而非列表开关=1
 9. 测试脚本轮询等待面板窗口出现（盘点 ~2s，固定 sleep 会竞态）；参考 `tmp/t34_expand_click.py`/`tmp/t8_t12.py` 的 wait_panel 模式；进程存活/交接验证用 `pgrep`（T25）；双开唤醒测试用 `open -n`（T26）
-10. 纯逻辑单测：项目根目录 `python3 -m unittest discover -s tests -t .`（99 项，不需 GUI/AX 权限）
+10. 纯逻辑单测：项目根目录 `python3 -m unittest discover -s tests -t .`（105 项，不需 GUI/AX 权限）
 
 ## 10. 进度快照
 
@@ -378,6 +392,14 @@ PeaseBar/
   重启，零人工）、T92（设置格子右键菜单要先左键热窗，P52 单跑才露馅）；P43 硬编码基线换相对基线
   （本机 notched 不再恒 0，T72 加注）。README 重写为使用说明（功能/五页设置/权限/安装/已知边界）。
   **Phase 4 全部收官；待办只剩发布工相关（版本号、dmg/zip 产物、GitHub Release）。**
+- **2026-11-22（Phase 5 显示层纯图标化 + 触发图标可定义）**：用户四件事定调（①触发图标可定义
+  ②修半截③UI 只显示纯图标不显消息数字④数值条目移回菜单栏必须保原样）。实现：
+  capture.split_leading_glyph 剥前导图标、剥不出走兜底（T93）；sections.CONTROL_ICONS 五预设+
+  通用页下拉即时生效+重启保持；菜单栏本体不受影响。真机 Q61–Q69 全 PASS（探针 tmp/t_p6.py，
+  过程中挖出 T94 NSWorkspace 陈旧快照坑并双修 live_pids/pump）；Q70 回归冒烟 t_p2b 五条+
+  t_p5 P91–P99 全绿（P47 需与 P46 成对跑属前置纪律非回归）；单测 105 项。本轮又踩实锤两老坑：
+  探针必须用 tp5.tp 同一底座实例（p95_probe 同款）、重签洗双权限走 T87/T91 恢复流（新增
+  grant_ax2 step2b：⌘⇧G+AX 写路径，免指纹）。**下一步：发布工（版本号定版+tag+zip+GitHub Release）。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；

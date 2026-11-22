@@ -117,7 +117,7 @@ class TestPersist(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "missing.json")
             cfg = sections.load_config(path)
-            self.assertEqual(cfg, {"sections": {}, "order": [], "panel_timeout": 8})
+            self.assertEqual(cfg, dict(sections.DEFAULT_CONFIG))
 
     def test损坏文件回默认(self):
         with tempfile.TemporaryDirectory() as d:
@@ -125,7 +125,7 @@ class TestPersist(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as f:
                 f.write("{不是json")
             self.assertEqual(sections.load_config(path),
-                             {"sections": {}, "order": [], "panel_timeout": 8})
+                             dict(sections.DEFAULT_CONFIG))
 
     def test加载丢弃脏分区值(self):
         with tempfile.TemporaryDirectory() as d:
@@ -136,6 +136,18 @@ class TestPersist(unittest.TestCase):
             cfg = sections.load_config(path)
             self.assertEqual(cfg["sections"], {"b|B": sections.SECTION_HIDDEN})
             self.assertEqual(cfg["panel_timeout"], 8)  # 负数非法 → 回默认
+
+    def test_control_icon往返与脏值回默认(self):
+        # 触发图标预设：表内的存得住，表外/非字符串一律回默认（渲染端不二次校验）
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.json")
+            cfg = dict(sections.load_config(path), control_icon="eye")
+            sections.save_config(cfg, path)
+            self.assertEqual(sections.load_config(path)["control_icon"], "eye")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"control_icon": "not-a-symbol"}, f)
+            self.assertEqual(sections.load_config(path)["control_icon"],
+                             sections.DEFAULT_CONFIG["control_icon"])
 
     def test保存自动建目录且无半截文件(self):
         with tempfile.TemporaryDirectory() as d:
