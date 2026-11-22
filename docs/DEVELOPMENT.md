@@ -50,7 +50,7 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | F4 | **分区模型** | visible / hidden / always-hidden 三区，配置键 = bundleId+图标名；面板可按区过滤 | 标记为 hidden 的图标在面板中归入隐藏区并持久化 |
 | F5 | **自动收回** | 点击面板外即关；可配超时（默认 8s，0=不超时） | 失焦即收；超时行为正确 |
 | F6 | **全局快捷键** | 默认 ⌥⌘B 切换面板；可在配置改键 | 快捷键全局有效（其他 App 在前台也生效） |
-| F7 | **权限引导** | 启动检测辅助功能权限；缺失则弹窗带"打开系统设置"按钮 | 无权限时有明确中文指引，不静默失效 |
+| F7 | **权限引导** | 辅助功能权限缺失时**不阻塞启动**：状态项正常显示，菜单项「检查辅助功能权限」提供状态反馈与“打开系统设置”按钮（图标显示本身不需要 AX 权限，见 T12） | 无权限时功能受限但不静默：图标在、盘点入口有中文指引 |
 | F8 | **顺序编辑器（只读视图）** | 面板列出当前实际顺序（按 x 排序） | 与真实顺序一致 |
 | F9 | **状态持久化** | 配置存 `~/Library/Application Support/PeaseBar/config.json` | 重启 PeaseBar 分区/设置保留 |
 | F10 | **单实例 + 退出** | 二次启动唤起已有实例；右键菜单可退出 | 双开不出现两个控制图标 |
@@ -98,15 +98,25 @@ Thaw 3（macOS 27 分支）的核心业务闭环：
 | T7 | 刘海区：`NSScreen.auxiliaryTopLeftArea/auxiliaryTopRightArea` 拼不满整行即为有刘海；本机刘海 x∈[918,1138]（宽 220pt），菜单栏高 38pt；`safeAreaInsets` 在 27 只报 top，**不能**用 | 遮挡判定 = 图标矩形与刘海矩形相交 |
 | T8 | CGWindowList 层 24/25 在 27 上只剩 Window Server 的 "Menubar" 背景条；**图标没有自己的窗口** | 位图/位置不能走窗口列表，只能走 AX |
 | T9 | `NSStatusItem Preferred Position` 经典存储仅个别域残留（TextInputMenuAgent、CleanMyMac5.Menu） | 顺序写入不靠它；走 ⌘拖拽合成（E2）或 27 顺序文件（需"菜单栏布局访问"TCC，Python 难授权，列为受限路线） |
-| T10 | 屏幕录制权限：未验证（E4）。`screencapture -x` 是否出图待证 | 影响测试取证与 v2 位图捕获 |
+| T10 | 屏幕录制权限：终端已具备，`screencapture -x`/`-R` 出图正常（E4） | 测试取证与 v2 位图捕获可行 |
+| T11 | **菜单栏准入门**（系统设置→菜单栏→允许在菜单栏显示）：列表**自动注册**——App 首次成功创建状态项即入列（TestItem/PeaseBar 均实测）；无“+”手动添加按钮；每 App 一个开关（默认开），关闭后“无法再在菜单栏显示” | 无需引导用户手动放行；但必须保证状态项**尽早创建**（见 T12） |
+| T12 | **状态项显示三要素**（E5 对照实验：最小 Swift App TestItem vs PeaseBar）：① 启动不能被模态弹窗阻塞——runModal 卡在状态项创建之前 → 图标永不出现且永不入准入门（修复前 PeaseBar 正是此因）；② 必须走 LaunchServices 正规启动（`open`/Finder/launchd），终端 `nohup` 直启 bundle 二进制时 StatusBarServer 拒绝记账 → 图标不显示且进程 `AXExtrasMenuBar` 报 -25212；③ 图标过多时新图标被**自动收纳**进溢出区（« 按钮）——正常业务非故障 | app.py 启动顺序已按此修复（状态项先建、权限检查非阻塞）；测试/运行一律 `open` 启动 |
+| T13 | **AX 可见性联动**：图标被收纳（不可见）时，其 owner 进程 `AXExtrasMenuBar` 返回 -25212；原生按钮展开后同一进程 err=0。即 E1 “被收纳图标不在 AX”的扩展：**连 owner 自己的 AX 树都没有它** | F1 盘点需“展开收纳区→枚举→diff→收起”舞步（含 PeaseBar 自举）；-25212 可用作“图标当前不可见”信号 |
 
 ## 6. 隐藏与顺序的实现策略（按可行性递减，实验后定型）
 
 | 策略 | 机制 | 状态 |
 |------|------|------|
-| A 原生收纳引导 | 把图标 ⌘拖进刘海区触发系统收纳（原生按钮出现，面板仍可触发） | 待 E1/E2 |
-| B per-app 开关写入 | 找到 26/27"在菜单栏中允许"开关的 defaults 域，直接写 + 重载 MenuBarAgent | 待 E3 |
-| C 面板代持（兜底） | 图标不动，"隐藏"只是面板分区过滤 + 救援触发；顺序编辑只读 | **v1 保底，一定可用** |
+| A 原生收纳引导 | 把图标 ⌘拖进刘海区触发系统收纳（E2 已验证成立）；原生按钮可 AXPress 展开/收起（E1 已验证） | **v1.x 正式路线** |
+| B per-app 开关写入 | 27 上存储不可达（E3），放弃 | ✗ 已否决 |
+| C 面板代持（兜底） | 图标不动，“隐藏”只是面板分区过滤 + 救援触发；顺序编辑只读 | **v1 保底，一定可用** |
+
+> 补充：原生收纳按钮的当前状态可从按钮描述读取——「显示隐藏菜单栏项目」=收起态、「隐藏菜单栏项目」=展开态；
+> 被收纳的图标不展开时**不在 AX 中**（无法静默读取清单，T13），面板要列收纳清单需“展开→枚举→diff→收起”舞步，
+> v1 先不做，面板提供“一键展开/收起”按钮（F12）。
+>
+> E5 补充：菜单栏图标溢出时系统会**自动收纳**新图标（无需拖入刘海）；PeaseBar 自己的图标也会被收纳——
+> 这正是产品要解决的核心场景，F3 面板必须能呈现“被收纳的图标”（含 PeaseBar 自身，注意自举）。
 
 ## 7. 架构与模块
 
@@ -137,11 +147,11 @@ PeaseBar/
 
 ### Phase 0 可行性与骨架
 - [x] P0.1 探测 AX 权限 / MenuBarAgent 结构 / 第三方 AX / 刘海检测 / 坐标解码（§5 T1–T9 已取证）
-- [ ] P0.2 **E1**：重跑 `tmp/probe_reveal.py`，AXPress 原生收纳按钮，取证收纳图标的呈现形态（上次被重启打断）
-- [ ] P0.3 **E2**：`tmp/probe_drag.py` 合成 ⌘拖拽移动一个第三方图标（选 PeaseClash），前/后 x 坐标 + 截图取证
-- [ ] P0.4 **E3**：`tmp/probe_native_hide.py` 引导用户手动切一次 per-app 菜单栏开关，diff defaults 域定位存储
-- [ ] P0.5 **E4**：验证 `screencapture` 条带截图可用性（测试取证依赖）
-- [ ] P0.6 骨架：`__main__/app.py` AppKit 生命周期 + Accessory + 单实例 + 右键菜单可退出 → **节点提交**
+- [x] P0.2 **E1**：原生收纳按钮 AXPress 可切换；展开后收纳图标出现在刘海**左侧**（证据 `tmp/bar_before/after/restored.png`）；按钮描述在「显示/隐藏菜单栏项目」间切换，可读状态
+- [x] P0.3 **E2**：合成 ⌘拖拽**有效**——移动图标成功（证据 `tmp/drag_*.png`）；拖到刘海边缘会触发**系统自动收纳**（策略 A 成立）；拖回复原精确（x=1270 复原成功，证据 `tmp/restore_*.png`）
+- [x] P0.4 **E3**：收纳持久化存储不可达（MenuBarAgent 无容器偏好；候选 defaults 域无变化，证据 `tmp/probe_stash_store.py` 输出）→ 策略 B 判定为受限不可用，不进入 v1.x；顺序写入只走 ⌘拖拽
+- [x] P0.5 **E4**：`screencapture -x -R` 条带截图可用（终端已有屏幕录制权限），取证链路成立
+- [x] P0.6 骨架：`__main__/app.py` AppKit 生命周期 + Accessory + 单实例 + 右键菜单可退出；启动顺序修复（状态项先建、权限引导非阻塞）；**E5** 准入机制对照实验：状态项自动入准入门、图标现身收纳展开区（证据 `tmp/bar_peasebar_icon.png`、`tmp/bar_expanded_zoom.png`、`tmp/allow_list_1.png`）→ **节点提交**
 
 ### Phase 1 v1 核心（F1–F3, F8）
 - [ ] P1.1 `axutil.py` + `inventory.py`（含遮挡判定、两级结构兼容、轮询刷新）
@@ -173,15 +183,24 @@ PeaseBar/
    依赖缺失则 `python3 -m pip install --user pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-ApplicationServices`
 4. 临时/测试产物一律放 `tmp/`（已 gitignore）；提交节奏 = 每个 Phase 节点 commit+push（remote: `PeaseAPI/PeaseBar`）
 5. 代码注释一律中文（Pease 产品线规范）；UI 文案中文优先
+6. 启动/重启 PeaseBar 一律 `open /Applications/PeaseBar.app`（开发态构建：`python3 setup.py py2app -A && ditto dist/PeaseBar.app /Applications/PeaseBar.app`）；**切勿**终端直启二进制（T12：StatusBarServer 拒绝记账，图标不显示）
 
 ## 10. 进度快照
 
-- **2026-11-22**：完成 §5 全部探测（T1–T9 已取证，`tmp/probe_ax.py`/`tmp/probe_result.json`）；
-  E1 首跑被机器重启打断，待重跑（P0.2）。**下一步：P0.2 → P0.6 → Phase 1。**
+- **2026-11-22（上午）**：完成 §5 全部探测（T1–T9 已取证，`tmp/probe_ax.py`/`tmp/probe_result.json`）；
+  E1 首跑被机器重启打断。
+- **2026-11-22（下午）**：E1/E2/E3/E4 全部完成（见 Phase 0 勾选项与 §6 结论），架构定型：
+  v1 = 面板代持（C）+ 原生收纳联动（A）；⌘拖拽合成有效（mover.py 可开工）。
+  **下一步：P0.6 骨架 → Phase 1。**
+- **2026-11-22（午后）**：P0.6 骨架完成并冒烟验证（图标已现身，当前被系统自动收纳，见 T13）。
+  排障「图标不显示」定案三层根因（权限弹窗阻塞启动 / 终端直启链被拒 / 自动收纳属正常业务），
+  全部取证并修复：T11–T13、E5 写入 §5/§6，app.py 启动顺序改为「状态项先建、权限非阻塞」。
+  **下一步：Phase 1（P1.1 盘点引擎 axutil+inventory）→ P1.3 面板。**
 - 已知风险：
   - 打包成 .app 后辅助功能权限需对新 bundle 重新授权（T1 边界）；
   - macOS 27 小版本可能改动 MenuBarAgent AX 树（每次系统升级后重跑 `tmp/probe_ax.py`）；
-  - 图标识别键 = bundleId+AXDescription，同一 App 双图标（如多个 Clash 实例）需在 F4 用 owner 序号消歧（Phase 2 处理）。
+  - 图标识别键 = bundleId+AXDescription，同一 App 双图标（如多个 Clash 实例）需在 F4 用 owner 序号消歧（Phase 2 处理）；
+  - PeaseBar 自身图标也会被自动收纳——F1 盘点与 F3 面板需处理「自举」（自己也在列表里，T13）。
 
 ## 11. 测试与取证规范
 

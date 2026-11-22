@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""控制图标（Control Item）：PeaseBar 在菜单栏上的常驻图标。
+
+职责：
+- 常驻 NSStatusItem，SF Symbol 图标自动适配深浅色（template）；
+- 左键 → 回调 on_left（Phase 1 接救援面板）；
+- 右键 → 弹出主菜单（挂临时菜单的经典方案，避免左键也弹菜单）；
+- 用户可以用系统手势拖动它改变位置，PeaseBar 不干预。
+"""
+from AppKit import (
+    NSStatusBar,
+    NSVariableStatusItemLength,
+    NSImage,
+    NSMenu,
+    NSMenuItem,
+    NSApp,
+    NSAlert,
+)
+from Foundation import NSObject, NSMakeRect
+import peasebar
+
+# 点击分发需要按下即触发（而非抬起），沿用 NSCell 的 sendActionOn_
+try:
+    from AppKit import NSEventMaskLeftMouseDown, NSEventMaskRightMouseDown
+    CLICK_MASKS = NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown
+except ImportError:  # 旧版常量名兜底
+    CLICK_MASKS = (1 << 1) | (1 << 3)
+
+from AppKit import (
+    NSEventTypeLeftMouseDown,
+    NSEventTypeRightMouseDown,
+)
+
+# 控制图标默认用 SF Symbol「更多」语义；找不到时退化为文字「···」
+SYMBOL_NAME = "ellipsis.circle.fill"
+FALLBACK_TITLE = "···"
+
+
+class ControlItem(NSObject):
+    """封装 NSStatusItem 与左右键分发。"""
+
+    def initWithCallbacks_(self, on_left):
+        """on_left：左键回调（无参，Phase 1 由救援面板提供）。"""
+        self = super(ControlItem, self).init()
+        if self is None:
+            return None
+        self.on_left = on_left
+        self.menu = None
+        return self
+
+    def build(self):
+        """创建状态图标与主菜单（中文优先）。"""
+        bar = NSStatusBar.systemStatusBar()
+        self.item = bar.statusItemWithLength_(NSVariableStatusItemLength)
+        button = self.item.button()
+
+        image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(SYMBOL_NAME, None)
+        if image is not None:
+            image.setTemplate_(True)  # 随系统深浅色自动反色
+            button.setImage_(image)
+        else:
+            button.setTitle_(FALLBACK_TITLE)
+        button.setToolTip_("PeaseBar：查看全部菜单栏图标")
+
+        # 主菜单（右键用；左键行为由回调接管）
+        self.menu = NSMenu.alloc().initWithTitle_("PeaseBar")
+        mi_about = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "关于 PeaseBar", "showAbout:", "")
+        mi_perms = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "检查辅助功能权限", "checkPermission:", "")
+        mi_quit = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "退出 PeaseBar", "terminate:", "q")
+        for mi in (mi_about, mi_perms, mi_quit):
+            self.menu.addItem_(mi)
+
+        # 按下即回调（左右键都进 on_click，再按事件类型分发）
+        button.setTarget_(self)
+        button.setAction_("onStatusClick:")
+        button.sendActionOn_(CLICK_MASKS)
+        return self
+
+    def onStatusClick_(self, sender):
+        """状态图标点击入口：按事件类型分发左右键。"""
+        event = NSApp.currentEvent()
+        if event is None:
+            return
+        etype = event.type()
+        if etype == NSEventTypeRightMouseDown:
+            self._popup_menu()
+        elif etype == NSEventTypeLeftMouseDown:
+            if self.on_left is not None:
+                self.on_left()
+
+    def _popup_menu(self):
+        """右键弹菜单：临时挂 NSMenu 到状态项，借 performClick 触发弹层。"""
+        self.item.setMenu_(self.menu)
+        try:
+            self.item.button().performClick_(None)
+        finally:
+            self.item.setMenu_(None)
+
+    def showAbout_(self, sender):
+        """关于窗口。"""
+        from AppKit import NSAlert
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("PeaseBar")
+        alert.setInformativeText_(
+            "macOS 菜单栏图标管理器\n"
+            "被刘海遮挡、被系统收纳的图标，都能从这里一键找回。\n"
+            f"版本 {peasebar.__version__}（开发态）"
+        )
+        alert.runModal()
+
+    def checkPermission_(self, sender):
+        """手动触发权限检查并提示结果。"""
+        from peasebar.app import ensure_accessibility, _alert
+        if ensure_accessibility(interactive=True):
+            _alert("PeaseBar 权限正常", "辅助功能权限已授予，功能完整可用。")
+
+    def terminate_(self, sender):
+        """退出应用（交给 NSApp 处理）。"""
+        NSApp.terminate_(None)
