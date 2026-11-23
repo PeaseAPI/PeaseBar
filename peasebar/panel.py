@@ -58,16 +58,17 @@ import time
 
 from peasebar import capture, ccnative, inventory, sections, trigger
 
-# 面板几何：单张干净网格（Thaw 式），格子只放图标、四周留呼吸感。
+# 面板几何：单张干净网格（Thaw 式），紧凑版参数（用户定调：一排多放几枚、
+# 别稀稀拉拉）——格子只比菜单栏图标本身略大，间隙压到 2pt。
 # Phase 9 口径：宽度不再写死，由 grid_layout() 按内容算（见文件头「面板尺寸按内容收缩」）。
-PANEL_MAX_W = 468  # 宽度上限：列宽撑到最宽时也不宽过菜单栏常用宽
-PANEL_MIN_W = 64   # 下限：只有一个图标时也该有个胶囊的样子，不窄成一条线
+PANEL_MAX_W = 560  # 宽度上限：放宽后一排能容 12 枚（原本 468 只容得下 9 枚，11 枚就拆两行）
+PANEL_MIN_W = 54   # 下限：一格宽 34 + 2×EDGE 正好贴边（单枚图标也不留大空白）
 EMPTY_W = 200      # 空态只有一行提示，给个固定小宽度
-GRID_COLS = 9      # 列数上限（实际列数还会被列宽再压）
-CELL_W, CELL_H = 44, 40  # 列宽下限（窄图标时保持整齐）
-CELL_MAX_W = 96    # 列宽上限：宽条（网速/温度这类）撑到这就够了
-CELL_GAP = 6
-CELL_PAD = 6       # 图标左右各留的内边距
+GRID_COLS = 12     # 列数上限（实际列数还会被列宽再压）
+CELL_W, CELL_H = 34, 32  # 列宽/行高下限：菜单栏图标约 22～24pt，只留最小呼吸感
+CELL_MAX_W = 84    # 列宽上限：宽条（网速/温度这类）撑到这就够了
+CELL_GAP = 2
+CELL_PAD = 4       # 图标左右各留的内边距
 EDGE = 10
 EMPTY_H = 28  # 空态提示行高
 

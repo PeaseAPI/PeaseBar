@@ -196,6 +196,13 @@ class AppDelegate(NSObject):
         # 启动同步（用户痛点「设为弹窗显示的图标还在菜单栏」）：把上次保存的分区
         # 一次性镜像回真实菜单栏（后台线程、稍延，等状态项摆稳且有辅助功能权限）。
         self.settings.reconcile_real_bar_async()
+        # 周期核对（60s）：App 断线重连重建图标/系统重写记录会让隐藏悄悄失效
+        # （真机实证：Synology Drive Client 隐藏后重现）。无漂移时幂等零动作
+        # （不写盘、不重启 Agent、菜单栏不闪），有漂移才在后台收回来。
+        tick = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            60.0, self.settings, "syncCCTick:", None, True)
+        NSRunLoop.mainRunLoop().addTimer_forMode_(tick, NSRunLoopCommonModes)
+        print("[PeaseBar] CC 周期核对已挂（60s，无漂移零动作）")
 
     def _refresh_panel_if_open(self):
         """设置变更后：作废位图缓存并刷新面板（重活在后台，不卡设置窗）。"""

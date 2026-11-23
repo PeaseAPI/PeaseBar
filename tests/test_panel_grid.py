@@ -38,8 +38,8 @@ class TestGridLayout(unittest.TestCase):
 
     def test_宽图标把列宽撑起来但列数变少(self):
         """网速/温度这类宽条：格子按图宽伸缩，装不下的列数自然减下来，总宽不越界。"""
-        width, _h, cell_w, cols, rows = panel.grid_layout(25, [80] * 25)
-        self.assertEqual(cell_w, 80 + 2 * panel.CELL_PAD)
+        width, _h, cell_w, cols, rows = panel.grid_layout(25, [60] * 25)
+        self.assertEqual(cell_w, 60 + 2 * panel.CELL_PAD)
         self.assertLess(cols, panel.GRID_COLS)
         self.assertGreater(rows, 1)
         self.assertLessEqual(width, panel.PANEL_MAX_W)

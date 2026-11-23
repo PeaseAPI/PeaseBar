@@ -1455,6 +1455,97 @@ class SettingsController(NSObject):
                 "reversible": (after_hide is True and after_reveal is False)}
 
     @objc.python_method
+    def sync_cc_now(self):
+        """按配置全量对齐 CC 开关（启动同步与周期核对共用的正路）。
+
+        真机实证：写 isAllowed=false + killall MenuBarAgent → 图标消失且 App
+        照跑；true → 回来。CC plist 是持久存储，App 没跑也能写——只处理
+        「此刻盘点到的」会漏掉没跑的 App（欧路词典案例）。幂等：目标态与
+        现状一致时 set_apps_allowed 不写盘、不重启 Agent，周期核对零感知。
+
+        返回摘要：writable / hide / show / leftover(label 列表) / error。
+        """
+        cfg = sections.load_config()
+        out = {"writable": False, "hide": 0, "show": 0, "leftover": []}
+        if not ccnative.is_writable():
+            return out
+        out["writable"] = True
+        try:
+            cfg_hidden_bids = {k.split("|", 1)[0]
+                               for k, s in cfg["sections"].items()
+                               if s in (sections.SECTION_HIDDEN,
+                                        sections.SECTION_ALWAYS_HIDDEN)}
+            cfg_visible_bids = {k.split("|", 1)[0]
+                                for k, s in cfg["sections"].items()
+                                if s == sections.SECTION_VISIBLE}
+            # 显回的只限「自己上轮藏过、现在配置改显示」的：用户在系统设置
+            # 里手动关掉的（配置是显示）不动，尊重手动选择。
+            prev = ccnative.last_hidden()
+            to_show = {b for b in prev
+                       if ccnative.match_bid(b, cfg_visible_bids)}
+            # 盘点到的可见项也补写 true（幂等，防中途被谁动过）
+            for m in inventory.list_items()[0]:
+                if m.is_stash_button or ccnative.is_protected(m.owner_bundle_id):
+                    continue
+                if sections.section_of(cfg, sections.item_key(m)) == sections.SECTION_VISIBLE:
+                    to_show.add(m.owner_bundle_id)
+            out["hide"] = len(ccnative.set_apps_allowed(cfg_hidden_bids, False))
+            out["show"] = len(ccnative.set_apps_allowed(to_show, True))
+            # 侧车记「此刻系统藏着的、且是配置让它藏的」全集：配置日后改成
+            # 「显示」时同步据此负责显回。
+            duty = {b for b in ccnative.hidden_bids_now()
+                    if not ccnative.is_protected(b)
+                    and ccnative.match_bid(b, cfg_hidden_bids)}
+            ccnative.record_hidden(duty)
+            out["leftover"] = [
+                m.label or m.owner_bundle_id
+                for m in inventory.list_items()[0]
+                if not m.is_stash_button
+                and ccnative.is_protected(m.owner_bundle_id)
+                and sections.section_of(cfg, sections.item_key(m)) in (
+                    sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN)]
+        except Exception as exc:  # noqa: BLE001
+            out["error"] = str(exc)
+        return out
+
+    def syncCCTick_(self, timer):
+        """周期核对（60s，app.py 挂钟）：系统状态会漂移——App 断线重连时重建
+        图标（真机实证：Synology Drive Client 隐藏后重现），启动时一次同步
+        管不住全程。后台跑一次全量对齐：无漂移时幂等零动作（不写盘、不
+        重启 Agent、菜单栏不闪），有漂移才真正落盘收回来。"""
+
+        def _run():
+            try:
+                r = self.sync_cc_now()
+                if r.get("writable") and (r.get("hide") or r.get("show")):
+                    print(f"[PeaseBar] 周期核对：收回 {r['hide']} 枚 / 显回 "
+                          f"{r['show']} 枚（系统状态漂移已纠正）")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] 周期核对异常：{exc}")
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+
+    def driftInject_(self, timer):
+        """主线程回调（__DRIFT__ 取证）：注入漂移——把指定 App 的 isAllowed
+        写回 true（模拟 App 重连重建图标/系统重写记录），之后 60s 周期核对
+        应自动把它收回。写盘在后台线程，主线程不卡。"""
+        bid = str(getattr(self, "_drift_bid", "") or "")
+        if not bid:
+            return
+
+        def _run():
+            try:
+                changed = ccnative.set_apps_allowed({bid}, True)
+                print(f"[PeaseBar] 漂移实验：已把 {bid} 写回显示态"
+                      f"（改动 {sorted(changed)}），等 60s 周期核对收回")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] 漂移实验注入失败：{exc}")
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+
+    @objc.python_method
     def reconcile_real_bar(self):
         """把已保存的分区一次性镜像到真实菜单栏（启动/授权后调一次）。
 
@@ -1614,6 +1705,13 @@ class SettingsController(NSObject):
                 elif owner == "__SETTINGSWIN__":
                     # 取证：主线程开设置窗口（布局页），4s 后截屏 + 三区清单落盘
                     r = self._settings_open_test()
+                elif owner == "__DRIFT__":
+                    # 取证：启动同步完成后延迟注入「系统漂移」（PeaseBar 进程才有
+                    # TCC 写权，终端写会 Errno 1）——把指定 App 的 isAllowed 写回
+                    # true 模拟 App 重连重建图标，验证 60s 周期核对的自动收回
+                    self._drift_bid = spec[1] if len(spec) > 1 else ""
+                    self._drift_armed = True
+                    r = {"drift_armed": True, "bid": self._drift_bid}
                 else:
                     ident = spec[1] if len(spec) > 1 else owner
                     title = spec[2] if len(spec) > 2 else ident
@@ -1643,67 +1741,27 @@ class SettingsController(NSObject):
             print("[PeaseBar] 启动同步：无辅助功能权限，跳过真实菜单栏镜像")
             return
 
-        # ---- 主通道：ControlCenter 按 App 显隐（不受收纳条容量限制）----
-        # 真机实证：写 isAllowed=false + killall MenuBarAgent → 图标消失且 App
-        # 照跑；true → 回来。Thaw native 模式同源（系统设置「菜单栏」每 App
-        # 开关的存储）。按配置全量同步（不依赖盘点）：CC plist 是持久存储，
-        # App 没跑也能写——只处理「此刻盘点到的」会漏掉没跑的 App（实证：
-        # 欧路词典配置隐藏但 isAllowed=true，下次它一启动图标就回来了）。
-        # 「先显回侧车再重藏」的两段式也废弃：全量同步下，配置改「显示」的
-        # bid 直接落在显回集合里一步到位，没有中间态。
-        if ccnative.is_writable():
-            try:
-                cfg_hidden_bids = {k.split("|", 1)[0]
-                                   for k, s in cfg["sections"].items()
-                                   if s in (sections.SECTION_HIDDEN,
-                                            sections.SECTION_ALWAYS_HIDDEN)}
-                cfg_visible_bids = {k.split("|", 1)[0]
-                                    for k, s in cfg["sections"].items()
-                                    if s == sections.SECTION_VISIBLE}
-                # 显回的只限「自己上轮藏过、现在配置改显示」的：用户在系统设置
-                # 里手动关掉的（配置是显示）不动，尊重手动选择。
-                prev = ccnative.last_hidden()
-                to_show = {b for b in prev
-                           if ccnative.match_bid(b, cfg_visible_bids)}
-                # 盘点到的可见项也补写 true（幂等，防中途被谁动过）
-                for m in inventory.list_items()[0]:
-                    if m.is_stash_button or ccnative.is_protected(m.owner_bundle_id):
-                        continue
-                    if sections.section_of(cfg, sections.item_key(m)) == sections.SECTION_VISIBLE:
-                        to_show.add(m.owner_bundle_id)
-                n_hide = len(ccnative.set_apps_allowed(cfg_hidden_bids, False))
-                n_show = len(ccnative.set_apps_allowed(to_show, True))
-                # 侧车记「此刻系统藏着的、且是配置让它藏的」全集：配置日后改成
-                # 「显示」时启动同步据此负责显回。
-                duty = {b for b in ccnative.hidden_bids_now()
-                        if not ccnative.is_protected(b)
-                        and ccnative.match_bid(b, cfg_hidden_bids)}
-                ccnative.record_hidden(duty)
-                if n_hide or n_show or prev:
-                    print(f"[PeaseBar] 启动同步：原生显隐收 {n_hide} 枚 / 放 "
-                          f"{n_show} 枚（ControlCenter 通道，无容量限制）")
-                # 系统项（com.apple.*）走不了按 App 开关（is_protected 永不触碰），
-                # 拖拽也拖不动（真机实证）——诚实说明后返回。启动同步永不自动
-                # 模拟鼠标（用户对「鼠标乱跑」零容忍，2026-11-23）：合成 ⌘-拖
-                # 只保留给设置窗口里用户的显式操作（_real_hide/_real_reveal）。
-                leftover = [m for m in inventory.list_items()[0]
-                            if not m.is_stash_button
-                            and ccnative.is_protected(m.owner_bundle_id)
-                            and sections.section_of(cfg, sections.item_key(m)) in (
-                                sections.SECTION_HIDDEN,
-                                sections.SECTION_ALWAYS_HIDDEN)]
-                if leftover:
-                    print(f"[PeaseBar] 启动同步：{len(leftover)} 枚系统项"
-                          f"（{'、'.join(m.label or m.owner_bundle_id for m in leftover)}）"
-                          f"系统不允许第三方隐藏，跳过")
-            except Exception as exc:
-                print(f"[PeaseBar] 启动同步：原生通道异常（{exc}），本次跳过"
-                      f"（不自动拖拽：启动时模拟鼠标移动会打扰用户）")
-        else:
-            # CC 通道不可用（is_writable=False）：不再回退启动期拖拽（同上，
-            # 不在用户不设防时抢鼠标），如实告知即可。
+        # ---- 主通道：CC 按 App 显隐（不受收纳条容量限制；细节见 sync_cc_now）----
+        r = self.sync_cc_now()
+        if not r.get("writable"):
+            # CC 通道不可用（is_writable=False）：不再回退启动期拖拽——
+            # 不在用户不设防时抢鼠标，如实告知即可。
             print("[PeaseBar] 启动同步：CC 通道不可用，本次不动真实菜单栏；"
                   "可在设置窗口里手动调整图标显隐")
+        elif "error" in r:
+            print(f"[PeaseBar] 启动同步：原生通道异常（{r['error']}），本次跳过"
+                  f"（不自动拖拽：启动时模拟鼠标移动会打扰用户）")
+        else:
+            if r.get("hide") or r.get("show"):
+                print(f"[PeaseBar] 启动同步：原生显隐收 {r['hide']} 枚 / 放 "
+                      f"{r['show']} 枚（ControlCenter 通道，无容量限制）")
+            if r.get("leftover"):
+                # 系统项（com.apple.*）走不了按 App 开关（is_protected 永不触碰），
+                # 拖拽也拖不动（真机实证）——诚实说明。启动同步永不自动模拟鼠标
+                # （用户对「鼠标乱跑」零容忍，2026-11-23）：合成 ⌘-拖只保留给
+                # 设置窗口里用户的显式操作（_real_hide/_real_reveal）。
+                print(f"[PeaseBar] 启动同步：{len(r['leftover'])} 枚系统项"
+                      f"（{'、'.join(r['leftover'])}）系统不允许第三方隐藏，跳过")
 
         # 注：无论主通道成败都落到这里（取证调度在下方），不再走启动期拖拽。
 
@@ -1725,6 +1783,15 @@ class SettingsController(NSObject):
                 0.1, self, "settingsOpen:", None, False)
             NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
             print("[PeaseBar] 设置取证：启动同步完成，已安排主线程开设置窗")
+
+        # __DRIFT__ 取证：启动同步全部完成后再注入漂移（太早注入会被启动同步
+        # 立刻收回去，验不到周期核对），8s 足够稳
+        if getattr(self, "_drift_armed", False):
+            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
+            t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                8.0, self, "driftInject:", None, False)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
+            print("[PeaseBar] 漂移实验：启动同步完成，8s 后注入")
 
         # __POSTCHECK__ 取证：启动同步收敛完，盘点最终收纳状态（只读不动）
         if getattr(self, "_postcheck_armed", False):
