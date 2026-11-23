@@ -190,3 +190,51 @@ def apply_now():
         subprocess.run(["killall", proc], capture_output=True)
     # 给 launchd 拉起与首帧重画一点时间
     time.sleep(0.6)
+
+
+# ---------------------------------------------------------------------------
+# 输入法菜单通道（搜狗等输入法的菜单栏图标宿主是 com.apple.TextInputMenuAgent）
+# ---------------------------------------------------------------------------
+# 真机实证（2026-11-23）：TextInputMenuAgent 是 Apple 进程——CC 按 App 开关不管它
+# （trackedApplications 不跟踪），⌘-拖也拖不动（movable 拒绝一切 com.apple.*），
+# 但它的显隐由 com.apple.TextInputMenu 域的 visible 键控制，正是系统设置里
+# 「在菜单栏中显示输入法菜单」开关的落盘位置：
+# - 写 0 + killall TextInputMenuAgent → 图标从菜单栏消失，输入法照常可用；
+# - 写 1 + killall TextInputMenuAgent → 图标回来。双向可逆、值不被系统改写。
+# 对比死路：TextInputMenuAgent 域里的 NSStatusItem VisibleCC 键是运行时状态
+# （进程每次启动把当前可见性写回去），killall 后自动回 1，控制不了。
+
+INPUT_MENU_DOMAIN = "com.apple.TextInputMenu"
+INPUT_MENU_AGENT = "com.apple.TextInputMenuAgent"
+
+
+def input_menu_plist_path():
+    return os.path.expanduser(
+        "~/Library/Preferences/%s.plist" % INPUT_MENU_DOMAIN)
+
+
+def input_menu_visible():
+    """输入法菜单此刻是否显示（键不存在/读不到按系统默认的「显示」处理）。"""
+    try:
+        with open(input_menu_plist_path(), "rb") as f:
+            return plistlib.load(f).get("visible", 1) == 1
+    except Exception:
+        return True
+
+
+def set_input_menu_visible(show):
+    """把输入法菜单设为显示（True）或隐藏（False），返回是否实际改动。
+
+    值已一致时不写盘不重启（幂等——60s 周期核对反复调用时零打扰）。改动走
+    defaults 写（经 cfprefsd 同步缓存，与系统设置开关同一落盘位置）+ killall
+    TextInputMenuAgent（进程重启后按新值决定是否创建状态项）。
+    """
+    if input_menu_visible() == show:
+        return False
+    subprocess.run(
+        ["defaults", "write", INPUT_MENU_DOMAIN, "visible",
+         "-int", "1" if show else "0"], capture_output=True)
+    subprocess.run(["killall", INPUT_MENU_AGENT], capture_output=True)
+    # 给 launchd 拉起一点时间（图标消失/重现都不是瞬时的）
+    time.sleep(0.6)
+    return True

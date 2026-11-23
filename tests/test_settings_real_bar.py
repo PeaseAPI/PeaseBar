@@ -186,5 +186,49 @@ class TestCCPreferred(unittest.TestCase):
         self.assertEqual(rec.names(), ["reveal"])
 
 
+class TestInputMenuSync(unittest.TestCase):
+    """sync_cc_now 的输入法菜单通道：配置 hidden → visible=0；
+    CC 通道不可用（is_writable=False）也照样管（通道各自独立，
+    搜狗通道只写普通偏好域不依赖 CC plist 写权）。"""
+
+    def setUp(self):
+        self.ctrl = settings.SettingsController.alloc().init()
+        self.calls = []
+        self.cfg_sections = {}
+        self._orig = (sections.load_config, ccnative.is_writable,
+                      ccnative.set_input_menu_visible)
+        sections.load_config = lambda: {"sections": self.cfg_sections}
+        ccnative.is_writable = lambda: False  # CC 通道故意摆烂
+        ccnative.set_input_menu_visible = (
+            lambda show: self.calls.append(show) or True)
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        (sections.load_config, ccnative.is_writable,
+         ccnative.set_input_menu_visible) = self._orig
+
+    def test_配置隐藏则关输入法菜单(self):
+        """搜狗标到隐藏区：写 visible=0（CC 不可用也管）。"""
+        self.cfg_sections = {"com.apple.TextInputMenuAgent|TextInputMenuAgent":
+                             sections.SECTION_HIDDEN}
+        out = self.ctrl.sync_cc_now()
+        self.assertEqual(out.get("input_menu"), "hide")
+        self.assertEqual(self.calls, [False])
+
+    def test_配置显示则开输入法菜单(self):
+        self.cfg_sections = {"com.apple.TextInputMenuAgent|TextInputMenuAgent":
+                             sections.SECTION_VISIBLE}
+        out = self.ctrl.sync_cc_now()
+        self.assertEqual(out.get("input_menu"), "show")
+        self.assertEqual(self.calls, [True])
+
+    def test_用户没管就不动系统现状(self):
+        """两区都没标输入法菜单：不写不重启（尊重系统默认与手动选择）。"""
+        self.cfg_sections = {}
+        out = self.ctrl.sync_cc_now()
+        self.assertNotIn("input_menu", out)
+        self.assertEqual(self.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -298,16 +298,17 @@ class TestLayoutFlags(unittest.TestCase):
             self.assertTrue(back["bar_wrap"])
 
     def test_默认值与非布尔脏值(self):
-        # 默认：真实像素优先开、换行也开（单行裁切会被当成「图标少一半」）；
-        # json 里写字符串/数字都当没写过，回默认
-        self.assertTrue(sections.DEFAULT_CONFIG["use_captured"])
+        # 默认：真实像素关（微信未读数等实时数字会被拍进设置格子，用户不要）、
+        # 换行开（单行裁切会被当成「图标少一半」）；json 里写字符串/数字都当
+        # 没写过，回默认
+        self.assertFalse(sections.DEFAULT_CONFIG["use_captured"])
         self.assertTrue(sections.DEFAULT_CONFIG["bar_wrap"])
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "config.json")
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"use_captured": "yes", "bar_wrap": 1}, f)
             cfg = sections.load_config(path)
-            self.assertTrue(cfg["use_captured"])
+            self.assertFalse(cfg["use_captured"])
             self.assertTrue(cfg["bar_wrap"])
 
 

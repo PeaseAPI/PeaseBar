@@ -162,7 +162,7 @@ DRAG_SLOP = 6.0
 BAR_ROW_H = 38 + 4
 # 布局页底部选项开关（存配置，重启后照旧）
 _OPT_SWITCHES = (
-    ("use_captured", "优先用菜单栏真实像素", "关掉后格子一律用 App 图标/系统符号，截图权限没给也长得整齐"),
+    ("use_captured", "格子用菜单栏真实像素", "开：格子跟栏上一模一样，但会把微信未读数等实时数字拍进格子；默认关，用 App 图标保持干净"),
     ("bar_wrap", "图标条放不下时换行", "开：整区图标一次看全（区会变高）；关：单行横向滚动"),
     ("real_bar", "同步到真实菜单栏", "开：换区/改序时用合成 ⌘-拖真的隐显/重排系统图标（仅第三方，苹果系统项自动跳过）"),
 )
@@ -518,7 +518,7 @@ class SettingsController(NSObject):
         self.tiles = {}       # 配置键 → 格子按钮（选中态/反查用）
         self.selected_key = None  # 当前选中的图标（编辑动作的作用对象）
         self.drag_key = None      # 正在拖的图标配置键（没拖时 None）
-        self.use_captured = True  # 布局页选项：格子优先用真实截图像素
+        self.use_captured = False  # 布局页选项：默认用 App 图标（真实像素会把未读数等拍进格子）
         self.bar_wrap = True      # 布局页选项：图标条装不下就换行而不是横向滚动
         self.real_bar = True      # 布局页选项：换区/改序镜像到真实菜单栏（合成 ⌘-拖）
         self.buckets = {}     # 最近一次 _rebuild 的分桶结果（键盘编辑读它，不二次盘点）
@@ -635,7 +635,7 @@ class SettingsController(NSObject):
         buckets = sections.plan_sections(self.items, cfg)
         self.buckets = buckets  # 键盘编辑（⌥方向键/前移后移）就在这份分桶上动手
         # 三个布局选项同步成标记：格子宽/高、取图、真实菜单栏镜像都看它，一处读盘多处用
-        self.use_captured = bool(cfg.get("use_captured", True))
+        self.use_captured = bool(cfg.get("use_captured", False))
         self.bar_wrap = bool(cfg.get("bar_wrap", True))
         self.real_bar = bool(cfg.get("real_bar", True))
         self.tiles = {}
@@ -1467,17 +1467,31 @@ class SettingsController(NSObject):
         """
         cfg = sections.load_config()
         out = {"writable": False, "hide": 0, "show": 0, "leftover": []}
+        cfg_hidden_bids = {k.split("|", 1)[0]
+                           for k, s in cfg["sections"].items()
+                           if s in (sections.SECTION_HIDDEN,
+                                    sections.SECTION_ALWAYS_HIDDEN)}
+        cfg_visible_bids = {k.split("|", 1)[0]
+                            for k, s in cfg["sections"].items()
+                            if s == sections.SECTION_VISIBLE}
+        # 输入法菜单（搜狗等输入法图标的宿主）走专用 visible 键通道：CC 按 App
+        # 开关不管 Apple 进程（真机实证与死路对比见 ccnative 输入法菜单段注释）。
+        # 配置 hidden → 隐藏；配置 visible → 显示；两区都没标（用户没管）→
+        # 不动系统现状。该通道只写普通偏好域，不依赖 CC plist 写权，放在
+        # writable 判断之前——CC 通道不可用时搜狗照样能管。
+        try:
+            if ccnative.match_bid(ccnative.INPUT_MENU_AGENT, cfg_hidden_bids):
+                out["input_menu"] = (
+                    "hide" if ccnative.set_input_menu_visible(False) else "hidden")
+            elif ccnative.match_bid(ccnative.INPUT_MENU_AGENT, cfg_visible_bids):
+                out["input_menu"] = (
+                    "show" if ccnative.set_input_menu_visible(True) else "shown")
+        except Exception as exc:  # noqa: BLE001
+            out["input_menu_error"] = str(exc)
         if not ccnative.is_writable():
             return out
         out["writable"] = True
         try:
-            cfg_hidden_bids = {k.split("|", 1)[0]
-                               for k, s in cfg["sections"].items()
-                               if s in (sections.SECTION_HIDDEN,
-                                        sections.SECTION_ALWAYS_HIDDEN)}
-            cfg_visible_bids = {k.split("|", 1)[0]
-                                for k, s in cfg["sections"].items()
-                                if s == sections.SECTION_VISIBLE}
             # 显回的只限「自己上轮藏过、现在配置改显示」的：用户在系统设置
             # 里手动关掉的（配置是显示）不动，尊重手动选择。
             prev = ccnative.last_hidden()
@@ -1502,6 +1516,7 @@ class SettingsController(NSObject):
                 for m in inventory.list_items()[0]
                 if not m.is_stash_button
                 and ccnative.is_protected(m.owner_bundle_id)
+                and m.owner_bundle_id != ccnative.INPUT_MENU_AGENT
                 and sections.section_of(cfg, sections.item_key(m)) in (
                     sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN)]
         except Exception as exc:  # noqa: BLE001
@@ -1520,6 +1535,10 @@ class SettingsController(NSObject):
                 if r.get("writable") and (r.get("hide") or r.get("show")):
                     print(f"[PeaseBar] 周期核对：收回 {r['hide']} 枚 / 显回 "
                           f"{r['show']} 枚（系统状态漂移已纠正）")
+                if r.get("input_menu") in ("hide", "show"):
+                    print(f"[PeaseBar] 周期核对：输入法菜单"
+                          f"{'已收回' if r['input_menu'] == 'hide' else '已显回'}"
+                          f"（系统状态漂移已纠正）")
             except Exception as exc:  # noqa: BLE001
                 print(f"[PeaseBar] 周期核对异常：{exc}")
 
@@ -1764,6 +1783,14 @@ class SettingsController(NSObject):
                       f"（{'、'.join(r['leftover'])}）系统不允许第三方隐藏，跳过")
 
         # 注：无论主通道成败都落到这里（取证调度在下方），不再走启动期拖拽。
+
+        # 输入法菜单（搜狗宿主）的显隐独立于 CC 通道成败，动作结果放公共尾部打印
+        if r.get("input_menu") in ("hide", "show"):
+            print(f"[PeaseBar] 启动同步：输入法菜单（搜狗等输入法图标的宿主）已"
+                  f"{'隐藏' if r['input_menu'] == 'hide' else '显示'}")
+        if r.get("input_menu_error"):
+            print(f"[PeaseBar] 启动同步：输入法菜单显隐失败："
+                  f"{r['input_menu_error']}")
 
         # __PANEL__ 取证：启动同步已全部跑完，这里才把「开面板」安排进主 runloop
         # （0.1s 后 fire）——不能在触发文件处直接调度：reconcile 在后台线程跑，
