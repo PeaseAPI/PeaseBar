@@ -122,6 +122,19 @@ def perform_press(el):
     return AS.AXUIElementPerformAction(el, "AXPress") == 0
 
 
+def set_position(el, x, y):
+    """写元素的 AXPosition（全局 CG 坐标），返回错误码（0=成功）。
+
+    跨进程移动状态项窗口用（移出屏幕隐藏的实验/正式通道）；
+    权限与 AXIsProcessTrusted 同源（辅助功能）。
+    """
+    try:
+        pos = AS.AXValueCreate(AS.kAXValueCGPointType, (float(x), float(y)))
+        return AS.AXUIElementSetAttributeValue(el, "AXPosition", pos)
+    except Exception:
+        return -1
+
+
 def perform_action(el, action="AXPress"):
     """执行指定 AX 动作，返回错误码（0=成功）。
 

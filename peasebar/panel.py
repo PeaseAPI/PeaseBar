@@ -56,7 +56,7 @@ import objc
 import threading
 import time
 
-from peasebar import capture, inventory, sections, trigger
+from peasebar import capture, ccnative, inventory, sections, trigger
 
 # 面板几何：单张干净网格（Thaw 式），格子只放图标、四周留呼吸感。
 # Phase 9 口径：宽度不再写死，由 grid_layout() 按内容算（见文件头「面板尺寸按内容收缩」）。
@@ -93,6 +93,80 @@ def grid_layout(count, image_widths=()):
     width = max(PANEL_MIN_W, min(PANEL_MAX_W, 2 * EDGE + grid_w))
     height = EDGE * 2 + rows * (CELL_H + CELL_GAP) - CELL_GAP
     return width, height, cell_w, cols, rows
+
+
+HIDE_DELAY = 6  # 点按原生隐藏格后，临时显回的图标几秒后收回（菜单点击窗口）
+
+
+def native_hidden_items(items, cfg):
+    """构造「被原生通道藏起、此刻不在盘点里」的弹窗显示区伪项。
+
+    配置为「弹窗显示」的图标被 isAllowed=false 藏掉后不进 AX 盘点
+    （MenuBarAgent 不再暴露它），plan_sections 自然分不到桶；从配置键反推
+    这些项补进面板（Thaw 同口径：面板只列看不见的，它们恰好全看不见）。
+    图标位图截不到，格子走兜底链（按 bundle id 查 App 图标）。
+    「永久隐藏」不补；PeaseBar 自己与 com.apple.* 永不触碰（is_protected）。
+    """
+    import types
+
+    seen = {m.owner_bundle_id for m in items}
+    now_hidden = ccnative.hidden_bids_now() | set(ccnative.last_hidden())
+    out = []
+    for key, sec in cfg["sections"].items():
+        if sec != sections.SECTION_HIDDEN:
+            continue
+        bid, _, part = key.partition("|")
+        if bid in seen or ccnative.is_protected(bid) or bid not in now_hidden:
+            continue  # 在盘点里（面板旧逻辑管）/受保护/App 没在跑：都不补
+        out.append(types.SimpleNamespace(
+            label=part or bid, owner_app=bid.rsplit(".", 1)[-1],
+            owner_bundle_id=bid, owner_pid=-1, key_part=part,
+            stashed=False, notched=False, frame=None, el=None,
+            is_stash_button=False, native_hidden=True))
+    return out
+
+
+def open_native_hidden_async(bid, on_done=None):
+    """点「原生隐藏」格子：临时显回 → 等 AX 元素出现 → 正常阶梯触发 → 延迟收回。
+
+    被 isAllowed=false 藏掉的图标不在 AX 树里（点击打不到），只能三步走：
+    先写 isAllowed=true 显回菜单栏，等盘点拿到它的 AX 元素后照常 AXPress
+    弹菜单，最后隔 HIDE_DELAY 秒收回（给菜单跟踪循环留点击窗口；点慢了
+    菜单会被收回，再点一次格子即可）。全程后台线程，异常时也收回图标。
+    """
+    def run():
+        try:
+            ccnative.set_apps_allowed([bid], True)
+            time.sleep(1.2)  # MenuBarAgent 重启后 AX 树重建需要时间，先歇再问
+            item = None
+            end = time.time() + 8.0
+            while time.time() < end:
+                for m in inventory.list_items()[0]:
+                    if m.owner_bundle_id == bid and not m.is_stash_button:
+                        item = m
+                        break
+                if item is not None:
+                    break
+                time.sleep(0.3)
+            if item is None:
+                ccnative.set_apps_allowed([bid], False)  # 没等到也收回，保持一致
+                if on_done is not None:
+                    on_done("显回菜单栏后没等到它的图标（App 可能没在跑）", False)
+                return
+            result = trigger.open_item(item)
+            time.sleep(HIDE_DELAY)  # 菜单还开着就继续点，到点无条件收回
+            ccnative.set_apps_allowed([bid], False)
+            if on_done is not None:
+                on_done(*result)
+        except Exception:  # noqa: BLE001
+            import traceback
+            traceback.print_exc()
+            try:
+                ccnative.set_apps_allowed([bid], False)  # 异常也别把图标留在栏上
+            except Exception:  # noqa: BLE001
+                pass
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 class KeyPanel(NSPanel):
@@ -222,9 +296,9 @@ class RescuePanel(NSObject):
         """纯数据采集：盘点 → 挑「被隐藏的图标」→ 位图。不做任何 AppKit UI，可子线程调用。
     
         照 Thaw：弹窗不是全量镜像——菜单栏此刻画着的图标不出现在面板里；
-        面板只负责找回「看不见」的：弹窗显示区里被收纳/刘海挡住的（配置隐藏了、
-        此刻真的不在栏上）+ 逻辑上在菜单栏但被系统收纳/刘海遮挡的（系统藏的）。
-        配置隐藏但被挤出、仍画在栏上的不列（栏上直接点就行，不重复）；永久隐藏不展示。
+        面板只负责找回「看不见」的：配置隐藏、被原生通道（isAllowed=false）
+        藏掉不在盘点里的 + 配置隐藏但被系统收纳/刘海挡住的 + 可见区被系统
+        收纳/刘海遮挡的。仍画在栏上的不列（栏上直接点就行，不重复）；永久隐藏不展示。
         """
         all_items, _ = inventory.list_items()
         items = [m for m in all_items if not m.is_stash_button]
@@ -239,15 +313,20 @@ class RescuePanel(NSObject):
         # 可见区里此刻没画在菜单栏上的（被收纳/被刘海挡）：救援目标
         lost_group = [m for m in buckets[sections.SECTION_VISIBLE]
                       if m.stashed or m.notched]
+        # 原生通道（isAllowed=false）藏起的图标不在盘点里，从配置反推补格子
+        native_extra = native_hidden_items(items, cfg)
         stashed = sum(1 for m in items if m.stashed)
         notched = sum(1 for m in items if m.notched)
-        # 单张网格：先用户藏的、再系统藏的（两类的区分留给 tooltip 说明）
-        group = hidden_group + lost_group
+        # 单张网格：用户藏的（原生隐藏 + 系统收纳/刘海）→ 系统藏的（区分进 tooltip）
+        group = hidden_group + native_extra + lost_group
+        # 伪项也要进 items：格子 tag 是 items 下标（onIconClick_ 按索引取）
+        items = list(items) + native_extra
         # 图标位图（只显示图标）：截不到像素时 capture_icons 会用兜底图标顶上；
         # 位置没变时代际缓存命中，后台刷新也不会重截
         images, no_perm = capture.capture_icons(items)
         print(f"[PeaseBar] 盘点完成：总 {len(all_items)} 项，弹窗显示 {len(hidden_group)} 项，"
-              f"被收纳 {stashed} 项，刘海 {notched} 项；网格 {len(group)} 项"
+              f"原生隐藏 {len(native_extra)} 项，被收纳 {stashed} 项，刘海 {notched} 项；"
+              f"网格 {len(group)} 项"
               + ("，无屏幕录制权限→兜底图标" if no_perm else ""))
         return {"items": items, "images": images, "group": group}
     
@@ -364,6 +443,8 @@ class RescuePanel(NSObject):
             tip += "\n被系统收纳：坐标不可信，走 AX 直接投递"
         if item.notched:
             tip += "\n▨ 被刘海遮挡"
+        if getattr(item, "native_hidden", False):
+            tip += "\n原生隐藏：点按会临时显回并触发，稍后自动收回"
         btn.setToolTip_(tip)
         btn.setAccessibilityLabel_(item.label)
         # 身份标识用配置键（与设置窗口同一套）：图标名是活文本，不能当身份用
@@ -403,6 +484,15 @@ class RescuePanel(NSObject):
         item = self.items[idx] if 0 <= idx < len(self.items) else None
         self.close()  # 先收面板：对方的菜单跟踪循环会占住主线程
         if item is None:
+            return
+
+        if getattr(item, "native_hidden", False):
+            # 原生隐藏格：图标不在 AX 树里，直接投不了，走显回→触发→收回复合链路
+            def done_native(how, seen):
+                print(f"[PeaseBar] 触发 {item.owner_app}/{item.label}"
+                      f"（原生隐藏）：{how}，反应={'有' if seen else '无'}")
+
+            open_native_hidden_async(item.owner_bundle_id, done_native)
             return
 
         def done(how, seen):

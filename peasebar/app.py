@@ -137,6 +137,15 @@ class AppDelegate(NSObject):
 
             print("[PeaseBar] 启动装配失败（面板/快捷键/设置均不可用）：")
             traceback.print_exc()
+            # print 进 launchd 不可见，落盘一份才能离线定位（与 reconcile 同做法）
+            try:
+                import os
+                with open(os.path.expanduser(
+                        "~/Project/PeaseBar/tmp/wireup_error.txt"),
+                        "w", encoding="utf-8") as f:
+                    traceback.print_exc(file=f)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _wire_up(self):
         """真正的装配：控制图标 → 救援面板 → 设置窗口 → 快捷键 → 单实例监听。"""
