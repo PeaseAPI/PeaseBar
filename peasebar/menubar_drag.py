@@ -103,6 +103,28 @@ def _notch_mid_x():
     return (n[0] + n[1]) / 2.0 if n else None
 
 
+def _stash_drop_x():
+    """逐枚隐藏的落点 x：拖到系统「收纳/溢出」区即可被隐藏。
+
+    两条可用路径（都实测有效）：
+    1. 有刘海 → 拖进刘海中点（无空间，系统自动收进溢出区）；
+    2. 无刘海但溢出按钮在 → 拖到收纳按钮左侧一点，即丢进隐藏段。
+    都拿不到返回 None（这枚没法逐枚隐藏）。
+    """
+    mx = _notch_mid_x()
+    if mx is not None:
+        return mx
+    try:
+        items, _ = inventory.list_items()
+    except Exception:  # noqa: BLE001
+        return None
+    for m in items:
+        if getattr(m, "is_stash_button", False) and m.frame:
+            # 收纳按钮左边界外一点 = 隐藏段（实测被收纳项就堆在这条线左侧）
+            return m.frame[0] - 12.0
+    return None
+
+
 def reorder(src_item, dst_item, after=True):
     """把 src_item 在真实菜单栏上拖到 dst_item 的前/后，达成目标顺序。"""
     ok = movable(src_item) and src_item.frame and dst_item and dst_item.frame
@@ -121,17 +143,20 @@ def reorder(src_item, dst_item, after=True):
 
 
 def hide(item):
-    """把 item ⌘-拖进刘海：macOS 把它收进溢出区（下一次盘点 stashed=True）。"""
+    """把 item ⌘-拖进系统收纳区：macOS 把它收进溢出区（下一次盘点 stashed=True）。
+
+    有刘海拖进刘海；无刘海拖到收纳按钮左侧的隐藏段。两条都走不通才放弃。
+    """
     if not (movable(item) and item.frame):
         print(f"[PeaseBar][拖] hide 跳过：movable={movable(item)} 有帧={bool(item and item.frame)}")
         return False
-    mx = _notch_mid_x()
+    mx = _stash_drop_x()
     if mx is None:
-        print("[PeaseBar][拖] hide 跳过：未检测到刘海（_notch_mid_x=None）")
-        return False  # 无刘海屏，这条路不适用（老屏用溢出按钮，另议）
+        print("[PeaseBar][拖] hide 跳过：未找到收纳落点（无刘海且无收纳按钮）")
+        return False
     y = _center(item.frame)[1]
     print(f"[PeaseBar][拖] hide {getattr(item,'owner_bundle_id','?')} "
-          f"src={_center(item.frame)} -> 刘海中点 x={round(mx,1)}")
+          f"src={_center(item.frame)} -> 收纳落点 x={round(mx,1)}")
     command_drag(_center(item.frame), (mx, y))
     return True
 
