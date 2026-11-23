@@ -125,19 +125,37 @@ class TestHideCoords(unittest.TestCase):
         self.rec = []
         self._orig_drag = menubar_drag.command_drag
         self._orig_stash = menubar_drag._stash_drop_x
+        self._orig_wait = menubar_drag._wait_state
+        self._orig_find = menubar_drag._find
         menubar_drag.command_drag = lambda src, dst, *a, **k: self.rec.append((src, dst))
         menubar_drag._stash_drop_x = lambda: 767.0
+        # 隔真机：_find 回到 None 就用传入的桩，保证用桩的 frame 算坐标
+        menubar_drag._find = lambda item: None
+        # hide 现在拖完会轮询真机确认 stashed 翻转；单测里没真菜单栏，
+        # 模拟“拖后确实生效”（want_stashed=True 即成功）。
+        menubar_drag._wait_state = lambda item, want_stashed, **k: bool(want_stashed)
 
     def tearDown(self):
         menubar_drag.command_drag = self._orig_drag
         menubar_drag._stash_drop_x = self._orig_stash
+        menubar_drag._wait_state = self._orig_wait
+        menubar_drag._find = self._orig_find
 
     def test_拖到收纳落点(self):
         item = fake(frame=(1300.0, 0.0, 24.0, 24.0))   # 中心 (1312, 12)
         self.assertTrue(menubar_drag.hide(item))
+        # 验证生效后应只拖一次就返回，不重试
+        self.assertEqual(len(self.rec), 1)
         src_pt, dst_pt = self.rec[-1]
         self.assertEqual(src_pt, (1312.0, 12.0))
         self.assertEqual(dst_pt, (767.0, 12.0))
+
+    def test_验证不过则重试并最终返回失败(self):
+        # 拖完始终确认不了 stashed（溢出区满）：应重试 3 次，最后返回 False
+        item = fake(frame=(1300.0, 0.0, 24.0, 24.0))
+        menubar_drag._wait_state = lambda *a, **k: False
+        self.assertFalse(menubar_drag.hide(item))
+        self.assertEqual(len(self.rec), 3)
 
 
 if __name__ == "__main__":

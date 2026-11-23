@@ -1358,37 +1358,69 @@ class SettingsController(NSObject):
         if n:
             print(f"[PeaseBar] 重置：把 {n} 个图标拖回真实菜单栏")
 
-    # ---------- 真实菜单栏显隐的统一入口（优先权重表，回退合成拖） ----------
+    # ---------- 真实菜单栏显隐的统一入口（真机取证：合成拖拽） ----------
 
     @objc.python_method
     def _real_hide(self, item, always=False):
-        """逐枚隐藏一枚图标：先走布局权重表（正路：可逆、不重启、无数量限制），
-        拿不到授权或匹配不到状态键时，才回退到合成 ⌘-拖（系统溢出区，受容量限制）。
+        """逐枚隐藏一枚图标：走合成 ⌘-拖（真机唯一双向、即时、什么都不重启的可靠路）。
+
+        取证结论：直写布局权重表每次都要重载 MenuBarAgent（菜单栏瞬间重建），
+        且“显示”有滞后不可靠，已放弃作为主机制；只保留拖拽。拖拽内部已带
+        验证与重试，返回是否真的隐藏成功。
         """
-        try:
-            if layout_table.has_access() and layout_table.hide(item, always=always):
-                return True
-        except Exception as exc:  # noqa: BLE001 — 权重表任何异常都不该弄崩设置窗
-            print(f"[PeaseBar] 权重表隐藏异常，回退拖拽：{exc}")
         try:
             return menubar_drag.movable(item) and menubar_drag.hide(item)
         except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 拖拽隐藏也失败（{getattr(item,'owner_bundle_id','?')}）：{exc}")
+            print(f"[PeaseBar] 拖拽隐藏失败（{getattr(item,'owner_bundle_id','?')}）：{exc}")
             return False
 
     @objc.python_method
     def _real_reveal(self, item):
-        """取消隐藏一枚图标：同样优先权重表，回退拖拽。"""
-        try:
-            if layout_table.has_access() and layout_table.show(item):
-                return True
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 权重表显示异常，回退拖拽：{exc}")
+        """取消隐藏一枚图标：合成拖拽拖回可见段（带验证与重试）。"""
         try:
             return menubar_drag.reveal(item)
         except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 拖拽显示也失败（{getattr(item,'owner_bundle_id','?')}）：{exc}")
+            print(f"[PeaseBar] 拖拽显示失败（{getattr(item,'owner_bundle_id','?')}）：{exc}")
             return False
+
+    @objc.python_method
+    def _drag_cycle_test(self, owner, label):
+        """真机逐条取证：对一枚图标跑 hide→确认 stashed→reveal→确认回到可见。
+
+        走的是正式入口 _real_hide/_real_reveal（含拖拽验证与重试），结果落
+        tmp/peasebar_exp_result.json。选当前可见的靶标，周期结束回到可见=原状。
+        """
+        import time
+
+        def find():
+            try:
+                for m in inventory.list_items()[0]:
+                    if (m.owner_bundle_id or "").lower() == owner.lower() and (
+                            not label or label.lower() in (m.label or "").lower()):
+                        return m
+            except Exception:  # noqa: BLE001
+                pass
+            return None
+
+        m0 = find()
+        if m0 is None:
+            return {"error": f"未找到 {owner}/{label}"}
+        before = bool(getattr(m0, "stashed", False))
+        hide_ret = self._real_hide(m0)
+        time.sleep(0.4)
+        m1 = find()
+        after_hide = bool(getattr(m1, "stashed", False)) if m1 else None
+        reveal_ret = self._real_reveal(m1 or m0)
+        time.sleep(0.4)
+        m2 = find()
+        after_reveal = bool(getattr(m2, "stashed", True)) if m2 else None
+        return {"owner": owner, "label": getattr(m0, "label", label),
+                "before_stashed": before,
+                "hide_returned": hide_ret, "after_hide_stashed": after_hide,
+                "hide_ok": after_hide is True,
+                "reveal_returned": reveal_ret, "after_reveal_stashed": after_reveal,
+                "reveal_ok": after_reveal is False,
+                "reversible": (after_hide is True and after_reveal is False)}
 
     @objc.python_method
     def reconcile_real_bar(self):
@@ -1407,29 +1439,32 @@ class SettingsController(NSObject):
         """
         import time
 
-        # 诊断：不论下面各守卫能不能过，先落一份真实表 + 访问链诊断（只需
-        # 书签+TCC 文件权限，不依赖辅助功能），便于离线核对权限断点与 key 格式。
-        try:
-            layout_table.dump_table()
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 启动同步：dump 布局表异常：{exc}")
-        # 诊断：把在线第三方图标清单（owner/label/key_part）落一份，供构造
-        # 状态键 status:<owner>::<identifier> 时核对真实拼法。
-        try:
-            import json as _json
-            items = inventory.list_items()[0]
-            rec = [{"owner_app": m.owner_app, "owner_bundle_id": m.owner_bundle_id,
-                    "label": m.label, "key_part": m.key_part, "role": m.role,
-                    "stashed": bool(getattr(m, "stashed", False)),
-                    "is_stash_button": bool(m.is_stash_button)}
-                   for m in items]
-            with open(os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
-                                   "live_inventory.json"), "w",
-                      encoding="utf-8") as f:
-                _json.dump(rec, f, ensure_ascii=False, indent=2)
-            print(f"[PeaseBar] 启动同步：已 dump 在线图标清单 {len(rec)} 项")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 启动同步：dump 在线清单异常：{exc}")
+        # 诊断触发文件：只在开发取证时用（文件在才跑各种 dump/实验），
+        # 平时启动不落盘、不扰民。
+        trig = os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
+                            "peasebar_exp_hide")
+        if os.path.exists(trig):
+            # 落一份真实表 + 访问链诊断（离线核对权限断点与 key 格式）。
+            try:
+                layout_table.dump_table()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] 启动同步：dump 布局表异常：{exc}")
+            # 把在线第三方图标清单（owner/label/key_part/stashed）落一份。
+            try:
+                import json as _json
+                items = inventory.list_items()[0]
+                rec = [{"owner_app": m.owner_app, "owner_bundle_id": m.owner_bundle_id,
+                        "label": m.label, "key_part": m.key_part, "role": m.role,
+                        "stashed": bool(getattr(m, "stashed", False)),
+                        "is_stash_button": bool(m.is_stash_button)}
+                       for m in items]
+                with open(os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
+                                       "live_inventory.json"), "w",
+                          encoding="utf-8") as f:
+                    _json.dump(rec, f, ensure_ascii=False, indent=2)
+                print(f"[PeaseBar] 启动同步：已 dump 在线图标清单 {len(rec)} 项")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] 启动同步：dump 在线清单异常：{exc}")
 
         # 诊断：若 tmp/peasebar_exp_hide 存在，跑一次受控隐藏实验（写多种候选
         # 状态键），把结果落 tmp/peasebar_exp_result.json，然后删掉触发文件。
@@ -1455,6 +1490,10 @@ class SettingsController(NSObject):
                     ok = bool(hit is not None and menubar_drag.reveal(hit))
                     r = {"revealed": ok, "owner": o,
                          "label": getattr(hit, "label", None)}
+                elif owner == "__DRAGTEST__":
+                    r = self._drag_cycle_test(
+                        spec[1] if len(spec) > 1 else "",
+                        (spec[2] if len(spec) > 2 else ""))
                 elif owner == "__REALHIDE__":
                     o = spec[1] if len(spec) > 1 else owner
                     ident = spec[2] if len(spec) > 2 else o
@@ -1506,40 +1545,8 @@ class SettingsController(NSObject):
             print("[PeaseBar] 启动同步：无辅助功能权限，跳过真实菜单栏镜像")
             return
 
-        # ---- 正路：布局权重表一趟批量写 ----
-        try:
-            authorized = layout_table.has_access()
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 启动同步：查布局表授权异常：{exc}")
-            authorized = False
-        if authorized:
-            keys = list(layout_table.read_positions().keys())
-            if not keys:
-                print("[PeaseBar] 启动同步：布局表里没有任何状态键，回退拖拽")
-            else:
-                assignments = {}
-                for m in inventory.list_items()[0]:
-                    if m.is_stash_button:
-                        continue
-                    bid = m.owner_bundle_id or ""
-                    if not bid or bid.startswith("com.apple."):
-                        continue
-                    k = layout_table.resolve_key(m, keys)
-                    if not k:
-                        continue
-                    sec = sections.section_of(cfg, sections.item_key(m))
-                    assignments[k] = ("hidden" if sec == sections.SECTION_HIDDEN
-                                      else "always_hidden" if sec == sections.SECTION_ALWAYS_HIDDEN
-                                      else "visible")
-                if assignments:
-                    ok = layout_table.apply_plan(assignments)
-                    print(f"[PeaseBar] 启动同步：权重表单趟写入 {len(assignments)} 枚（成功={ok}）")
-                    self._resync_frames()
-                else:
-                    print("[PeaseBar] 启动同步：没有需要镜像到权重表的第三方图标")
-                return
-
-        # ---- 回退：合成 ⌘-拖 + 容量护栏 ----
+        # ---- 逐枚隐藏/显示：合成 ⌘-拖 + 容量护栏（真机唯一即时不重启的可靠路）----
+        # 取证已证实写权重表需重载 MenuBarAgent 且“显示”不可靠，不再作为启动镜像手段。
         def stashed_count():
             return sum(1 for m in inventory.list_items()[0]
                        if getattr(m, "stashed", False) and not m.is_stash_button)

@@ -152,26 +152,44 @@ def reorder(src_item, dst_item, after=True):
 
 
 def hide(item):
-    """把 item ⌘-拖进系统收纳区：macOS 把它收进溢出区（下一次盘点 stashed=True）。
+    """把 item ⌘-拖进系统收纳区，直到真机确认它已 stashed（失败重试）。
 
-    有刘海拖进刘海；无刘海拖到收纳按钮左侧的隐藏段。两条都走不通才放弃。
+    有刘海拖进刘海左侧；无刘海拖到收纳按钮左侧的隐藏段。拖完不盲返 True，
+    而是重新盘点轮询它的 stashed 是否变 True，没变就重算落点再拖，最多 tries 次。
+    返回是否真的隐藏成功。
     """
     if not (movable(item) and item.frame):
         print(f"[PeaseBar][拖] hide 跳过：movable={movable(item)} 有帧={bool(item and item.frame)}")
         return False
-    mx = _stash_drop_x()
-    if mx is None:
-        print("[PeaseBar][拖] hide 跳过：未找到收纳落点（无刘海且无收纳按钮）")
-        return False
-    y = _center(item.frame)[1]
-    print(f"[PeaseBar][拖] hide {getattr(item,'owner_bundle_id','?')} "
-          f"src={_center(item.frame)} -> 收纳落点 x={round(mx,1)}")
-    command_drag(_center(item.frame), (mx, y))
-    return True
+    tries = 3
+    for _attempt in range(tries):
+        cur = _find(item) or item
+        if cur is None or not getattr(cur, "frame", None):
+            break
+        if getattr(cur, "stashed", False):
+            return True  # 已在收纳区，视为成功
+        mx = _stash_drop_x()
+        if mx is None:
+            print("[PeaseBar][拖] hide 跳过：未找到收纳落点（无刘海且无收纳按钮）")
+            return False
+        y = _center(cur.frame)[1]
+        print(f"[PeaseBar][拖] hide {getattr(cur,'owner_bundle_id','?')} "
+              f"src={_center(cur.frame)} -> 收纳落点 x={round(mx,1)}（第{_attempt+1}次）")
+        command_drag(_center(cur.frame), (mx, y))
+        if _wait_state(item, want_stashed=True, timeout=1.6):
+            return True
+    ok = bool(getattr(_find(item) or item, "stashed", False))
+    if not ok:
+        print(f"[PeaseBar][拖] hide 未生效（{getattr(item,'owner_bundle_id','?')}）：溢出区可能已满或该项不可拖")
+    return ok
 
 
 def reveal(item):
-    """把被收纳的 item 拖回可见段：先展开溢出区拿到它的真实坐标，再拖到可见区最右。"""
+    """把被收纳的 item 拖回可见段，直到真机确认它已不再 stashed（失败重试）。
+
+    先展开溢出区拿到它的真实坐标，再拖到可见区最右；拖完轮询 stashed 是否转 False。
+    返回是否真的显示成功。
+    """
     if item is None or getattr(item, "el", None) is None:
         return False
     if getattr(item, "is_stash_button", False):
@@ -182,20 +200,38 @@ def reveal(item):
     if not inventory.set_stash_revealed(True):
         return False
     try:
-        time.sleep(0.25)
-        fresh = _find(item)
-        if fresh is None or fresh.frame is None:
-            return False
-        items, _ = inventory.list_items()
-        vis = [m.frame[0] + m.frame[2] for m in items
-               if m.frame and not m.stashed and not m.is_stash_button
-               and m.owner_bundle_id != "com.apple.MenuBarAgent"]
-        right = max(vis, default=fresh.frame[0] + 200)
-        y = _center(fresh.frame)[1]
-        command_drag(_center(fresh.frame), (right - 8, y))
-        return True
+        for _attempt in range(3):
+            fresh = _find(item)
+            if fresh is None or fresh.frame is None:
+                break
+            if not getattr(fresh, "stashed", False):
+                return True  # 已在可见段
+            items, _ = inventory.list_items()
+            vis = [m.frame[0] + m.frame[2] for m in items
+                   if m.frame and not m.stashed and not m.is_stash_button
+                   and m.owner_bundle_id != "com.apple.MenuBarAgent"]
+            right = max(vis, default=fresh.frame[0] + 200)
+            y = _center(fresh.frame)[1]
+            print(f"[PeaseBar][拖] reveal {getattr(fresh,'owner_bundle_id','?')} "
+                  f"src={_center(fresh.frame)} -> 可见最右 x={round(right-8,1)}（第{_attempt+1}次）")
+            command_drag(_center(fresh.frame), (right - 8, y))
+            if _wait_state(item, want_stashed=False, timeout=1.6):
+                return True
+        return not bool(getattr(_find(item) or item, "stashed", False))
     finally:
         inventory.set_stash_revealed(False)
+
+
+def _wait_state(item, want_stashed, timeout=1.6, poll=0.2) -> bool:
+    """拖拽后轮询盘点，直到该图标的 stashed 达到期望值或超时。"""
+    end = time.time() + timeout
+    while time.time() < end:
+        m = _find(item)
+        if m is not None and bool(getattr(m, "stashed", False)) == want_stashed:
+            return True
+        time.sleep(poll)
+    m = _find(item)
+    return bool(m is not None and getattr(m, "stashed", False) == want_stashed)
 
 
 def _find(item):
