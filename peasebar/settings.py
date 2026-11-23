@@ -1541,6 +1541,10 @@ class SettingsController(NSObject):
                 elif owner == "__PANEL__":
                     # 取证：主线程把救援面板打开，供外部截屏看面板现状
                     r = self._panel_open_test()
+                elif owner == "__POSTCHECK__":
+                    # 取证：置标志，启动同步全部跑完后盘点最终收纳状态
+                    self._postcheck_armed = True
+                    r = {"postcheck_scheduled": True}
                 else:
                     ident = spec[1] if len(spec) > 1 else owner
                     title = spec[2] if len(spec) > 2 else ident
@@ -1564,43 +1568,52 @@ class SettingsController(NSObject):
         # ---- 逐枚隐藏/显示：合成 ⌘-拖 + 容量护栏（真机唯一即时不重启的可靠路）----
         # 取证已证实写权重表需重载 MenuBarAgent 且“显示”不可靠，不再作为启动镜像手段。
         def pending_keys():
+            """配置隐藏、此刻仍可见、且拖得动的项（系统项拖不动，不算剩余）。"""
             out = []
             for m in inventory.list_items()[0]:
                 if m.is_stash_button or m.stashed:
                     continue
                 sec = sections.section_of(cfg, sections.item_key(m))
                 if sec in (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN):
-                    out.append(m)
+                    if menubar_drag.movable(m):
+                        out.append(m)
             return out
 
         # 1. 折叠系统收纳区
         inventory.set_stash_revealed(False)
         time.sleep(0.4)
 
-        # 2/3. 增量应用 + 容量护栏：一次收不进不算满（hide 内部已带 3 次重试与
-        # 落点重算），连续 2 枚收不进才停；系统项（com.apple.*）拖不动，跳过不占失败。
-        # 旧版一次失败就收手，导致「设了弹窗显示却一直留在菜单栏上」。
+        # 2/3. 多轮收敛：一轮拖完重新盘点，「设了隐藏却还在栏上」的接着拖，
+        # 直到收齐或连续两轮无进展（收纳条物理容量到顶）。上一轮拖拽的重排
+        # 抖动会把已收的顶出来（FIFO），单轮“全部成功”不可信，必须轮末复点；
+        # TG Pro 这类文本图标宽度随内容变，每轮可用宽度也不同。拖后歇 0.8s
+        # 给 MenuBarAgent 重排时间，防下一拖把刚收的顶出。
         hidden = 0
-        consec = 0
-        for target in pending_keys():
-            if not menubar_drag.movable(target):
-                continue
-            try:
-                ok = menubar_drag.hide(target)
-            except Exception as exc:  # noqa: BLE001
-                print(f"[PeaseBar] 启动同步隐藏失败（{target.owner_bundle_id}）：{exc}")
-                ok = False
-            time.sleep(0.4)
-            if ok:
-                hidden += 1
-                consec = 0
-            else:
-                consec += 1
-                if consec >= 2:
-                    print("[PeaseBar] 启动同步：连续 2 枚收不进（收纳条已满？），停止")
-                    break
+        prev_left = None
+        for round_no in (1, 2, 3):
+            left = pending_keys()
+            if not left:
+                break
+            if prev_left is not None and len(left) >= prev_left:
+                print(f"[PeaseBar] 启动同步：第{round_no}轮无进展"
+                      f"（仍剩 {len(left)} 枚，收纳条可能已满），停止")
+                break
+            prev_left = len(left)
+            print(f"[PeaseBar] 启动同步：第{round_no}轮，"
+                  f"仍有 {len(left)} 枚「弹窗/永久隐藏」在菜单栏上")
+            for target in left:
+                try:
+                    ok = menubar_drag.hide(target)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[PeaseBar] 启动同步隐藏失败（{target.owner_bundle_id}）：{exc}")
+                    ok = False
+                time.sleep(0.8)
+                if ok:
+                    hidden += 1
+            # 轮末等重排落定，再盘点下一轮
+            time.sleep(1.0)
         if hidden:
-            print(f"[PeaseBar] 启动同步：把 {hidden} 个「弹窗/永久隐藏」图标收进真实收纳区")
+            print(f"[PeaseBar] 启动同步：共把 {hidden} 枚「弹窗/永久隐藏」图标收进真实收纳区")
 
         # __PANEL__ 取证：启动同步已全部跑完，这里才把「开面板」安排进主 runloop
         # （0.1s 后 fire）——不能在触发文件处直接调度：reconcile 在后台线程跑，
@@ -1611,6 +1624,20 @@ class SettingsController(NSObject):
                 0.1, self, "panelOpen:", None, False)
             NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
             print("[PeaseBar] 面板取证：启动同步完成，已安排主线程开面板")
+
+        # __POSTCHECK__ 取证：启动同步收敛完，盘点最终收纳状态（只读不动）
+        if getattr(self, "_postcheck_armed", False):
+            try:
+                r2 = self._inventory_diag()
+                with open(os.path.expanduser(
+                        "~/Project/PeaseBar/tmp/peasebar_exp_result.json"),
+                        "w", encoding="utf-8") as f:
+                    import json as _json
+                    _json.dump(r2, f, ensure_ascii=False, indent=2, default=str)
+                print(f"[PeaseBar] 后置盘点：已收 {len(r2.get('stashed', []))} 枚，"
+                      f"仍在栏 {len(r2.get('configured_hidden_still_visible', []))} 枚")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] 后置盘点失败：{exc}")
 
     @objc.python_method
     def reconcile_real_bar_async(self, delay=1.5):

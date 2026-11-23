@@ -222,14 +222,20 @@ class RescuePanel(NSObject):
         """纯数据采集：盘点 → 挑「被隐藏的图标」→ 位图。不做任何 AppKit UI，可子线程调用。
     
         照 Thaw：弹窗不是全量镜像——菜单栏此刻画着的图标不出现在面板里；
-        面板只负责找回「看不见」的：弹窗显示区（用户藏起来的）+
-        逻辑上在菜单栏但被系统收纳/刘海遮挡的（系统藏起来的）。永久隐藏不展示。
+        面板只负责找回「看不见」的：弹窗显示区里被收纳/刘海挡住的（配置隐藏了、
+        此刻真的不在栏上）+ 逻辑上在菜单栏但被系统收纳/刘海遮挡的（系统藏的）。
+        配置隐藏但被挤出、仍画在栏上的不列（栏上直接点就行，不重复）；永久隐藏不展示。
         """
         all_items, _ = inventory.list_items()
         items = [m for m in all_items if not m.is_stash_button]
         cfg = sections.load_config()
         buckets = sections.plan_sections(items, cfg)
-        hidden_group = buckets[sections.SECTION_HIDDEN]
+        # 面板只列「此刻看不见」的（docstring 承诺的真实现）：配置隐藏但被挤出、
+        # 仍画在菜单栏上的不列——它在栏上直接点就行，再列一份会造成
+        # 「面板也有、菜单栏也有」的重复困惑（用户真机实测反馈）。
+        hidden_group = [m for m in buckets[sections.SECTION_HIDDEN]
+                        if getattr(m, "stashed", False)
+                        or getattr(m, "notched", False)]
         # 可见区里此刻没画在菜单栏上的（被收纳/被刘海挡）：救援目标
         lost_group = [m for m in buckets[sections.SECTION_VISIBLE]
                       if m.stashed or m.notched]
