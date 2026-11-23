@@ -63,6 +63,7 @@ class TestEarlyReturn(unittest.TestCase):
         self.calls = []
         self._orig_drag = menubar_drag.command_drag
         self._orig_notch = menubar_drag._notch_mid_x
+        self._orig_stash = menubar_drag._stash_drop_x
 
         def boom(*a, **k):
             raise AssertionError("不该在未通过守卫时调用 command_drag")
@@ -72,6 +73,7 @@ class TestEarlyReturn(unittest.TestCase):
     def tearDown(self):
         menubar_drag.command_drag = self._orig_drag
         menubar_drag._notch_mid_x = self._orig_notch
+        menubar_drag._stash_drop_x = self._orig_stash
 
     def test_系统项hide不发事件(self):
         self.assertFalse(menubar_drag.hide(fake(bid="com.apple.Spotlight")))
@@ -80,9 +82,9 @@ class TestEarlyReturn(unittest.TestCase):
         self.assertFalse(menubar_drag.reorder(
             fake(bid="com.apple.Spotlight"), fake()))
 
-    def test_无刘海hide早退(self):
-        # movable 通过，但 _notch_mid_x 返回 None（老屏）→ 不发事件
-        menubar_drag._notch_mid_x = lambda: None
+    def test_找不到收纳落点hide早退(self):
+        # movable 通过，但 _stash_drop_x 返回 None（无隐藏簇/无刘海/无按钮）→ 不发事件
+        menubar_drag._stash_drop_x = lambda: None
         self.assertFalse(menubar_drag.hide(fake()))
 
 
@@ -114,25 +116,28 @@ class TestReorderCoords(unittest.TestCase):
 
 
 class TestHideCoords(unittest.TestCase):
-    """hide：目标 x = 刘海中点，y 取源中心。"""
+    """hide：目标 x = _stash_drop_x（系统收纳/溢出区落点），y 取源中心。
+
+    拖拽已是「未授权权重表」时的回退路径，落点由 _stash_drop_x 统一给出。
+    """
 
     def setUp(self):
         self.rec = []
         self._orig_drag = menubar_drag.command_drag
-        self._orig_notch = menubar_drag._notch_mid_x
+        self._orig_stash = menubar_drag._stash_drop_x
         menubar_drag.command_drag = lambda src, dst, *a, **k: self.rec.append((src, dst))
-        menubar_drag._notch_mid_x = lambda: 1028.0
+        menubar_drag._stash_drop_x = lambda: 767.0
 
     def tearDown(self):
         menubar_drag.command_drag = self._orig_drag
-        menubar_drag._notch_mid_x = self._orig_notch
+        menubar_drag._stash_drop_x = self._orig_stash
 
-    def test_拖进刘海中点(self):
+    def test_拖到收纳落点(self):
         item = fake(frame=(1300.0, 0.0, 24.0, 24.0))   # 中心 (1312, 12)
         self.assertTrue(menubar_drag.hide(item))
         src_pt, dst_pt = self.rec[-1]
         self.assertEqual(src_pt, (1312.0, 12.0))
-        self.assertEqual(dst_pt, (1028.0, 12.0))
+        self.assertEqual(dst_pt, (767.0, 12.0))
 
 
 if __name__ == "__main__":
