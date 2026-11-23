@@ -341,6 +341,72 @@ def _jsonable(obj, _depth=0):
     return str(obj)
 
 
+def menubar_container_dir() -> str:
+    """MenuBarAgent 自己的 group 容器（真权重表很可能就在这里，非 controlcenter）。"""
+    return os.path.expanduser("~/Library/Group Containers/com.apple.MenuBar")
+
+
+def _collect_status_keys(obj, found, _depth=0):
+    """递归找形如 status:.../module:... 的键，或名为权重字典的结构。"""
+    if _depth > 8:
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            ks = str(k)
+            if ks.startswith("status:") or ks.startswith("module:"):
+                found[ks] = (v if isinstance(v, (int, float, str, bool)) else
+                             type(v).__name__)
+            _collect_status_keys(v, found, _depth + 1)
+    elif isinstance(obj, list):
+        for v in obj:
+            _collect_status_keys(v, found, _depth + 1)
+
+
+def _probe_menubar_container() -> dict:
+    """FDA 授权后走普通文件读（不需书签），枚举 com.apple.MenuBar 容器
+    里的 plist 并挖出真正的权重表位置/键。写 tmp/menubar_container_dump.json。
+    """
+    import json
+    out = {"base": menubar_container_dir(), "files": [], "plists": [],
+           "status_keys": {}}
+    base = menubar_container_dir()
+    try:
+        for root, dirs, files in os.walk(base):
+            for fn in files:
+                fp = os.path.join(root, fn)
+                rel = os.path.relpath(fp, base)
+                out["files"].append(rel)
+                if fn.endswith(".plist"):
+                    out["plists"].append(rel)
+                    try:
+                        with open(fp, "rb") as f:
+                            data = f.read()
+                        parsed = plistlib.loads(data)
+                        top = list(parsed.keys()) if isinstance(parsed, dict) else \
+                            type(parsed).__name__
+                        found = {}
+                        _collect_status_keys(parsed, found)
+                        out.setdefault("plist_detail", {})[rel] = {
+                            "bytes": len(data), "top_keys": top,
+                            "status_key_count": len(found)}
+                        for kk, vv in found.items():
+                            out["status_keys"][kk] = vv
+                    except Exception as exc:  # noqa: BLE001
+                        out.setdefault("plist_detail", {})[rel] = {
+                            "error": str(exc)}
+    except (PermissionError, OSError) as oe:
+        out["error"] = f"{oe.errno}: {oe.strerror}（FDA 未生效？）"
+    try:
+        p = os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
+                         "menubar_container_dump.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2, default=str)
+        _log(f"已 probe com.apple.MenuBar 容器 → {p}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"容器 probe 写入失败：{exc}")
+    return out
+
+
 def dump_table(path: str | None = None) -> dict:
     """把真实布局表结构 + 完整访问链诊断落到文件（诊断用，不参与业务）。
 
@@ -358,6 +424,11 @@ def dump_table(path: str | None = None) -> dict:
         "table_path": table_path(),
         "table_path_exists": os.path.exists(table_path()),
     }
+    # FDA 授权后走普通文件读枚举 com.apple.MenuBar 容器，拿真表键格式。
+    try:
+        result["menubar_container"] = _probe_menubar_container()
+    except Exception as exc:  # noqa: BLE001
+        result["menubar_container_error"] = str(exc)
     # CFPreferences 探针：定位权重表到底在哪个域/键（单独落文件）。
     try:
         probe = _probe_cfprefs()
@@ -561,6 +632,286 @@ def cfprefs_write_probe(owner: str, title: str) -> dict:
             "readback_count": (len(readback) if isinstance(readback, dict) else None),
             "before_type": type(before).__name__,
             "error": err}
+
+
+# ---------- 真表（com.apple.MenuBar 容器）读写：FDA 正路 ----------
+
+# MenuBarAgent 的权威权重表就在它自己的 group 容器里，顶层只有一个键
+# TrailingItemPreferredPositions = {状态键: 位置权重}。FDA 授权后普通文件读
+# 即可拿到；写要经 cfprefsd（域 com.apple.MenuBar）才能让在线 Agent 采信。
+MENUBAR_SUITE = "com.apple.MenuBar"
+POS_TABLE_KEY = "TrailingItemPreferredPositions"
+
+
+def real_table_path() -> str:
+    return os.path.join(menubar_container_dir(),
+                        "Library/Preferences/com.apple.MenuBar.plist")
+
+
+def read_real_table() -> dict:
+    """普通文件读真表 TrailingItemPreferredPositions，返回 {状态键: 权重(float/int)}。"""
+    try:
+        with open(real_table_path(), "rb") as f:
+            root = plistlib.loads(f.read())
+    except Exception as exc:  # noqa: BLE001
+        _log(f"读真表失败：{exc}")
+        return {}
+    tbl = root.get(POS_TABLE_KEY) if isinstance(root, dict) else None
+    return {str(k): v for k, v in tbl.items()} if isinstance(tbl, dict) else {}
+
+
+def cfprefs_real_table() -> dict:
+    """经 CFPreferences（域 com.apple.MenuBar）读同一张表，用于比对与写路径判定。"""
+    try:
+        val = CFPreferencesCopyValue(CFSTR(POS_TABLE_KEY), CFSTR(MENUBAR_SUITE),
+                                     kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"CFPreferences 读真表异常：{exc}")
+        return {}
+    return {str(k): v for k, v in val.items()} if isinstance(val, dict) else {}
+
+
+def real_probe(live_items) -> dict:
+    """决定性诊断：把在线每枚图标 → 真表状态键 → 权重 ↔ 实际 stashed 对齐，
+    并比对「文件读 vs CFPreferences 读」是否同源，找出现机真实隐藏阈值。
+
+    live_items：inventory 的 MenuItem 列表（需辅助功能）。结果落
+    tmp/real_probe.json。只读不写，安全。
+    """
+    import json
+    file_tbl = read_real_table()
+    cf_tbl = cfprefs_real_table()
+    keys = list(file_tbl.keys())
+    rows = []
+    for m in live_items:
+        if getattr(m, "is_stash_button", False):
+            continue
+        key = resolve_key(m, keys)
+        w_file = file_tbl.get(key) if key else None
+        w_cf = cf_tbl.get(key) if key else None
+        rows.append({
+            "owner": getattr(m, "owner_bundle_id", ""),
+            "label": getattr(m, "label", ""),
+            "key": key,
+            "w_file": w_file,
+            "w_cf": w_cf,
+            "stashed": bool(getattr(m, "stashed", False)),
+            "on_screen": bool(getattr(m, "is_on_screen", True)),
+        })
+    vis = [r["w_file"] for r in rows if not r["stashed"] and isinstance(r["w_file"], (int, float))]
+    hid = [r["w_file"] for r in rows if r["stashed"] and isinstance(r["w_file"], (int, float))]
+    out = {
+        "real_table_path": real_table_path(),
+        "file_count": len(file_tbl),
+        "cf_count": len(cf_tbl),
+        "file_eq_cf": (file_tbl == cf_tbl),
+        "file_only_keys": [k for k in file_tbl if k not in cf_tbl][:20],
+        "cf_only_keys": [k for k in cf_tbl if k not in file_tbl][:20],
+        "divider_candidates": {
+            k: v for k, v in file_tbl.items()
+            if "ControlItem" in k or k.startswith("module:")},
+        "visible_weight_min": (min(vis) if vis else None),
+        "visible_weight_max": (max(vis) if vis else None),
+        "hidden_weight_min": (min(hid) if hid else None),
+        "hidden_weight_max": (max(hid) if hid else None),
+        "rows": sorted(rows, key=lambda r: (r["w_file"]
+                     if isinstance(r["w_file"], (int, float)) else 1e18)),
+    }
+    try:
+        p = os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
+                         "real_probe.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2, default=str)
+        _log(f"已 probe 真表↔在线 → {p}")
+    except Exception as exc:  # noqa: BLE001
+        out["dump_error"] = str(exc)
+    return out
+
+
+def cfprefs_suite_write_probe() -> dict:
+    """测：CFPreferences 写域 com.apple.MenuBar 是否被 cfprefsd 受理（能则在线
+    Agent 会收到偏好变更并采信），用无害探针键，写完立即回收。"""
+    probe = "__peasebar_probe__"
+    err = ""
+    try:
+        CFPreferencesSetValue(CFSTR(probe), 1, CFSTR(MENUBAR_SUITE),
+                              kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(CFSTR(MENUBAR_SUITE), kCFPreferencesCurrentUser,
+                                 kCFPreferencesAnyHost)
+    except Exception as exc:  # noqa: BLE001
+        err = f"set:{exc}"
+    back = CFPreferencesCopyValue(CFSTR(probe), CFSTR(MENUBAR_SUITE),
+                                  kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    accepted = back == 1
+    try:
+        CFPreferencesSetValue(CFSTR(probe), None, CFSTR(MENUBAR_SUITE),
+                              kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(CFSTR(MENUBAR_SUITE), kCFPreferencesCurrentUser,
+                                 kCFPreferencesAnyHost)
+    except Exception as exc:  # noqa: BLE001
+        err += f" | cleanup:{exc}"
+    return {"suite": MENUBAR_SUITE, "cfprefs_accepted": accepted,
+            "readback": back, "error": err}
+
+
+def write_real_table(table: dict) -> bool:
+    """直写群容器真表文件（FDA）：只换顶层 TrailingItemPreferredPositions，
+    其余顶层键不动。写前先读一次合并，避免覆盖 Agent 之间新写的项。"""
+    try:
+        with open(real_table_path(), "rb") as f:
+            root = plistlib.loads(f.read())
+    except Exception as exc:  # noqa: BLE001
+        _log(f"写真表前读失败：{exc}")
+        return False
+    if not isinstance(root, dict):
+        root = {}
+    root[POS_TABLE_KEY] = dict(table)
+    blob = plistlib.dumps(root, fmt=plistlib.FMT_BINARY)
+    tmp = real_table_path() + ".peasebar.tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(blob)
+        os.replace(tmp, real_table_path())
+        _log(f"直写真表完成：{len(table)} 条")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _log(f"直写真表失败：{exc}")
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def _stashed_of(owner, title) -> dict:
+    """从在线清单里按 owner/label 找一枚图标，返回 {found, stashed, on_screen}。"""
+    try:
+        from peasebar import inventory
+        items = inventory.list_items()[0]
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+    o = _norm(owner)
+    t = _norm(title)
+    for m in items:
+        if _norm(getattr(m, "owner_bundle_id", "")) != o:
+            continue
+        lab = _norm(getattr(m, "label", ""))
+        if t and t not in lab and lab and lab not in t:
+            continue
+        return {"found": True, "label": getattr(m, "label", ""),
+                "stashed": bool(getattr(m, "stashed", False)),
+                "on_screen": bool(getattr(m, "is_on_screen", True)),
+                "x": (round(m.frame[0], 1) if getattr(m, "frame", None) else None)}
+    return {"found": False}
+
+
+class _KeyProbe:
+    """给 resolve_key 用的最小化假 item（只需 owner/label）。"""
+    def __init__(self, owner, label):
+        self.owner_bundle_id = owner
+        self.label = label
+        self.key_part = label
+
+
+def real_hide_test(owner: str, ident: str, title: str, weight) -> dict:
+    """决定性实验：往「正确的」群容器真表直写一枚图标的权重，等在线 Agent
+    反应，再用 AX 重新读它的 stashed 变化。只改一枚目标键，写完自动还原。
+
+    weight 为 None 时只测「回写原值」能否推动 Agent（验证写入链）。"""
+    import time
+    tbl = read_real_table()
+    # 先洗掉残留的实验脏数据：值为 None 或键里带实验标记的
+    tbl = {k: v for k, v in tbl.items()
+           if v is not None and "__REALHIDE__" not in k
+           and "__peasebar" not in k.lower()}
+    keys = list(tbl.keys())
+    key = resolve_key(_KeyProbe(owner, title), keys) or status_key(owner, ident)
+    orig = tbl.get(key)
+    before = _stashed_of(owner, title)
+    probe = dict(tbl)
+    probe[key] = (orig if weight is None else weight)
+    wrote = write_real_table(probe)
+    time.sleep(18.0)  # 不重启 Agent，只等足够久，测在线 Agent 是否会自己重读表
+    after_tbl = read_real_table()
+    after = _stashed_of(owner, title)
+    # 还原（无论之前成没成，尽量回到原状）
+    if orig is not None:
+        restore = dict(after_tbl)
+        restore[key] = orig
+        write_real_table(restore)
+    return {"key": key, "orig_weight": orig, "target_weight": probe[key],
+            "write_ok": wrote, "weight_in_file_after": after_tbl.get(key),
+            "agent_kept_our_write": (after_tbl.get(key) == probe[key]),
+            "before": before, "after": after}
+
+
+def _relaunch_menu_bar_agent() -> bool:
+    """杀掉 MenuBarAgent（launchd 会自动重拉），迫使它重读真表。
+
+    只重启系统菜单栏代理，不重启目标 App（用户不反感的只是重启目标 App）。"""
+    import subprocess
+    try:
+        subprocess.run(["/usr/bin/pkill", "-x", "MenuBarAgent"], check=False)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _log(f"重启 MenuBarAgent 异常：{exc}")
+        return False
+
+
+def _wait_inventory(timeout=12.0):
+    """轮询等 MenuBarAgent 重拉、图标重新上线（至少 5 枚）；返回最大一次条数。"""
+    import time
+    from peasebar import inventory
+    deadline = time.time() + timeout
+    best = 0
+    while time.time() < deadline:
+        try:
+            items = inventory.list_items()[0]
+            n = sum(1 for m in items
+                    if not getattr(m, "is_stash_button", False))
+            best = max(best, n)
+            if n >= 5:
+                return n
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(0.5)
+    return best
+
+
+def real_hide_agent_test(owner: str, ident: str, title: str, weight) -> dict:
+    """决定性实验：往真表永久写一枚目标权重→重启 MenuBarAgent 重载→
+    看（a）重载后文件里我们的值是否保留（表是否权威），（b）目标图标是否移动/隐藏。
+
+    测完自动还原原值并再次重载，尽量回到原状。"""
+    import time
+    tbl = read_real_table()
+    tbl = {k: v for k, v in tbl.items()
+           if v is not None and "__REAL" not in k and "__peasebar" not in k.lower()}
+    key = resolve_key(_KeyProbe(owner, title), list(tbl.keys())) or status_key(owner, ident)
+    orig = tbl.get(key)
+    before = _stashed_of(owner, title)
+    probe = dict(tbl)
+    probe[key] = weight
+    wrote = write_real_table(probe)
+    _relaunch_menu_bar_agent()
+    time.sleep(2.0)
+    seen = _wait_inventory(12.0)
+    after_tbl = read_real_table()
+    after = _stashed_of(owner, title)
+    result = {"key": key, "orig_weight": orig, "target_weight": weight,
+              "write_ok": wrote, "items_after_reload": seen,
+              "weight_after_reload": after_tbl.get(key),
+              "agent_reload_kept_our_value": (after_tbl.get(key) == weight),
+              "before": before, "after": after,
+              "moved_x": (before.get("x") != after.get("x")),
+              "now_stashed": after.get("stashed")}
+    # 还原原值并再重载一次，回到原状
+    if orig is not None:
+        restore = dict(read_real_table())
+        restore[key] = orig
+        write_real_table(restore)
+        _relaunch_menu_bar_agent()
+    return result
 
 
 def _norm(s: str) -> str:

@@ -1442,6 +1442,46 @@ class SettingsController(NSObject):
                 owner = spec[0] if spec else ""
                 if owner == "__CLEANUP__":
                     r = layout_table.clear_table()
+                elif owner == "__REVEAL__":
+                    o = spec[1] if len(spec) > 1 else ""
+                    t = (spec[2] if len(spec) > 2 else "").lower()
+                    _it = inventory.list_items()[0]
+                    hit = None
+                    for m in _it:
+                        if (m.owner_bundle_id or "").lower() == o.lower() and (
+                                not t or t in (m.label or "").lower()):
+                            hit = m
+                            break
+                    ok = bool(hit is not None and menubar_drag.reveal(hit))
+                    r = {"revealed": ok, "owner": o,
+                         "label": getattr(hit, "label", None)}
+                elif owner == "__REALHIDE__":
+                    o = spec[1] if len(spec) > 1 else owner
+                    ident = spec[2] if len(spec) > 2 else o
+                    title = spec[3] if len(spec) > 3 else ident
+                    w = spec[4] if len(spec) > 4 else None
+                    try:
+                        w = (None if w in (None, "", "None") else float(w))
+                    except ValueError:
+                        w = None
+                    r = layout_table.real_hide_test(o, ident, title, w)
+                elif owner == "__REALAGENT__":
+                    o = spec[1] if len(spec) > 1 else owner
+                    ident = spec[2] if len(spec) > 2 else o
+                    title = spec[3] if len(spec) > 3 else ident
+                    w = spec[4] if len(spec) > 4 else None
+                    try:
+                        w = (None if w in (None, "", "None") else float(w))
+                    except ValueError:
+                        w = None
+                    r = layout_table.real_hide_agent_test(o, ident, title, w)
+                elif owner == "__REALPROBE__":
+                    try:
+                        _it = inventory.list_items()[0]
+                    except Exception:  # noqa: BLE001
+                        _it = []
+                    r = {"real_probe": layout_table.real_probe(_it),
+                         "cfprefs_write": layout_table.cfprefs_suite_write_probe()}
                 elif owner == "__CFWRITE__":
                     ident = spec[1] if len(spec) > 1 else owner
                     title = spec[2] if len(spec) > 2 else ident
