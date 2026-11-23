@@ -1323,6 +1323,92 @@ class SettingsController(NSObject):
         if n:
             print(f"[PeaseBar] 重置：把 {n} 个图标拖回真实菜单栏")
 
+    @objc.python_method
+    def reconcile_real_bar(self):
+        """把已保存的分区一次性镜像到真实菜单栏（启动/授权后调一次）。
+
+        用户痛点「设为弹窗显示的图标还在菜单栏上」的根因：换区只在拖动的
+        那一瞬间镜像到真实菜单栏，启动时从不把「上次保存的布局」重新贴回系统。
+
+        真机取证（macOS 27）：逐枚隐藏靠把图标 ⌘-拖进系统「溢出/收纳区」，
+        但该溢出区容量受菜单栏宽度限制——硬塞超过能容纳的数量会把已收纳的
+        顶出来、形成反复横跳。所以这里：
+        1. 先把系统收纳区折起来（展开态会把隐藏项临时画出来、报成可见）；
+        2. 单趟遍历，一枚枚把「应隐藏却还可见」的第三方图标拖进溢出区；
+        3. 容量护栏：一旦某次隐藏不再让被收纳数上升（说明溢出区满了、再塞
+        会把别的顶出来），立即停止，不去和系统溢出机制打架。
+        在后台线程跑（逐枚 ⌘-拖较慢，不能卡主线程/启动）。
+        """
+        import time
+
+        cfg = sections.load_config()
+        if not cfg.get("real_bar", True):
+            return
+        if not AXIsProcessTrusted():
+            print("[PeaseBar] 启动同步：无辅助功能权限，跳过真实菜单栏镜像")
+            return
+
+        def stashed_count():
+            return sum(1 for m in inventory.list_items()[0]
+                       if getattr(m, "stashed", False) and not m.is_stash_button)
+
+        def pending_keys():
+            out = []
+            for m in inventory.list_items()[0]:
+                if m.is_stash_button or m.stashed:
+                    continue
+                sec = sections.section_of(cfg, sections.item_key(m))
+                if sec in (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN):
+                    out.append(m)
+            return out
+
+        # 1. 折叠系统收纳区
+        inventory.set_stash_revealed(False)
+        time.sleep(0.4)
+
+        # 2/3. 单趟 + 容量护栏
+        before = stashed_count()
+        hidden = 0
+        for target in pending_keys():
+            if not menubar_drag.movable(target):
+                continue
+            try:
+                menubar_drag.hide(target)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] 启动同步隐藏失败（{target.owner_bundle_id}）：{exc}")
+                continue
+            time.sleep(0.5)
+            now = stashed_count()
+            if now > before:
+                before = now
+                hidden += 1
+            else:
+                # 溢出区已满：再塞会把别的顶出来，收手（把这枚重新拖回可见段）
+                print(f"[PeaseBar] 启动同步：溢出区已满（{target.owner_bundle_id} 放不下），停止")
+                try:
+                    menubar_drag.reveal(target)
+                except Exception:  # noqa: BLE001
+                    pass
+                break
+        if hidden:
+            print(f"[PeaseBar] 启动同步：把 {hidden} 个「弹窗/永久隐藏」图标收回真实菜单栏收纳区")
+
+    @objc.python_method
+    def reconcile_real_bar_async(self, delay=1.5):
+        """延后一点、在后台线程跑一次启动同步（等菜单栏把状态项摆稳）。"""
+        import threading
+
+        def _run():
+            import time
+            time.sleep(delay)
+            try:
+                self.reconcile_real_bar()
+            except Exception:  # noqa: BLE001
+                import traceback
+                traceback.print_exc()
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def onLaunchToggle_(self, sender):
         """开机自启开关（SMAppService）：改完以系统回读为准，UI 不自说自话（P95 判据）。"""
         want_on = int(sender.state()) == 1

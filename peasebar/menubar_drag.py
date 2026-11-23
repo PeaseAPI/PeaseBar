@@ -104,24 +104,33 @@ def _notch_mid_x():
 
 
 def _stash_drop_x():
-    """逐枚隐藏的落点 x：拖到系统「收纳/溢出」区即可被隐藏。
+    """逐枚隐藏的落点 x：拖到系统「溢出/收纳」区即可被隐藏。
 
-    两条可用路径（都实测有效）：
-    1. 有刘海 → 拖进刘海中点（无空间，系统自动收进溢出区）；
-    2. 无刘海但溢出按钮在 → 拖到收纳按钮左侧一点，即丢进隐藏段。
+    真机取证：本机有刘海，被收纳项堆在**刘海左侧**（x 小于刘海左缘），
+    拖到刘海中点（死区）反而不生效。所以优先级：
+    1. 已有隐藏簇 → 拖到最左那枚被收纳项的中心（最稳，直接归堆）；
+    2. 无隐藏簇但有刘海 → 拖到刘海左缘外一点（新开辟隐藏位）；
+    3. 无刘海但有收纳按钮 → 拖到收纳按钮左侧。
     都拿不到返回 None（这枚没法逐枚隐藏）。
     """
-    mx = _notch_mid_x()
-    if mx is not None:
-        return mx
     try:
         items, _ = inventory.list_items()
     except Exception:  # noqa: BLE001
-        return None
+        items = []
+    # 1. 已有隐藏簇：拖到最左那枚被收纳项附近，最稳
+    stashed = [m.frame for m in items
+               if getattr(m, "stashed", False) and not m.is_stash_button and m.frame]
+    if stashed:
+        return min(f[0] + f[2] / 2.0 for f in stashed)
+    # 2. 没隐藏簇：有刘海就拖到刘海左侧外
+    from AppKit import NSScreen
+    n = notch_region(NSScreen.mainScreen())
+    if n:
+        return n[0] - 60.0
+    # 3. 无刘海：拖到收纳按钮左侧
     for m in items:
         if getattr(m, "is_stash_button", False) and m.frame:
-            # 收纳按钮左边界外一点 = 隐藏段（实测被收纳项就堆在这条线左侧）
-            return m.frame[0] - 12.0
+            return m.frame[0] - 40.0
     return None
 
 

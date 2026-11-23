@@ -184,6 +184,9 @@ class AppDelegate(NSObject):
         print("[PeaseBar] 控制图标与救援面板就绪（左键图标/⌥⌘B 弹出，点击图标可弹其原生菜单）")
         # 预热快照（T98）：后台采一次，第一次点开面板也能秒出
         self.rescue.prewarm()
+        # 启动同步（用户痛点「设为弹窗显示的图标还在菜单栏」）：把上次保存的分区
+        # 一次性镜像回真实菜单栏（后台线程、稍延，等状态项摆稳且有辅助功能权限）。
+        self.settings.reconcile_real_bar_async()
 
     def _refresh_panel_if_open(self):
         """设置变更后：作废位图缓存并刷新面板（重活在后台，不卡设置窗）。"""
