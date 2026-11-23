@@ -129,32 +129,27 @@ _TAG_SECTIONS = {0: sections.SECTION_VISIBLE, 1: sections.SECTION_HIDDEN,
                  2: sections.SECTION_ALWAYS_HIDDEN}
 
 # 侧栏页签（key, 显示名, 副标题）；key 也写进侧栏按钮的 AXIdentifier 供取证认页。
-# Phase 11：1:1 对标 Thaw 设置窗的 12 页结构（副标题直接抄 Thaw 各窗标题的英文短语）。
-PAGES = (("general", "通用", "开机自启、语言与图标"),
+# 侧栏页签（key, 显示名, 副标题）；key 也写进侧栏按钮的 AXIdentifier 供取证认页。
+# 只留真实生效的功能页（2026-11-24 收缩：外观/工具栏/显示器/模块四页的后端从未
+# 实现，摆着只会让用户拨了没反应——宁少勿假）；visibility 页改为展示真实
+# 隐藏通道状态与自动核对开关，about 页不再提 Thaw（代码已全部自有，仅仿其 UI 观感）。
+PAGES = (("general", "通用", "开机自启、面板与控制图标"),
          ("layout", "布局", "菜单栏显示、弹窗显示与永久隐藏"),
-         ("visibility", "显隐规则", "已隐藏图标如何呈现与收回"),
-         ("appearance", "外观", "颜色、形状与边框"),
-         ("thawbar", "PeaseBar 工具栏", "菜单栏下方的隐藏图标条"),
-         ("display", "显示器", "每块屏幕与空间"),
-         ("shortcuts", "快捷键", "键盘快捷方式"),
+         ("visibility", "显隐规则", "隐藏通道状态与自动核对"),
+         ("shortcuts", "快捷键", "内置键盘快捷方式速查"),
          ("profiles", "配置管理", "已保存的布局方案"),
-         ("modules", "模块", "可独立运行的扩展功能"),
-         ("privacy", "隐私", "权限与网络访问"),
-         ("troubleshoot", "疑难解答", "日志、备份与重置"),
-         ("about", "关于", "版本、更新与致谢"))
+         ("privacy", "隐私", "权限与数据边界"),
+         ("troubleshoot", "疑难解答", "日志、修复与重置"),
+         ("about", "关于", "版本与源码"))
 
-# 侧栏 SF Symbol 图标（对标 Thaw：纯文字页签太素）；系统取不到符号时优雅降级为纯文字
+# 侧栏 SF Symbol 图标（取不到符号时优雅降级为纯文字）
 _PAGE_ICONS = {"general": "gearshape", "layout": "square.grid.2x2",
-               "visibility": "eye", "appearance": "paintbrush", "thawbar": "rectangle.bottomthird.inset.filled",
-               "display": "display", "shortcuts": "keyboard", "profiles": "square.stack.3d.up",
-               "modules": "square.grid.3x2", "privacy": "lock.shield", "troubleshoot": "wrench.and.screwdriver",
-               "about": "info.circle"}
-# 侧栏分组（1:1 对标 Thaw）：首组无小标题，MODULES 只有配置管理，MANAGE 四项。
-# 首组用空串当标题，_build_sidebar 见空串就不画小标题行。
-_SIDEBAR_GROUPS = (("", ("general", "layout", "visibility", "appearance",
-                         "thawbar", "display", "shortcuts")),
-                   ("模块", ("profiles",)),
-                   ("管理", ("modules", "privacy", "troubleshoot", "about")))
+               "visibility": "eye", "shortcuts": "keyboard",
+               "profiles": "square.stack.3d.up", "privacy": "lock.shield",
+               "troubleshoot": "wrench.and.screwdriver", "about": "info.circle"}
+# 侧栏分组：首组无小标题（_build_sidebar 见空串就不画小标题行），「管理」收工具性页面
+_SIDEBAR_GROUPS = (("", ("general", "layout", "visibility", "shortcuts")),
+                   ("管理", ("profiles", "privacy", "troubleshoot", "about")))
 
 # 拖拽：按下后移动多少点算「拖」（小于它当点击，T9 手感与系统一致）
 DRAG_SLOP = 6.0
@@ -234,7 +229,8 @@ def _tabbar(page, options):
 
 
 def _sidebar_symbol(name, label):
-    """侧栏图标：把 15×15 的 SF 符号画进 23×15 的透明画布，右边 8pt 就是图文间距。
+    """侧栏图标：把 15×15 的 SF 符号画进 33×15 的透明画布——左留 10pt 让图标
+    离选中框左缘远一点（用户批评贴边难看），右边 8pt 仍是图文间距。
 
     NSButton 的 image/title 之间那段间距调不了（只给 2pt，看上去糊在一起），而把
     符号本身的 size 拉宽会连图标一起变形，所以拿透明画布垫出间距。
@@ -244,12 +240,12 @@ def _sidebar_symbol(name, label):
     if sym is None:
         return None
     sym.setSize_(NSMakeSize(15, 15))
-    box = NSImage.alloc().initWithSize_(NSMakeSize(23, 15))
+    box = NSImage.alloc().initWithSize_(NSMakeSize(33, 15))
     if box is None:
         sym.setSize_(NSMakeSize(15, 15))
         return sym
     box.lockFocus()
-    sym.drawInRect_(NSMakeRect(0, 0, 15, 15))
+    sym.drawInRect_(NSMakeRect(10, 0, 15, 15))  # 左留 10pt：不再贴选中框左缘
     box.unlockFocus()
     box.setTemplate_(True)  # 跟着 contentTintColor 走（选中白、未选灰）
     return box
@@ -538,6 +534,11 @@ class SettingsController(NSObject):
             # 关掉再打开时一律从布局页起步：分区编辑才是设置窗的主用途，
             # 也让回归探针「开窗就有格子」的假设不依赖上一次停在哪页
             self.page = "layout"
+        # 取证钩子：PEASEBAR_OPEN_PAGE=<页键> 直接开到指定页——真机截页时
+        # 免去辅助功能权限（CGEvent/AX 点击在沙箱里都会被系统静默丢弃）
+        forced = os.environ.get("PEASEBAR_OPEN_PAGE", "")
+        if forced and any(k == forced for k, _l, _s in PAGES):
+            self.page = forced
         self._rebuild()
         self.window.makeKeyAndOrderFront_(None)
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
@@ -1121,6 +1122,16 @@ class SettingsController(NSObject):
             mi.setTag_(idx)
             mi.setRepresentedObject_(sections.item_key(item))
             menu.addItem_(mi)
+        # 同区内前移/后移（用户主诉「编辑前后顺序不順」）：右键哪枚就动哪枚，
+        # 不要求先单击选中再按 ⌥方向键——多一条低门槛路径
+        menu.addItem_(NSMenuItem.separatorItem())
+        for label, delta in (("前移（⌥←）", -1), ("后移（⌥→）", 1)):
+            mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                label, "onMenuReorder:", "")
+            mi.setTarget_(self)
+            mi.setTag_(delta)
+            mi.setRepresentedObject_(sections.item_key(item))
+            menu.addItem_(mi)
         return menu
 
     def _paint_tile(self, btn, selected):
@@ -1304,6 +1315,12 @@ class SettingsController(NSObject):
         key = sender.representedObject()
         self.applyMove_to_(str(key) if key is not None else None,
                           _TAG_SECTIONS.get(sender.tag()))
+
+    def onMenuReorder_(self, sender):
+        """右键菜单项「前移/后移」：作用于菜单项标记的图标（tag 即位移量）。"""
+        key = sender.representedObject()
+        self.reorderSelected_by_(str(key) if key is not None else None,
+                                 sender.tag())
 
     def onPickPage_(self, sender):
         """侧栏切页：通用页先落盘超时输入，再整窗重画。"""
@@ -2797,6 +2814,10 @@ class SettingsController(NSObject):
         ctl = row.get("ctl")
         if ctl and ctl[0] in ("toggles", "buttons"):
             h += 34  # 宽控件另起一带放
+        # 无标题无说明的按钮行（如关于页「源码」块）：标题带是纯空白，压掉
+        if (ctl and ctl[0] == "buttons" and not row.get("title")
+                and not (help_on and row.get("help"))):
+            h = 6 + 34 + self._VPAD
         return h
 
     @objc.python_method
@@ -2851,6 +2872,8 @@ class SettingsController(NSObject):
         ctl_w = {"switch": 52, "popup": 180, "slider": 200, "status": 96}.get(kind, 150)
         right_x = x + w - ctl_w
         band_y = cy if kind not in ("toggles", "buttons") else cy + self._TITLE_H + 30
+        if kind == "buttons" and not (row.get("title") or row.get("help")):
+            band_y = cy + 6  # 无标题按钮行：按钮贴行顶，不再给空标题带让位
         if kind == "switch":
             sw = NSSwitch.alloc().initWithFrame_(NSMakeRect(right_x, band_y, 52, 22))
             sw.setState_(1 if self._cfg_get(cfg, ctl[1]) else 0)
@@ -3073,7 +3096,32 @@ class SettingsController(NSObject):
     def onPrefSwitch_(self, sender):
         meta = sender.representedObject()
         key = str(meta["key"])
-        self._persist(key, int(sender.state()) == 1)
+        on = int(sender.state()) == 1
+        self._persist(key, on)
+        if key == "cc_tick_enabled":
+            # 唯一一个需要即时生效的通用开关：停/重挂 app.py 装的 60s 核对定时器
+            try:
+                self._apply_cc_tick(on)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] 设置：自动核对开关生效失败：{exc}")
+
+    @objc.python_method
+    def _apply_cc_tick(self, on):
+        """「每分钟自动核对显隐」开关即时生效：停掉/重挂 60s 定时器。
+        timer 由 app.py 启动时挂到 self.tick_timer；离线（测试）没挂过就只落盘。"""
+        t = getattr(self, "tick_timer", None)
+        if t is not None:
+            t.invalidate()
+            self.tick_timer = None
+        if not on:
+            print("[PeaseBar] 设置：自动核对已停用（60s 定时器已停）")
+            return
+        from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
+        nt = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            60.0, self, "syncCCTick:", None, True)
+        NSRunLoop.mainRunLoop().addTimer_forMode_(nt, NSRunLoopCommonModes)
+        self.tick_timer = nt
+        print("[PeaseBar] 设置：自动核对已开启（60s 定时器已重挂）")
 
     def onPrefPopup_(self, sender):
         meta = sender.representedObject()
@@ -3111,168 +3159,51 @@ class SettingsController(NSObject):
 
     @objc.python_method
     def _spec_general(self):
+        # 只留接了真后端的控件：开机自启（SMAppService）、面板超时、
+        # 显示描述（渲染端读取）、控制图标选择（即时生效）。
+        # 精简模式/Dock 图标/语言/主题/收起 App 菜单等无后端的开关已摘除
+        # ——宁少勿假，拨了没反应的开关比没有更伤体验。
         return [
             _block("应用", [
                 _row_launch(help="开机后自动运行 PeaseBar（SMAppService，以系统回读为准）。"),
                 _row_timeout(help="面板失去焦点或超过该秒数自动收回；0 = 不超时。"),
-                _row_switch("minimal_mode", "精简模式",
-                            help="只显示核心设置并预览分区，其余功能照你之前的设定继续工作。"),
-                _row_switch("show_dock_settings", "设置窗开着时在 Dock 显示图标",
-                            help="关掉后 PeaseBar 不进 Dock、也不出现在最近应用里。"),
-            ]),
-            _block("语言与主题", [
-                _row_popup("app_language", "应用语言",
-                           [("system", "系统默认"), ("zh", "简体中文"), ("en", "English")],
-                           help="用与系统不同的语言显示 PeaseBar。"),
-                _row_seg("theme", "主题",
-                         [("system", "跟随系统"), ("light", "浅色"), ("dark", "深色"), ("black", "纯黑")],
-                         help="作用于设置窗与引导页；纯黑适合 OLED 屏。"),
                 _row_switch("show_help_text", "显示设置描述",
                             help="在每个设置项正下方说明它的作用（就是这一行文字）。"),
             ]),
             _block("PeaseBar 图标", [
-                _row_switch("show_control_icon", "展示 PeaseBar 图标",
-                            help="点击显示隐藏项、右键打开设置。"),
-                _row_cicon(help="选择在菜单栏显示的自定义控制图标。"),
-            ]),
-            _block("菜单栏行为", [
-                _row_tgl("收起 App 菜单", [
-                    ("显示隐藏项时", "hide_app_menus", "空间不足时收起当前 App 的菜单。"),
-                    ("在桌面上（Alpha）", "hide_app_menus_desktop", "点击桌面后盖住 Finder 菜单。"),
-                ], help="通过把 App 菜单移出菜单栏腾出空间；Apple 菜单始终保留。"),
-                _row_switch("rightclick_menubar_menu", "右键菜单栏打开 PeaseBar 菜单",
-                            help="在菜单栏空白处右键打开精简版菜单；若被系统菜单抢占，按住 Option 再右键。"),
+                _row_cicon(help="选择在菜单栏显示的控制图标；点击它呼出面板，右键打开设置。"),
             ]),
         ]
 
     @objc.python_method
     def _spec_visibility(self):
+        """显隐规则页：只讲 PeaseBar 真有的机制——隐藏通道状态 + 自动核对开关。
+        （旧版整页是 Thaw 的「点击/悬停/滚动显示隐藏项」等功能清单，后端从未实现，
+        拨了没反应；2026-11-24 起改为真实内容。）"""
+        ax_ok = bool(AXIsProcessTrusted())
+        writable = ccnative.is_writable()
+        n_side = len(ccnative.last_hidden())
         return [
-            _block("显示已隐藏项目", [
-                _row_tgl("将已隐藏项目显示在", [
-                    ("点击", "reveal_click", "点击菜单栏空白处显示隐藏项。"),
-                    ("悬停", "reveal_hover", "悬停在空白处或 PeaseBar 图标上显示。"),
-                    ("滚动", "reveal_scroll", "在菜单栏滚动/滑动显示。"),
-                ], help="在菜单栏空白区域点击、悬停或滚动，以显示隐藏的菜单栏项目。"),
+            _para("PeaseBar 隐藏图标的机制：把你标为「弹窗显示/永久隐藏」的 App 写进"
+                  "系统「菜单栏」设置里对应的允许开关（ControlCenter 存储），再让系统"
+                  "菜单栏进程重读生效——全程在你 Mac 上完成，App 本体照常运行。"),
+            _block("隐藏通道", [
+                _row_status("按 App 显隐开关", writable, "可用" if writable else "不可用",
+                            help="第三方 App 图标的显隐都走这个系统开关；不可用时显隐会失效。"),
+                _row_status("辅助功能", ax_ok, "已授权" if ax_ok else "未授权",
+                            help="盘点菜单栏项目及其位置的必要权限。"),
+                _row_status("侧车记录", True, f"{n_side} 枚由 PeaseBar 隐藏中",
+                            help="PeaseBar 藏过的 App 记在这本账上；配置改回「菜单栏显示」时按它显回。"),
             ]),
-            _block("显示之后", [
-                _row_popup("hide_again_mode", "再次隐藏项目",
-                           [("click_elsewhere", "当我点击别处"),
-                            ("switch_app", "当我切换 App"), ("never", "从不")],
-                           help="在你点击别处或切换 App 时收回；其菜单开着时不收回。"),
-                _row_slider("keep_open_seconds", "在菜单栏保持打开", 0, 60, " 秒",
-                            help="从搜索或工具栏打开的隐藏项在再次隐藏前停留的时长。"),
-            ]),
-            _block("禅模式", [
-                _row_tgl("开启禅模式的时机", [
-                    ("共享屏幕时", "zen_sharing", "共享/镜像时保持隐藏。"),
-                    ("摄像头或麦克风", "zen_camera", "通话等占用摄像头/麦克风时。"),
-                ], help="禅模式让隐藏项远离视线，避免杂乱栏进入通话或共享画面。"),
-                _row_switch("zen_alert", "摄像头或麦克风开启时提醒",
-                            help="菜单栏下方短暂提示正在使用麦克风的应用；macOS 不告知哪个 App 用摄像头。"),
-            ]),
-            _block("交换显示与隐藏", [
-                _row_switch("show_swap_bar", "显示交换条",
-                            help="菜单栏下方一条带，一键交换显示与隐藏项。"),
-                _row_switch("click_icon_swap", "点击 PeaseBar 图标以交换",
-                            help="点击图标改为交换显示/隐藏，而不是显示隐藏项。"),
-            ]),
-            _block("搜索菜单栏", [
-                _row_popup("panel_layout", "面板布局",
-                           [("compact", "紧凑"), ("extended", "扩展")],
-                           help="Extended 总在搜索框下列出全部项目。"),
-                _row_switch("show_shortcut_bar", "显示快捷键栏",
-                            help="结果下方的那条带：设置、重命名、操作及其快捷键；不显示也照样能用。"),
-                _row_switch("remember_search", "记住上次搜索",
-                            help="打开搜索时带入你上次输入的文本。"),
-            ]),
-            _block("悬停", [
-                _row_tgl("悬停时显示", [
-                    ("名称", "hover_name", "带项目名称的提示。"),
-                    ("详情（测试版）", "hover_details", "小读数显示它报告的内容。"),
-                ], help="指针停在菜单栏项目上时显示其名称或读数。"),
+            _block("自动核对", [
+                _row_switch("cc_tick_enabled", "每分钟自动核对显隐",
+                            help="App 断线重连或系统漂移会让隐藏悄悄失效；开着就每分钟自动对齐你的分区"
+                                 "——无漂移时零动作，菜单栏不闪。"),
             ]),
         ]
 
-    @objc.python_method
-    def _spec_appearance(self):
-        return [
-            _block("形状", [
-                _row_seg("bar_shape", "", [("none", "无"), ("full", "全幅"), ("split", "分隔"), ("notch", "刘海")],
-                         help="该外观覆盖整个菜单栏；编辑时你的菜单栏会随之变化。"),
-            ]),
-            _block("菜单栏", [
-                _row_popup("bar_style", "样式",
-                           [("none", "无"), ("tint", "着色背景"), ("image", "图片背景")],
-                           help="填充整个菜单栏。"),
-            ]),
-            _block("屏幕圆角", [
-                _row_switch("round_corners", "圆角屏幕",
-                            help="在每台显示器的角落画黑，使它们看起来是圆角。"),
-            ]),
-            _block("高级", [
-                _row_switch("separate_light_dark", "为浅色/深色模式分别设置外观",
-                            help="在本页顶部选择在编辑哪一个。"),
-                _row_buttons("这个 Space", [("给这个 Space 独立外观", "onComingSoon:", 170)],
-                             help="拥有独立外观的 Space 只显示你在那里的编辑，其余 Space 沿用共享外观。"),
-            ]),
-            _para("在菜单栏空白处右键即可编辑外观，无需打开设置。"),
-        ]
-
-    @objc.python_method
-    def _spec_thawbar(self):
-        active = self._subtab("thawbar")
-        blocks = [_tabbar("thawbar", ["显示", "外观", "所有显示器"])]
-        if active == 0:
-            blocks += [
-                _block("作用范围", [
-                    _row_popup("bar_panel_display", "显示器",
-                               [("builtin", "内建视网膜显示器"), ("external", "显示器 1")]),
-                ]),
-                _block("行为", [
-                    _row_switch("bar_panel_enabled", "PeaseBar 工具栏",
-                                help="开启后，隐藏项出现在本显示器菜单栏下方的工具栏里。"),
-                    _row_switch("bar_panel_always_show", "始终显示隐藏项目",
-                                help="隐藏项留在菜单栏上，而不是等你去显示。"),
-                ]),
-            ]
-        elif active == 1:
-            blocks += [_para("工具栏外观在「外观」页统一编辑（形状/背景）。")]
-        else:
-            blocks += [_para("工具栏可按显示器分别开启；这里列出所有已连接的显示器。")]
-        return blocks
-
-    @objc.python_method
-    def _spec_display(self):
-        active = self._subtab("display")
-        blocks = [
-            _block("显示", [
-                {"title": "内建视网膜显示器", "help": "刘海，显示器 1",
-                 "ctl": ("buttons", [("识别", "onComingSoon:", 80)])},
-            ]),
-            _tabbar("display", ["间距", "模板", "空间", "宽屏显示器"]),
-        ]
-        if active == 0:
-            blocks += [
-                _para("改变间距会重启菜单栏应用：macOS 只在 App 启动时读取间距，所以 PeaseBar 会退出并重开每个带菜单栏项的 App，未保存的工作可能丢失；每次重启前都会询问。"),
-                _block("菜单栏项目间距", [
-                    _row_popup("when_spacing_changes", "间距变化时",
-                               [("ask", "重启前询问"), ("auto", "自动重启"), ("manual", "手动")]),
-                ]),
-                _block("按显示器", [
-                    _row_slider("spacing", "菜单栏项目间距", -8, 8, " pt",
-                                help="本显示器持有菜单栏时使用；应用改动会重启菜单栏应用，各 App 还会加自己的内边距。"),
-                    _row_buttons("间距没更新？", [("重置为默认间距", "onResetSpacing:", 130)],
-                                 help="把间距恢复为默认值（真实间距重启应用排在后续版本）。"),
-                ]),
-            ]
-        elif active == 1:
-            blocks += [_para("模板：把外观模板应用到本显示器。")]
-        elif active == 2:
-            blocks += [_para("空间：允许每个空间（Space）采用不同的布局配置。")]
-        else:
-            blocks += [_para("宽屏显示器：针对宽屏显示器的额外排布。")]
-        return blocks
+    # （外观/工具栏/显示器三页已删：这些功能的后端从未实现，摆着只会让用户
+    #   拨了没反应；2026-11-24 起 PAGES 与侧栏也不再包含它们。）
 
     @objc.python_method
     def _spec_shortcuts(self):
@@ -3286,11 +3217,15 @@ class SettingsController(NSObject):
             2: [("移到上一区", "⌥↑"), ("移到下一区", "⌥↓"), ("前移", "⌥←"), ("后移", "⌥→"), ("撤销", "⌘Z")],
             3: [("打开工具栏", ""), ("关闭工具栏", "")],
         }
-        rows = [{"title": label, "help": None,
-                 "ctl": ("buttons", [(combo or "录制快捷键", "onComingSoon:", 120)])}
-                for label, combo in rows_map.get(active, [])]
+        # 纯速查展示：不放「录制」假按钮（自定义快捷键无后端，宁少勿假）；
+        # 布局页那组（⌥↑↓←→ / ⌘Z）是真实内置键位，右键菜单里也有同等操作
+        rows = [{"title": f"{label}　{combo}" if combo else label,
+                 "help": None, "ctl": None}
+                for label, combo in rows_map.get(active, [])
+                if combo]  # 没内置键位的项不列（列了就是摆设）
         blocks.append(_block(tabs[active], rows))
-        blocks.append(_para("PeaseBar 当前内置：⌥⌘B 开关救援面板 · ⌥⌘S 打开设置窗。自定义录制排在后续版本，这里不放假按钮。"))
+        blocks.append(_para("PeaseBar 当前内置：⌥⌘B 开关救援面板 · ⌥⌘S 打开设置窗 · "
+                            "布局页 ⌥↑↓←→ 改区/改序、⌘Z 撤销 · 格子右键菜单同样能换区与前移后移。"))
         return blocks
 
     @objc.python_method
@@ -3308,25 +3243,17 @@ class SettingsController(NSObject):
             blocks.append({"heading": "已保存的配置", "rows": prof_rows})
         blocks.append(_block("新建配置", [
             _row_text("new_profile_name", "新建配置名称", "例如：工作 / 会议"),
-            _row_buttons("", [("保存当前配置", "onSaveProfile:", 120), ("导入配置…", "onComingSoon:", 100)]),
+            _row_buttons("", [("保存当前配置", "onSaveProfile:", 120)]),
         ]))
         return blocks
-
-    @objc.python_method
-    def _spec_modules(self):
-        mods = [("profiles", "配置管理", "按显示器/空间/专注模式/快捷键切换已保存布局。"),
-                ("scripts", "脚本", "在配置切换时运行你的脚本。"),
-                ("triggers", "触发器", "某 App 运行时或图标变化时显示指定项目。"),
-                ("widgets", "小组件", "把电量、Wi-Fi 等读数集中在一个菜单栏图标里。")]
-        rows = [_row_switch("modules." + k, name, help=desc) for k, name, desc in mods]
-        return [{"rows": rows}]
 
     @objc.python_method
     def _spec_privacy(self):
         ax_ok = bool(AXIsProcessTrusted())
         rec_ok = bool(capture.has_screen_permission())
         return [
-            _para("数据不出你的 Mac：PeaseBar 不收集任何分析或使用数据；权限检测只在你 Mac 上完成，唯一的网络请求就是下面列出的，且各带开关。"),
+            _para("数据不出你的 Mac：PeaseBar 不收集任何分析或使用数据，"
+                  "也没有任何网络请求——隐藏、显隐与配置全部本地完成。"),
             _block("权限", [
                 _row_status("辅助功能", ax_ok, "已授权" if ax_ok else "未授权",
                             help="检测 Mac 上菜单栏项目及其位置；移动项目以重排或隐藏；代表你点击项目。"),
@@ -3334,27 +3261,10 @@ class SettingsController(NSObject):
                             help="更新 macOS 保存的菜单栏布局，这是它把项目放进各区与顺序的方式。"),
                 _row_status("屏幕录制", rec_ok, "已授权" if rec_ok else "可选",
                             help="显示菜单栏项目的实时预览、取样颜色、并通过视觉识别查找项目。"),
-                _row_status("通知", False, "可选",
-                            help="关闭时 PeaseBar 无法提醒你更新或快捷键变化。"),
                 _row_buttons("", [("打开系统设置", "onOpenAXSettings:", 120)]),
             ]),
-            _block("可更改设置的 App", [
-                _row_switch("app_links_enabled", "允许 App 更改设置",
-                            help="你批准的 App 可用 peasebar:// 链接更改设置；每个新 App 首次都会询问。"),
-            ]),
             _block("PeaseBar 可以看到", [
-                _row_switch("show_crop_regions", "显示裁剪区域",
-                            help="裁剪区域是 PeaseBar 为每个菜单栏项目读取的确切像素；画面只显示一次、从不存盘。"),
                 _row_buttons("", [("立即抓取", "onRecapture:", 100)]),
-            ]),
-            _block("网络访问", [
-                _row_popup("auto_updates", "自动更新",
-                           [("off", "停用"), ("check", "仅检查"), ("download", "检查并下载")],
-                           help="检查只询问是否有新版本；下载会在后台取回。"),
-                _row_switch("whats_new_notes", "「新功能」说明",
-                            help="打开「新功能」时从服务器取最新发行说明并留一份离线副本。"),
-                _row_switch("show_release_notes", "更新后显示发行说明",
-                            help="更新后首次启动自动打开「新功能」。"),
             ]),
         ]
 
@@ -3371,7 +3281,7 @@ class SettingsController(NSObject):
                 ]),
                 _block("问题报告材料", [
                     {"title": "日志", "help": "导出会把日志与抓取样本打包成一个附件文件。",
-                     "ctl": ("buttons", [("在 Finder 中显示日志", "onOpenLog:", 150), ("导出日志", "onComingSoon:", 90)])},
+                     "ctl": ("buttons", [("在 Finder 中显示日志", "onOpenLog:", 150)])},
                     {"title": "项目列表", "help": f"PeaseBar 能看到的每个菜单栏项目（当前 {len(self.items)} 项）。",
                      "ctl": ("buttons", [("重新抓取图标", "onRecapture:", 120)])},
                 ]),
@@ -3399,27 +3309,17 @@ class SettingsController(NSObject):
         return [
             {"heading": "PeaseBar", "rows": [
                 {"title": f"版本 {__version__}",
-                 "help": "macOS 上的开源菜单栏管理工具（对开源项目 Thaw 的移植）。", "ctl": None},
+                 "help": "macOS 菜单栏图标管理工具：把装不下的图标收进弹窗，随时取用。",
+                 "ctl": None},
             ]},
-            _block("更新", [
-                _row_seg("update_channel", "更新频道", [("beta", "测试版"), ("alpha", "内测版")]),
-                _row_seg("auto_updates", "自动更新", [("off", "停用"), ("check", "仅检查"), ("download", "检查并下载")]),
-                _row_buttons("", [("立即检查", "onComingSoon:", 100), ("新功能", "onComingSoon:", 100)]),
+            _block("源码", [
+                _row_buttons("", [("复制版本信息", "onCopyVersion:", 120),
+                              ("打开源码仓库", "onOpenRepo:", 120)]),
             ]),
-            _block("源码与鸣谢", [
-                _row_buttons("", [("复制版本信息", "onCopyVersion:", 120), ("打开源码仓库", "onOpenRepo:", 120)]),
-            ]),
-            _para("Copyright © 2026 Pease。基于 Thaw（Copyright © Toni Förster et al.，GPL-3.0）。"),
+            _para("Copyright © 2026 Pease。"),
         ]
 
     # ---------- 新增 action：配置管理、间距、诚实占位 ----------
-
-    def onComingSoon_(self, sender):
-        try:
-            label = str(sender.title())
-        except Exception:  # noqa: BLE001
-            label = "按钮"
-        print(f"[PeaseBar] 设置：“{label}”对应的功能排在后续版本")
 
     def onSaveProfile_(self, sender):
         """把当前分区+顺序存为一个命名配置（写入 prefs.profiles）。"""

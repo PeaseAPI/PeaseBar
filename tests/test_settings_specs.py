@@ -35,11 +35,11 @@ def _iter_rows(block):
 
 
 class TestSidebarStructure(unittest.TestCase):
-    def test_pages_are_twelve_thaw_pages(self):
+    def test_pages_are_real_eight(self):
+        """只留真实生效的页（外观/工具栏/显示器/模块四页后端从未实现，已摘）。"""
         keys = [k for k, _l, _s in settings.PAGES]
-        self.assertEqual(keys, ["general", "layout", "visibility", "appearance",
-                                "thawbar", "display", "shortcuts", "profiles",
-                                "modules", "privacy", "troubleshoot", "about"])
+        self.assertEqual(keys, ["general", "layout", "visibility", "shortcuts",
+                                "profiles", "privacy", "troubleshoot", "about"])
 
     def test_sidebar_groups_cover_every_page(self):
         listed = [k for _g, keys in settings._SIDEBAR_GROUPS for k in keys]
@@ -47,7 +47,7 @@ class TestSidebarStructure(unittest.TestCase):
 
     def test_sidebar_group_labels_chinese(self):
         labels = [g for g, _k in settings._SIDEBAR_GROUPS]
-        self.assertEqual(labels, ["", "模块", "管理"])
+        self.assertEqual(labels, ["", "管理"])
 
     def test_ui_strings_no_english(self):
         """用户定调全中文：页名/副标题/分组标题不得再出现英文文案（品牌名除外）。"""
@@ -106,13 +106,44 @@ class TestPageSpecs(unittest.TestCase):
 
     def test_tabbar_specs_switch_content(self):
         # 有子页签的页：切不同子页都应产出合法块，不抛异常
-        for key in ("thawbar", "display", "shortcuts", "troubleshoot"):
+        for key in ("shortcuts", "troubleshoot"):
             for idx in range(4):
                 if not hasattr(self.ctrl, "_subtabs"):
                     self.ctrl._subtabs = {}
                 self.ctrl._subtabs[key] = idx
                 blocks = getattr(self.ctrl, "_spec_" + key)()
                 self.assertIsInstance(blocks, list)
+
+
+class TestReorderMenu(unittest.TestCase):
+    def setUp(self):
+        from types import SimpleNamespace
+        self.ctrl = _make_controller()
+        self.item = SimpleNamespace(owner_bundle_id="com.example.app",
+                                    label="示例", key_part="示例")
+
+    def test_menu_has_move_and_reorder_items(self):
+        """右键菜单 = 三区移区（⌘1/2/3）+ 分隔线 + 前移/后移（同区改序）。"""
+        from peasebar import sections
+        menu = self.ctrl._menu_for(self.item, sections.SECTION_VISIBLE)
+        items = [menu.itemAtIndex_(i) for i in range(menu.numberOfItems())]
+        self.assertEqual(len(items), 6)  # 3 移区 + 分隔线 + 前移 + 后移
+        self.assertTrue(items[3].isSeparatorItem())
+        for i, tag in ((0, 0), (1, 1), (2, 2)):
+            self.assertEqual(str(items[i].action()), "onMoveSection:")
+            self.assertEqual(items[i].tag(), tag)
+        for i, delta in ((4, -1), (5, 1)):
+            self.assertEqual(str(items[i].action()), "onMenuReorder:")
+            self.assertEqual(items[i].tag(), delta)
+            self.assertEqual(str(items[i].representedObject()),
+                             sections.item_key(self.item))
+
+    def test_move_items_reflect_current_section(self):
+        """当前区那一项打勾，其余不勾。"""
+        from peasebar import sections
+        menu = self.ctrl._menu_for(self.item, sections.SECTION_HIDDEN)
+        states = [menu.itemAtIndex_(i).state() for i in range(3)]
+        self.assertEqual(states, [0, 1, 0])
 
 
 if __name__ == "__main__":

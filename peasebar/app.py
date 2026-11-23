@@ -22,7 +22,7 @@ from AppKit import (
 )
 from Foundation import (NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer, NSURL)
 
-from peasebar import __version__, hotkeys
+from peasebar import __version__, hotkeys, sections
 from peasebar.control_item import ControlItem
 
 # 单实例哨兵端口（仅本机回环，无安全边界，只用于判重）
@@ -199,10 +199,16 @@ class AppDelegate(NSObject):
         # 周期核对（60s）：App 断线重连重建图标/系统重写记录会让隐藏悄悄失效
         # （真机实证：Synology Drive Client 隐藏后重现）。无漂移时幂等零动作
         # （不写盘、不重启 Agent、菜单栏不闪），有漂移才在后台收回来。
-        tick = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-            60.0, self.settings, "syncCCTick:", None, True)
-        NSRunLoop.mainRunLoop().addTimer_forMode_(tick, NSRunLoopCommonModes)
-        print("[PeaseBar] CC 周期核对已挂（60s，无漂移零动作）")
+        # 显隐规则页的「每分钟自动核对显隐」开关控制它（关掉则不挂，设置窗里
+        # 再开时由 _apply_cc_tick 重挂并写回 self.settings.tick_timer）。
+        if sections.get_pref(sections.load_config(), "cc_tick_enabled") is False:
+            print("[PeaseBar] CC 自动核对：已按配置停用（显隐规则页可重新开启）")
+        else:
+            tick = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                60.0, self.settings, "syncCCTick:", None, True)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(tick, NSRunLoopCommonModes)
+            self.settings.tick_timer = tick
+            print("[PeaseBar] CC 周期核对已挂（60s，无漂移零动作）")
 
     def _refresh_panel_if_open(self):
         """设置变更后：作废位图缓存并刷新面板（重活在后台，不卡设置窗）。"""

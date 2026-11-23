@@ -300,6 +300,7 @@ def store_order(cfg, items):
 # 暂无后端的键先落盘保留用户选择，后续逐项补接线。
 DEFAULT_PREFS = {
     # 通用
+    "cc_tick_enabled": True,        # 每分钟自动核对显隐（显隐规则页开关，停/挂 60s 定时器）
     "minimal_mode": False,          # 精简模式：只显示核心设置
     "show_dock_settings": True,     # 设置窗开着时在 Dock 显示图标
     "app_language": "system",       # 应用语言
