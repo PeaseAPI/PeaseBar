@@ -87,7 +87,7 @@ from ApplicationServices import AXIsProcessTrusted
 
 import ServiceManagement as SM
 
-from peasebar import capture, inventory, menubar_drag, sections
+from peasebar import capture, inventory, layout_table, menubar_drag, sections
 
 # 方向键的 keyCode（AppKit 的 NS*ArrowFunctionKey 取值，写数字谁也看不懂）
 KEY_LEFT, KEY_RIGHT, KEY_DOWN, KEY_UP = 123, 124, 125, 126
@@ -931,7 +931,50 @@ class SettingsController(NSObject):
         btn_reset.setAction_("onResetLayout:")
         btn_reset.setToolTip_("把弹窗显示/永久隐藏的图标全部带回菜单栏，并清空自定义顺序")
         content.addSubview_(btn_reset)
+
+        # 授权布局表（对标 Thaw「Grant Access to the Menu Bar Layout Table」）：
+        # 逐枚隐藏走「直写权重表」这条正路的前提，就是让用户亲自授权那一个文件。
+        # 已授权时按钮显示状态、再点可重新授权（文件挪位/书签失效时自救）。
+        try:
+            granted = layout_table.has_access()
+        except Exception:  # noqa: BLE001
+            granted = False
+        btn_grant = NSButton.alloc().initWithFrame_(
+            NSMakeRect(EDGE + 96 + 8, top - ROW_H, 132, ROW_H))
+        btn_grant.setTitle_("布局表已授权 ✓" if granted else "授权布局表…")
+        btn_grant.setBezelStyle_(0)
+        btn_grant.setFont_(NSFont.systemFontOfSize_(11))
+        btn_grant.setTarget_(self)
+        btn_grant.setAction_("onGrantLayoutTable:")
+        btn_grant.setToolTip_(
+            "逐枚隐藏改为直写系统菜单栏布局权重表（可逆、不重启、无数量限制）；"
+            "需你亲自选中 group.com.apple.controlcenter.plist 授权这一个文件的访问。")
+        content.addSubview_(btn_grant)
         return content
+
+    def onGrantLayoutTable_(self, sender):
+        """弹一次中文文件选择框，请用户授权布局权重表；成功后刷新按钮。"""
+        ok = layout_table.request_access()
+        print(f"[PeaseBar] 授权布局表：{'成功' if ok else '未授权/取消'}")
+        # 临时诊断：把真实表的顶层键与 menuItemLocations 样例 dump 到 tmp/，
+        # 用于核对状态键格式（匹配不准时据此修正 resolve_key）。
+        if ok:
+            try:
+                import json as _json
+                pos = layout_table.read_positions()
+                dump = {"count": len(pos),
+                        "keys_sample": list(pos.items())[:60]}
+                with open(os.path.join(os.path.expanduser(
+                        "~/Project/PeaseBar/tmp"), "layout_table_dump.json"),
+                        "w", encoding="utf-8") as f:
+                    _json.dump(dump, f, ensure_ascii=False, indent=2)
+                print(f"[PeaseBar] 布局表实测：{len(pos)} 条，已 dump 到 tmp/layout_table_dump.json")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] 布局表 dump 失败：{exc}")
+        # 授权成功即把已保存的布局重新贴回真实菜单栏（走权重表正路）
+        if ok and self.opt("real_bar"):
+            self.reconcile_real_bar_async(delay=0.6)
+        self._rebuild()
 
     @objc.python_method
     def _build_section_bar(self, content, group, sec, top, bar_h=None):
@@ -1315,13 +1358,45 @@ class SettingsController(NSObject):
                 bid = it.owner_bundle_id or ""
                 if bid and not bid.startswith("com.apple."):
                     try:
-                        if menubar_drag.reveal(it):
+                        if self._real_reveal(it):
                             n += 1
                     except Exception as exc:
                         print(f"[PeaseBar] 真实菜单栏同步（重置放出）失败：{exc}")
         self._resync_frames()
         if n:
             print(f"[PeaseBar] 重置：把 {n} 个图标拖回真实菜单栏")
+
+    # ---------- 真实菜单栏显隐的统一入口（优先权重表，回退合成拖） ----------
+
+    @objc.python_method
+    def _real_hide(self, item, always=False):
+        """逐枚隐藏一枚图标：先走布局权重表（正路：可逆、不重启、无数量限制），
+        拿不到授权或匹配不到状态键时，才回退到合成 ⌘-拖（系统溢出区，受容量限制）。
+        """
+        try:
+            if layout_table.has_access() and layout_table.hide(item, always=always):
+                return True
+        except Exception as exc:  # noqa: BLE001 — 权重表任何异常都不该弄崩设置窗
+            print(f"[PeaseBar] 权重表隐藏异常，回退拖拽：{exc}")
+        try:
+            return menubar_drag.movable(item) and menubar_drag.hide(item)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 拖拽隐藏也失败（{getattr(item,'owner_bundle_id','?')}）：{exc}")
+            return False
+
+    @objc.python_method
+    def _real_reveal(self, item):
+        """取消隐藏一枚图标：同样优先权重表，回退拖拽。"""
+        try:
+            if layout_table.has_access() and layout_table.show(item):
+                return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 权重表显示异常，回退拖拽：{exc}")
+        try:
+            return menubar_drag.reveal(item)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 拖拽显示也失败（{getattr(item,'owner_bundle_id','?')}）：{exc}")
+            return False
 
     @objc.python_method
     def reconcile_real_bar(self):
@@ -1330,14 +1405,13 @@ class SettingsController(NSObject):
         用户痛点「设为弹窗显示的图标还在菜单栏上」的根因：换区只在拖动的
         那一瞬间镜像到真实菜单栏，启动时从不把「上次保存的布局」重新贴回系统。
 
-        真机取证（macOS 27）：逐枚隐藏靠把图标 ⌘-拖进系统「溢出/收纳区」，
-        但该溢出区容量受菜单栏宽度限制——硬塞超过能容纳的数量会把已收纳的
-        顶出来、形成反复横跳。所以这里：
-        1. 先把系统收纳区折起来（展开态会把隐藏项临时画出来、报成可见）；
-        2. 单趟遍历，一枚枚把「应隐藏却还可见」的第三方图标拖进溢出区；
-        3. 容量护栏：一旦某次隐藏不再让被收纳数上升（说明溢出区满了、再塞
-        会把别的顶出来），立即停止，不去和系统溢出机制打架。
-        在后台线程跑（逐枚 ⌘-拖较慢，不能卡主线程/启动）。
+        正路（拿到布局权重表授权时）：读一次表→按每枚图标的目标分区批量调
+        权重（隐藏=停车权重、显示=还原正常值）→写一次→广播一次。权重表没有
+        溢出区容量上限，也不靠拖拽，因此一趟到位、不振荡、可逆、不重启 App。
+
+        回退（未授权布局表时）：才用合成 ⌘-拖逐枚塞进系统溢出区，并带容量
+        护栏（一旦不再让被收纳数上升说明溢出区已满，立即收手，别再硬塞）。
+        在后台线程跑（拖拽较慢时不能卡主线程/启动）。
         """
         import time
 
@@ -1348,6 +1422,40 @@ class SettingsController(NSObject):
             print("[PeaseBar] 启动同步：无辅助功能权限，跳过真实菜单栏镜像")
             return
 
+        # ---- 正路：布局权重表一趟批量写 ----
+        try:
+            authorized = layout_table.has_access()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 启动同步：查布局表授权异常：{exc}")
+            authorized = False
+        if authorized:
+            keys = list(layout_table.read_positions().keys())
+            if not keys:
+                print("[PeaseBar] 启动同步：布局表里没有任何状态键，回退拖拽")
+            else:
+                assignments = {}
+                for m in inventory.list_items()[0]:
+                    if m.is_stash_button:
+                        continue
+                    bid = m.owner_bundle_id or ""
+                    if not bid or bid.startswith("com.apple."):
+                        continue
+                    k = layout_table.resolve_key(m, keys)
+                    if not k:
+                        continue
+                    sec = sections.section_of(cfg, sections.item_key(m))
+                    assignments[k] = ("hidden" if sec == sections.SECTION_HIDDEN
+                                      else "always_hidden" if sec == sections.SECTION_ALWAYS_HIDDEN
+                                      else "visible")
+                if assignments:
+                    ok = layout_table.apply_plan(assignments)
+                    print(f"[PeaseBar] 启动同步：权重表单趟写入 {len(assignments)} 枚（成功={ok}）")
+                    self._resync_frames()
+                else:
+                    print("[PeaseBar] 启动同步：没有需要镜像到权重表的第三方图标")
+                return
+
+        # ---- 回退：合成 ⌘-拖 + 容量护栏 ----
         def stashed_count():
             return sum(1 for m in inventory.list_items()[0]
                        if getattr(m, "stashed", False) and not m.is_stash_button)
@@ -1391,7 +1499,7 @@ class SettingsController(NSObject):
                     pass
                 break
         if hidden:
-            print(f"[PeaseBar] 启动同步：把 {hidden} 个「弹窗/永久隐藏」图标收回真实菜单栏收纳区")
+            print(f"[PeaseBar] 启动同步（拖拽回退）：把 {hidden} 个「弹窗/永久隐藏」图标收回真实菜单栏收纳区")
 
     @objc.python_method
     def reconcile_real_bar_async(self, delay=1.5):
@@ -2464,10 +2572,10 @@ class SettingsController(NSObject):
         did = False
         try:
             if target in (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN):
-                did = menubar_drag.movable(item) and menubar_drag.hide(item)
+                did = self._real_hide(item, always=(target == sections.SECTION_ALWAYS_HIDDEN))
             elif target == sections.SECTION_VISIBLE:
-                did = menubar_drag.reveal(item)
-        except Exception as exc:  # 真实拖拽任何异常都不能弄崩设置窗
+                did = self._real_reveal(item)
+        except Exception as exc:  # 真实菜单栏同步任何异常都不能弄崩设置窗
             print(f"[PeaseBar] 真实菜单栏同步（移区）失败：{exc}")
         if did:
             self._resync_frames()
