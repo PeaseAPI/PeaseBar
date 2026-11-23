@@ -5,7 +5,7 @@
 只做纯逻辑校验（不调 AppKit 建视图），守住「按 Thaw 截图 1:1 重写」的骨架：
 - 每个非布局页都有 _spec_<key>；
 - _spec_* 返回块列表，块键与行/控制件结构合法；
-- 侧栏分组覆盖全部 12 页，且分组名对标 Thaw（首组空、MODULES、MANAGE）。
+- 侧栏分组覆盖全部 12 页，且分组名已中文化（首组空、模块、管理）。
 """
 import unittest
 
@@ -45,9 +45,22 @@ class TestSidebarStructure(unittest.TestCase):
         listed = [k for _g, keys in settings._SIDEBAR_GROUPS for k in keys]
         self.assertEqual(sorted(listed), sorted(k for k, _l, _s in settings.PAGES))
 
-    def test_sidebar_group_labels_match_thaw(self):
+    def test_sidebar_group_labels_chinese(self):
         labels = [g for g, _k in settings._SIDEBAR_GROUPS]
-        self.assertEqual(labels, ["", "MODULES", "MANAGE"])
+        self.assertEqual(labels, ["", "模块", "管理"])
+
+    def test_ui_strings_no_english(self):
+        """用户定调全中文：页名/副标题/分组标题不得再出现英文文案（品牌名除外）。"""
+        import re
+        allowed = re.compile(r"^(PeaseBar[\u4e00-\u9fff（）/、， ]*)$")
+        for _k, label, sub in settings.PAGES:
+            if not allowed.match(label):
+                self.assertIsNone(re.search(r"[A-Za-z]{2,}", label), f"页名仍有英文：{label}")
+            if not allowed.match(sub):
+                self.assertIsNone(re.search(r"[A-Za-z]{2,}", sub), f"副标题仍有英文：{sub}")
+        for g, _keys in settings._SIDEBAR_GROUPS:
+            if g:
+                self.assertIsNone(re.search(r"[A-Za-z]{2,}", g), f"分组标题仍有英文：{g}")
 
 
 class TestPageSpecs(unittest.TestCase):
