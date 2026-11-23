@@ -442,6 +442,127 @@ def dump_table(path: str | None = None) -> dict:
 
 # ---------- 把我们的图标匹配到表里的状态键 ----------
 
+def status_key(owner: str, identifier: str) -> str:
+    """按 Thaw 口径构造状态键：status:<owner>::<identifier>。"""
+    return f"status:{owner}::{identifier}"
+
+
+def run_hide_experiment(owner: str, identifier: str, title: str) -> dict:
+    """受控实验：往文件顶层 `TrailingItemPreferredPositions` 写多种候选状态键
+    的停车权重，落盘后返回写回读到的结构（判定 Agent 认哪种键）。
+
+    诊断专用；真正权重表的键是 TrailingItemPreferredPositions（Thaw 源码明确）。
+    """
+    POS_KEY = "TrailingItemPreferredPositions"
+    url = _load_bookmark_url()
+    root = _read_whole_plist(url) if url is not None else None
+    table = {}
+    if isinstance(root, dict) and isinstance(root.get(POS_KEY), dict):
+        table = {str(k): v for k, v in root[POS_KEY].items()}
+    cands = [
+        status_key(owner, identifier),
+        status_key(owner, title),
+        f"status:{owner}",
+        owner,
+    ]
+    wrote = {}
+    for i, k in enumerate(dict.fromkeys(cands)):
+        table[k] = HIDDEN_BASE + i
+        wrote[k] = table[k]
+    ok = write_root_key(POS_KEY, table)
+    url2 = _load_bookmark_url()
+    root2 = _read_whole_plist(url2) if url2 is not None else None
+    after = (root2.get(POS_KEY) if isinstance(root2, dict) else None)
+    return {"pos_key": POS_KEY, "write_ok": ok, "wrote": wrote,
+            "after": after, "table_path": table_path()}
+
+
+def write_root_key(key: str, value) -> bool:
+    """读整份 plist → 只改顶层某个键 → 写回（保留其它顶层键），并广播。"""
+    url = _load_bookmark_url()
+    if url is None:
+        _log("写顶层键失败：无授权书签")
+        return False
+    scoped = url.startAccessingSecurityScopedResource()
+    try:
+        root = _read_whole_plist(url)
+        if root is None:
+            return False
+        if value is None:
+            root.pop(key, None)
+        else:
+            root[key] = value
+        blob = plistlib.dumps(root, fmt=plistlib.FMT_BINARY)
+        data = NSData.dataWithBytes_length_(blob, len(blob))
+        did = data.writeToURL_atomically_(url, True)
+        _log(f"写顶层键 {key!r} 完成：落盘={did}")
+        return bool(did)
+    finally:
+        if scoped:
+            url.stopAccessingSecurityScopedResource()
+
+
+def clear_table() -> dict:
+    """实验收尾：把实验写过的顶层权重键（menuItemLocations /
+    TrailingItemPreferredPositions）整键删除，恢复到未自定义状态。
+
+    仅当这些顶层键是实验新增（原本不存在）时删掉是安全的；其它顶层键不动。
+    """
+    removed = {}
+    for k in ("menuItemLocations", "TrailingItemPreferredPositions"):
+        removed[k] = write_root_key(k, None)
+    url = _load_bookmark_url()
+    root = _read_whole_plist(url) if url is not None else None
+    return {"removed": removed, "top_level_keys":
+            (list(root.keys()) if isinstance(root, dict) else None),
+            "table_path": table_path()}
+
+
+def cfprefs_write_probe(owner: str, title: str) -> dict:
+    """决定性测试：用 CFPreferences（非直写文件）往 group suite 写一个探针
+    键→同步→读回，判断 cfprefsd 是否受理第三方进程写这个套件（能则 Agent 会收到
+    偏好变更通知），然后删探针。只影响一个临时键，不扰乱现有布局。
+    """
+    probe_key = "menuItemLocations"
+    key = status_key(owner, title)
+    before = CFPreferencesCopyValue(CFSTR(probe_key), CFSTR(SUITE),
+                                    kCFPreferencesCurrentUser,
+                                    kCFPreferencesAnyHost)
+    payload = dict(before) if isinstance(before, dict) else {}
+    payload = {str(k): v for k, v in payload.items()}
+    payload[key] = HIDDEN_BASE
+    err = ""
+    try:
+        CFPreferencesSetValue(CFSTR(probe_key), payload, CFSTR(SUITE),
+                              kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(CFSTR(SUITE), kCFPreferencesCurrentUser,
+                                 kCFPreferencesAnyHost)
+    except Exception as exc:  # noqa: BLE001
+        err = str(exc)
+    readback = CFPreferencesCopyValue(CFSTR(probe_key), CFSTR(SUITE),
+                                      kCFPreferencesCurrentUser,
+                                      kCFPreferencesAnyHost)
+    accepted = isinstance(readback, dict) and key in {str(k) for k in readback.keys()}
+    # 回收探针
+    try:
+        if isinstance(before, dict):
+            CFPreferencesSetValue(CFSTR(probe_key), before, CFSTR(SUITE),
+                                  kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        else:
+            CFPreferencesSetValue(CFSTR(probe_key), None, CFSTR(SUITE),
+                                  kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(CFSTR(SUITE), kCFPreferencesCurrentUser,
+                                 kCFPreferencesAnyHost)
+    except Exception as exc:  # noqa: BLE001
+        err += f" | cleanup:{exc}"
+    return {"suite": SUITE, "probe_key": probe_key, "wrote": key,
+            "cfprefs_accepted": accepted,
+            "readback_type": type(readback).__name__,
+            "readback_count": (len(readback) if isinstance(readback, dict) else None),
+            "before_type": type(before).__name__,
+            "error": err}
+
+
 def _norm(s: str) -> str:
     return (s or "").lower().strip()
 

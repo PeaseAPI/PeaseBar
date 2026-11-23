@@ -1431,6 +1431,34 @@ class SettingsController(NSObject):
         except Exception as exc:  # noqa: BLE001
             print(f"[PeaseBar] 启动同步：dump 在线清单异常：{exc}")
 
+        # 诊断：若 tmp/peasebar_exp_hide 存在，跑一次受控隐藏实验（写多种候选
+        # 状态键），把结果落 tmp/peasebar_exp_result.json，然后删掉触发文件。
+        try:
+            trig = os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
+                                "peasebar_exp_hide")
+            if os.path.exists(trig):
+                import json as _json
+                spec = open(trig, encoding="utf-8").read().strip().split("\t")
+                owner = spec[0] if spec else ""
+                if owner == "__CLEANUP__":
+                    r = layout_table.clear_table()
+                elif owner == "__CFWRITE__":
+                    ident = spec[1] if len(spec) > 1 else owner
+                    title = spec[2] if len(spec) > 2 else ident
+                    r = layout_table.cfprefs_write_probe(ident, title)
+                else:
+                    ident = spec[1] if len(spec) > 1 else owner
+                    title = spec[2] if len(spec) > 2 else ident
+                    r = layout_table.run_hide_experiment(owner, ident, title)
+                with open(os.path.join(os.path.dirname(trig),
+                                       "peasebar_exp_result.json"), "w",
+                          encoding="utf-8") as f:
+                    _json.dump(r, f, ensure_ascii=False, indent=2, default=str)
+                os.remove(trig)
+                print(f"[PeaseBar] 启动同步：隐藏实验已跑，结果落 peasebar_exp_result.json")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 启动同步：隐藏实验异常：{exc}")
+
         cfg = sections.load_config()
         if not cfg.get("real_bar", True):
             return
