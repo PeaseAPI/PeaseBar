@@ -960,15 +960,7 @@ class SettingsController(NSObject):
         # 用于核对状态键格式（匹配不准时据此修正 resolve_key）。
         if ok:
             try:
-                import json as _json
-                pos = layout_table.read_positions()
-                dump = {"count": len(pos),
-                        "keys_sample": list(pos.items())[:60]}
-                with open(os.path.join(os.path.expanduser(
-                        "~/Project/PeaseBar/tmp"), "layout_table_dump.json"),
-                        "w", encoding="utf-8") as f:
-                    _json.dump(dump, f, ensure_ascii=False, indent=2)
-                print(f"[PeaseBar] 布局表实测：{len(pos)} 条，已 dump 到 tmp/layout_table_dump.json")
+                layout_table.dump_table()
             except Exception as exc:  # noqa: BLE001
                 print(f"[PeaseBar] 布局表 dump 失败：{exc}")
         # 授权成功即把已保存的布局重新贴回真实菜单栏（走权重表正路）
@@ -1414,6 +1406,30 @@ class SettingsController(NSObject):
         在后台线程跑（拖拽较慢时不能卡主线程/启动）。
         """
         import time
+
+        # 诊断：不论下面各守卫能不能过，先落一份真实表 + 访问链诊断（只需
+        # 书签+TCC 文件权限，不依赖辅助功能），便于离线核对权限断点与 key 格式。
+        try:
+            layout_table.dump_table()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 启动同步：dump 布局表异常：{exc}")
+        # 诊断：把在线第三方图标清单（owner/label/key_part）落一份，供构造
+        # 状态键 status:<owner>::<identifier> 时核对真实拼法。
+        try:
+            import json as _json
+            items = inventory.list_items()[0]
+            rec = [{"owner_app": m.owner_app, "owner_bundle_id": m.owner_bundle_id,
+                    "label": m.label, "key_part": m.key_part, "role": m.role,
+                    "stashed": bool(getattr(m, "stashed", False)),
+                    "is_stash_button": bool(m.is_stash_button)}
+                   for m in items]
+            with open(os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
+                                   "live_inventory.json"), "w",
+                      encoding="utf-8") as f:
+                _json.dump(rec, f, ensure_ascii=False, indent=2)
+            print(f"[PeaseBar] 启动同步：已 dump 在线图标清单 {len(rec)} 项")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 启动同步：dump 在线清单异常：{exc}")
 
         cfg = sections.load_config()
         if not cfg.get("real_bar", True):

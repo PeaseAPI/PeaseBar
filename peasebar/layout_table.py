@@ -27,6 +27,8 @@ import plistlib
 
 from Foundation import (NSURL, NSData,
                         CFPreferencesSetValue, CFPreferencesSynchronize,
+                        CFPreferencesCopyAppValue, CFPreferencesCopyValue,
+                        CFPreferencesCopyKeyList,
                         CFSTR, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
 
 # 停车权重常量（与系统 PositionHideBackend 完全一致）
@@ -104,10 +106,21 @@ def _load_bookmark_url():
     except Exception:  # noqa: BLE001
         return None
     stale = None
-    url, err = NSURL.URLByResolvingBookmarkData_options_relativeToURL_bookmarkDataIsStale_error_(
+    # 该类方法有一个返回对象 + 两个出参（bookmarkDataIsStale、error），
+    # pyobjc 会把它们打包成 3 元组 (url, stale, err) 返回，必须按 3 个解。
+    res = NSURL.URLByResolvingBookmarkData_options_relativeToURL_bookmarkDataIsStale_error_(
         data, _RESOLVE_SCOPE, None, stale, None)
+    if isinstance(res, tuple):
+        url = res[0]
+        err = res[-1]
+        stale = res[1] if len(res) >= 3 else None
+    else:
+        url = res
+        err = None
     if url is None:
         _log(f"书签解析失败：{err}")
+    elif stale:
+        _log("书签已失效（stale），需重新授权布局表")
     return url
 
 
@@ -241,6 +254,190 @@ def relayout() -> None:
                                  kCFPreferencesAnyHost)
     except Exception as exc:  # noqa: BLE001
         _log(f"relayout 同步异常：{exc}")
+
+
+def _probe_cfprefs() -> dict:
+    """用 CFPreferences 在多个候选域/键上探一次，定位真正的权重表。
+
+    诊断用：把每个 {域 × 键} 的 CFPreferencesCopyAppValue 结果、以及域的全部键列表
+    都落到文件，看哪个组合返回 {status:...: 权重} 字典。
+    """
+    domains = [
+        "com.apple.controlcenter",
+        "group.com.apple.controlcenter",
+    ]
+    keys = [
+        "TrailingItemPreferredPositions",
+        "menuItemLocations",
+        "TrailingItemPreferredPositions ",
+    ]
+    out = {}
+    for dom in domains:
+        entry = {}
+        for key in keys:
+            # 两种 API 各试：CopyAppValue（应用域）与 CopyValue（套件域 + user/host）。
+            try:
+                val = CFPreferencesCopyAppValue(CFSTR(key), CFSTR(dom))
+                if val is None:
+                    entry["CopyAppValue:" + key] = None
+                elif isinstance(val, dict):
+                    entry["CopyAppValue:" + key] = {
+                        "type": "dict", "count": len(val),
+                        "sample": {str(k): v for k, v in
+                                   list(val.items())[:8]}}
+                else:
+                    entry["CopyAppValue:" + key] = {
+                        "type": type(val).__name__, "value": str(val)[:120]}
+            except Exception as exc:  # noqa: BLE001
+                entry["CopyAppValue:" + key] = f"异常：{exc}"
+            try:
+                val2 = CFPreferencesCopyValue(CFSTR(key), CFSTR(dom),
+                                              kCFPreferencesCurrentUser,
+                                              kCFPreferencesAnyHost)
+                if val2 is None:
+                    entry["CopyValue:" + key] = None
+                elif isinstance(val2, dict):
+                    entry["CopyValue:" + key] = {
+                        "type": "dict", "count": len(val2),
+                        "sample": {str(k): v for k, v in
+                                   list(val2.items())[:8]}}
+                else:
+                    entry["CopyValue:" + key] = {
+                        "type": type(val2).__name__, "value": str(val2)[:120]}
+            except Exception as exc:  # noqa: BLE001
+                entry["CopyValue:" + key] = f"异常：{exc}"
+        # 域的全部键（判断到底有哪些偏好驻留）
+        try:
+            kl = CFPreferencesCopyKeyList(CFSTR(dom), kCFPreferencesCurrentUser,
+                                          kCFPreferencesAnyHost)
+            entry["__all_keys__"] = [str(k) for k in (kl or [])]
+        except Exception as exc:  # noqa: BLE001
+            entry["__all_keys__"] = f"异常：{exc}"
+        out[dom] = entry
+    return out
+
+
+def _jsonable(obj, _depth=0):
+    """把 plist 解析出的结构递归转成 JSON 可序列化。
+
+    对 bytes 值会尝试再当 plist 解一次（菜单栏权重表就藏在 trackedApplications
+    这个 NSKeyedArchiver 归档块里），最多往下钻 3 层，避免无限递归。
+    """
+    if isinstance(obj, dict):
+        return {str(k): _jsonable(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v, _depth + 1) for v in obj]
+    if isinstance(obj, (bytes, bytearray)):
+        # 试着把内层归档（bplist/NSKeyedArchiver）解出来，方便定位权重
+        if _depth < 3:
+            try:
+                inner = plistlib.loads(bytes(obj))
+                return {"__nested_plist__": _jsonable(inner, _depth + 1)}
+            except Exception:  # noqa: BLE001
+                pass
+        return f"<bytes {len(obj)}>"
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    return str(obj)
+
+
+def dump_table(path: str | None = None) -> dict:
+    """把真实布局表结构 + 完整访问链诊断落到文件（诊断用，不参与业务）。
+
+    只有签名后的 App 进程能读到这张 TCC 保护表，命令行读不了；因此把诊断
+    做进 App 内、写到一个固定文件，我离线核对两件事：
+    1) 授权链到底断在哪一步（书签缺失 / startAccessing 返回 False / 读回 None）；
+    2) 若读得到，真实状态键的拼法是否匹配 resolve_key。
+    写全顶层键 + menuItemLocations 的完整内容（不只样例），确保一次看清。
+    """
+    import json
+    if path is None:
+        path = os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
+                            "layout_table_dump.json")
+    result = {
+        "table_path": table_path(),
+        "table_path_exists": os.path.exists(table_path()),
+    }
+    # CFPreferences 探针：定位权重表到底在哪个域/键（单独落文件）。
+    try:
+        probe = _probe_cfprefs()
+        pf = os.path.join(os.path.dirname(path), "cfprefs_probe.json")
+        with open(pf, "w", encoding="utf-8") as pff:
+            json.dump(probe, pff, ensure_ascii=False, indent=2, sort_keys=True,
+                      default=str)
+        _log(f"已 dump CFPreferences 探针 → {pf}")
+    except Exception as exc:  # noqa: BLE001
+        result["cfprefs_probe_error"] = str(exc)
+    # 书签是否已持久化
+    from peasebar import sections
+    try:
+        _cfg = sections.load_config()
+        result["bookmark_saved"] = bool(_cfg.get(
+            "prefs", {}).get(BOOKMARK_CFG_KEY))
+    except Exception as exc:  # noqa: BLE001
+        result["bookmark_saved"] = f"读取异常：{exc}"
+    url = _load_bookmark_url()
+    result["bookmark_resolved"] = url is not None
+    if url is not None:
+        try:
+            result["resolved_path"] = url.path()
+        except Exception:  # noqa: BLE001
+            result["resolved_path"] = None
+        scoped = url.startAccessingSecurityScopedResource()
+        try:
+            result["scoped_access"] = bool(scoped)
+            # 直接试探 NSData 读，单独记录成功与否
+            data = NSData.dataWithContentsOfURL_(url)
+            result["nsdata_read_bytes"] = (len(data) if data is not None else None)
+            root = _read_whole_plist(url)
+            if root is None:
+                result["error"] = "读文件失败（scoped 访问未生效？）"
+                # 再用裸 open 探一次，拿 errno 佐证 TCC 是否真的放行
+                try:
+                    with open(table_path(), "rb") as _f:
+                        result["raw_open_bytes"] = len(_f.read())
+                except OSError as oe:
+                    result["raw_open_errno"] = f"{oe.errno}: {oe.strerror}"
+            else:
+                result["top_level_keys"] = list(root.keys())
+                loc = root.get(TABLE_KEY)
+                if isinstance(loc, dict):
+                    result["table_count"] = len(loc)
+                    # 全量导出 {key: weight}，key 里若含非字符串也转 str 保底
+                    result["menuItemLocations"] = {
+                        str(k): (int(v) if isinstance(v, (int, float)) else str(v))
+                        for k, v in loc.items()}
+                else:
+                    result["menuItemLocations_type"] = type(loc).__name__
+                # 额外落一份完整 plist 结构（递归转成 JSON 可序列化），
+                # 用于定位权重到底存在哪个顶层键/子结构里。
+                try:
+                    full = os.path.join(os.path.dirname(path),
+                                        "layout_table_full.json")
+                    with open(full, "w", encoding="utf-8") as ff:
+                        json.dump(_jsonable(root), ff, ensure_ascii=False,
+                                  indent=2, sort_keys=True, default=str)
+                    _log(f"已 dump 完整 plist → {full}")
+                except Exception as exc:  # noqa: BLE001
+                    result["full_dump_error"] = str(exc)
+        finally:
+            if scoped:
+                url.stopAccessingSecurityScopedResource()
+    try:
+        result["has_access"] = has_access()
+    except Exception as exc:  # noqa: BLE001
+        result["has_access"] = f"异常：{exc}"
+    if path is None:
+        path = os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
+                            "layout_table_dump.json")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2, sort_keys=True)
+        _log(f"已 dump 真实布局表 → {path}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"dump 写入失败：{exc}")
+    return result
 
 
 # ---------- 把我们的图标匹配到表里的状态键 ----------
