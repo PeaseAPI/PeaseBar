@@ -407,6 +407,61 @@ def _probe_menubar_container() -> dict:
     return out
 
 
+def menubar_table_file() -> str | None:
+    """容器里真正的布局表 plist 路径（MenuBarAgent 自己的 com.apple.MenuBar.plist）。
+    FDA 才能读；找不到返回 None。"""
+    hit = None
+    try:
+        for root, _dirs, files in os.walk(menubar_container_dir()):
+            for fn in files:
+                if fn == "com.apple.MenuBar.plist":
+                    hit = os.path.join(root, fn)
+    except OSError:
+        return None
+    return hit
+
+
+def container_read_weights() -> dict:
+    """读容器真表 TrailingItemPreferredPositions：{状态键: 权重}；不可读返回 {}。"""
+    p = menubar_table_file()
+    if not p:
+        return {}
+    try:
+        with open(p, "rb") as f:
+            parsed = plistlib.loads(f.read())
+        t = parsed.get("TrailingItemPreferredPositions")
+        if isinstance(t, dict):
+            return {str(k): v for k, v in t.items()}
+    except Exception as exc:  # noqa: BLE001
+        _log(f"读容器真表失败：{exc}")
+    return {}
+
+
+def container_write_weights(updates: dict) -> dict:
+    """把 {状态键: 权重} 写进容器真表（值为 None 则删除该键），保留其余顶层键。
+
+    写完必须重启 MenuBarAgent 才会被采纳（在线 Agent 不监听文件变更，真机取证）。
+    """
+    p = menubar_table_file()
+    if not p:
+        return {"ok": False, "why": "找不到容器真表（FDA 未生效？）"}
+    try:
+        with open(p, "rb") as f:
+            root = plistlib.loads(f.read())
+        t = root.setdefault("TrailingItemPreferredPositions", {})
+        for k, v in updates.items():
+            if v is None:
+                t.pop(k, None)
+            else:
+                t[str(k)] = v
+        blob = plistlib.dumps(root, fmt=plistlib.FMT_BINARY)
+        with open(p, "wb") as f:
+            f.write(blob)
+        return {"ok": True, "path": p, "table_count": len(t)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "why": str(exc)}
+
+
 def dump_table(path: str | None = None) -> dict:
     """把真实布局表结构 + 完整访问链诊断落到文件（诊断用，不参与业务）。
 

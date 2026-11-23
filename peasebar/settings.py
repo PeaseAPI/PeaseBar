@@ -1525,6 +1525,19 @@ class SettingsController(NSObject):
                     ident = spec[1] if len(spec) > 1 else owner
                     title = spec[2] if len(spec) > 2 else ident
                     r = layout_table.cfprefs_write_probe(ident, title)
+                elif owner == "__INVENTORY__":
+                    # 只盘点+截图，不动任何图标：拿「此刻」真实收纳/可见状态取证
+                    r = self._inventory_diag()
+                elif owner == "__APPLYALL__":
+                    # 逐枚把「弹窗显示」收进真实收纳区，每步落日志（验容量自增强）
+                    r = self._apply_hidden_all()
+                elif owner == "__PARKTEST__":
+                    # 停车实验：写容器真表权重(≥50000)→重启MenuBarAgent→观察落点
+                    r = self._park_test(spec[1] if len(spec) > 1 else "",
+                                        spec[2] if len(spec) > 2 else "")
+                elif owner == "__PARKRESTORE__":
+                    # 恢复停车实验改过的所有权重 + 清垃圾键 + 重启 Agent
+                    r = self._park_restore_all()
                 else:
                     ident = spec[1] if len(spec) > 1 else owner
                     title = spec[2] if len(spec) > 2 else ident
@@ -1547,10 +1560,6 @@ class SettingsController(NSObject):
 
         # ---- 逐枚隐藏/显示：合成 ⌘-拖 + 容量护栏（真机唯一即时不重启的可靠路）----
         # 取证已证实写权重表需重载 MenuBarAgent 且“显示”不可靠，不再作为启动镜像手段。
-        def stashed_count():
-            return sum(1 for m in inventory.list_items()[0]
-                       if getattr(m, "stashed", False) and not m.is_stash_button)
-
         def pending_keys():
             out = []
             for m in inventory.list_items()[0]:
@@ -1565,32 +1574,30 @@ class SettingsController(NSObject):
         inventory.set_stash_revealed(False)
         time.sleep(0.4)
 
-        # 2/3. 单趟 + 容量护栏
-        before = stashed_count()
+        # 2/3. 增量应用 + 容量护栏：一次收不进不算满（hide 内部已带 3 次重试与
+        # 落点重算），连续 2 枚收不进才停；系统项（com.apple.*）拖不动，跳过不占失败。
+        # 旧版一次失败就收手，导致「设了弹窗显示却一直留在菜单栏上」。
         hidden = 0
+        consec = 0
         for target in pending_keys():
             if not menubar_drag.movable(target):
                 continue
             try:
-                menubar_drag.hide(target)
+                ok = menubar_drag.hide(target)
             except Exception as exc:  # noqa: BLE001
                 print(f"[PeaseBar] 启动同步隐藏失败（{target.owner_bundle_id}）：{exc}")
-                continue
-            time.sleep(0.5)
-            now = stashed_count()
-            if now > before:
-                before = now
+                ok = False
+            time.sleep(0.4)
+            if ok:
                 hidden += 1
+                consec = 0
             else:
-                # 溢出区已满：再塞会把别的顶出来，收手（把这枚重新拖回可见段）
-                print(f"[PeaseBar] 启动同步：溢出区已满（{target.owner_bundle_id} 放不下），停止")
-                try:
-                    menubar_drag.reveal(target)
-                except Exception:  # noqa: BLE001
-                    pass
-                break
+                consec += 1
+                if consec >= 2:
+                    print("[PeaseBar] 启动同步：连续 2 枚收不进（收纳条已满？），停止")
+                    break
         if hidden:
-            print(f"[PeaseBar] 启动同步（拖拽回退）：把 {hidden} 个「弹窗/永久隐藏」图标收回真实菜单栏收纳区")
+            print(f"[PeaseBar] 启动同步：把 {hidden} 个「弹窗/永久隐藏」图标收进真实收纳区")
 
     @objc.python_method
     def reconcile_real_bar_async(self, delay=1.5):
@@ -1607,6 +1614,219 @@ class SettingsController(NSObject):
                 traceback.print_exc()
 
         threading.Thread(target=_run, daemon=True).start()
+
+    @objc.python_method
+    def _inventory_diag(self):
+        """诊断（__INVENTORY__ 触发）：当前真实菜单栏的收纳/可见状态 + 条带截图。
+
+        只读不动：列出已收纳、可见第三方、以及「配置为弹窗显示但仍在可见段」的项，
+        配一张顶部条带 PNG（App 有屏幕录制权限，截到真实像素），结果落 tmp/。
+        """
+        import time as _t
+        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType
+        tmp = os.path.expanduser("~/Project/PeaseBar/tmp")
+        items = inventory.list_items()[0]
+        cfg = sections.load_config()
+
+        def rec(m):
+            return {"app": m.owner_app, "bid": m.owner_bundle_id,
+                    "label": m.label,
+                    "frame": tuple(m.frame) if m.frame else None}
+
+        stashed = [m for m in items if getattr(m, "stashed", False)
+                   and not m.is_stash_button]
+        vis3 = [m for m in items if not getattr(m, "stashed", False)
+                and not m.is_stash_button
+                and (m.owner_bundle_id or "") != "com.apple.MenuBarAgent"]
+        pend = [m for m in vis3
+                if sections.section_of(cfg, sections.item_key(m)) in
+                (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN)]
+        shot = os.path.join(tmp, "menubar_strip.png")
+        shot_ok = False
+        try:
+            s = NSScreen.mainScreen().frame()
+            img = Quartz.CGWindowListCreateImage(
+                Quartz.CGRectMake(0, 0, int(s.size.width), 40),
+                Quartz.kCGWindowListOptionOnScreenOnly,
+                Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
+            if img is not None:
+                rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
+                if rep is not None:
+                    data = rep.representationUsingType_properties_(NSPNGFileType, None)
+                    shot_ok = bool(data.writeToFile_atomically_(shot, True))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 诊断截图失败：{exc}")
+        return {"time": _t.strftime("%H:%M:%S"),
+                "screenshot": shot if shot_ok else None,
+                "stashed": [rec(m) for m in stashed],
+                "visible_3rd": [rec(m) for m in vis3],
+                "configured_hidden_still_visible": [rec(m) for m in pend]}
+
+    @objc.python_method
+    def _apply_hidden_all(self):
+        """取证（__APPLYALL__ 触发）：把配置为弹窗显示且仍可见的第三方图标逐枚
+        收进真实收纳区，每步落日志——验证「容量随可见区变空自增强」假设。
+
+        与启动同步的悲观护栏不同：一次收不进不算满（hide 内部已带 3 次重试与
+        落点重算），连续 2 枚收不进才停。系统项（com.apple.*）对 ⌘-拖抵抗、
+        拖不动，单独记 skip，不占失败计数。
+        """
+        import time
+        inventory.set_stash_revealed(False)
+        time.sleep(0.5)
+        cfg = sections.load_config()
+        log, tried = [], set()
+        hidden_n = skip_n = fail_n = 0
+        consec = 0
+        for _round in range(24):
+            items = inventory.list_items()[0]
+            target = None
+            for m in items:
+                if m.is_stash_button or getattr(m, "stashed", False):
+                    continue
+                k = sections.item_key(m)
+                if k in tried:
+                    continue
+                if sections.section_of(cfg, k) in (
+                        sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN):
+                    target = m
+                    break
+            if target is None:
+                log.append({"step": _round, "result": "done",
+                            "note": f"隐藏 {hidden_n}，跳过 {skip_n}，失败 {fail_n}"})
+                break
+            tried.add(sections.item_key(target))
+            if not menubar_drag.movable(target):
+                skip_n += 1
+                log.append({"step": _round,
+                            "skip": f"{target.owner_app}/{target.label}",
+                            "why": "系统项对 ⌘-拖抵抗，拖不动"})
+                continue
+            ok = menubar_drag.hide(target)
+            time.sleep(0.5)
+            fresh = menubar_drag._find(target)
+            now_stashed = bool(getattr(fresh, "stashed", False)) if fresh else False
+            log.append({"step": _round,
+                        "hide": f"{target.owner_app}/{target.label}",
+                        "drag_ok": bool(ok), "verified_stashed": now_stashed})
+            if now_stashed:
+                hidden_n += 1
+                consec = 0
+            else:
+                fail_n += 1
+                consec += 1
+                if consec >= 2:
+                    log.append({"step": _round, "result": "stopped",
+                                "note": "连续 2 枚收不进：溢出区可能真满"})
+                    break
+        items = inventory.list_items()[0]
+        return {"hidden_applied": hidden_n, "skipped": skip_n, "failed": fail_n,
+                "log": log,
+                "final_stashed": [f"{m.owner_app}/{m.label}" for m in items
+                                  if getattr(m, "stashed", False)
+                                  and not m.is_stash_button],
+                "final_visible_3rd": [f"{m.owner_app}/{m.label}" for m in items
+                                      if not getattr(m, "stashed", False)
+                                      and not m.is_stash_button
+                                      and (m.owner_bundle_id or "")
+                                      != "com.apple.MenuBarAgent"]}
+
+    @objc.python_method
+    def _park_test(self, bid, spec_weight):
+        """停车实验（__PARKTEST__ 触发）：把 bid 的真表权重写成停车值（默认
+        50000=HIDDEN_BASE）→ 重启 MenuBarAgent → 观察这枚落点。
+
+        要回答的问题：停车项是「彻底移除」（不占 7 位口袋 → 无限隐藏）
+        还是「照样进口袋」（那路就封死了）。spec_weight="restore" 则从
+        tmp/park_originals.json 恢复原权重（解除停车）。
+        """
+        import json as _json
+        import subprocess
+        import time
+        if not bid:
+            return {"ok": False, "why": "缺 bid 参数"}
+        weights = layout_table.container_read_weights()
+        key = None
+        for k in weights:
+            if k.startswith(f"status:{bid}::"):
+                key = k
+                break
+        if key is None:
+            return {"ok": False, "why": f"真表里找不到 {bid} 的键",
+                    "known_keys": [k for k in weights if bid.split(".")[-1] in k]}
+        orig_file = os.path.expanduser("~/Project/PeaseBar/tmp/park_originals.json")
+        origs = {}
+        if os.path.exists(orig_file):
+            try:
+                with open(orig_file, encoding="utf-8") as f:
+                    origs = _json.load(f)
+            except Exception:  # noqa: BLE001
+                origs = {}
+        origs.setdefault(key, weights[key])
+        if spec_weight == "restore":
+            w = origs.get(key)
+            action = f"restore->{w}"
+        else:
+            try:
+                w = float(spec_weight) if spec_weight else float(
+                    layout_table.HIDDEN_BASE)
+            except ValueError:
+                w = float(layout_table.HIDDEN_BASE)
+            action = f"park->{w}"
+        try:
+            with open(orig_file, "w", encoding="utf-8") as f:
+                _json.dump(origs, f, ensure_ascii=False, indent=2)
+        except Exception:  # noqa: BLE001
+            pass
+        wr = layout_table.container_write_weights({key: w})
+        # 重启 MenuBarAgent 让它重读表（launchd 秒级拉起，不碰任何 App）
+        subprocess.run(["killall", "MenuBarAgent"], capture_output=True)
+        time.sleep(4.0)
+        items = inventory.list_items()[0]
+        hit = None
+        for m in items:
+            if (m.owner_bundle_id or "").lower() == bid.lower():
+                hit = m
+                break
+        obs = None
+        if hit is not None:
+            obs = {"app": hit.owner_app, "label": hit.label,
+                   "stashed": bool(getattr(hit, "stashed", False)),
+                   "frame": tuple(hit.frame) if hit.frame else None,
+                   "ax_alive": hit.el is not None,
+                   "notched": bool(getattr(hit, "notched", False))}
+        stashed_n = sum(1 for m in items if getattr(m, "stashed", False)
+                        and not m.is_stash_button)
+        stash_list = [f"{m.owner_app}/{m.label}" for m in items
+                      if getattr(m, "stashed", False) and not m.is_stash_button]
+        return {"key": key, "action": action, "write": wr,
+                "observed": obs, "stash_count": stashed_n,
+                "stash_list": stash_list,
+                "table_now": layout_table.container_read_weights().get(key)}
+
+    @objc.python_method
+    def _park_restore_all(self):
+        """恢复停车实验改过的所有真表权重（tmp/park_originals.json 记录原值），
+        并清掉误跑实验写进 controlcenter 的垃圾键，最后重启 Agent 让它重读。
+        """
+        import json as _json
+        import subprocess
+        import time
+        orig_file = os.path.expanduser("~/Project/PeaseBar/tmp/park_originals.json")
+        origs = {}
+        if os.path.exists(orig_file):
+            try:
+                with open(orig_file, encoding="utf-8") as f:
+                    origs = _json.load(f)
+            except Exception:  # noqa: BLE001
+                origs = {}
+        upd = {k: v for k, v in origs.items() if v is not None}
+        wr = (layout_table.container_write_weights(upd) if upd
+              else {"ok": None, "why": "无原值记录"})
+        clean = layout_table.clear_table()
+        subprocess.run(["killall", "MenuBarAgent"], capture_output=True)
+        time.sleep(3.0)
+        return {"restored": upd, "write": wr, "cleanup": clean}
 
     def onLaunchToggle_(self, sender):
         """开机自启开关（SMAppService）：改完以系统回读为准，UI 不自说自话（P95 判据）。"""
