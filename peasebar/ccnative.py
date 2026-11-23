@@ -107,6 +107,29 @@ def hidden_bids_now():
             if r.get("isAllowed") is False and record_bid(r)}
 
 
+def is_app_hidden(bid):
+    """查一个 App 此刻的 CC 显隐状态（含前缀匹配）。
+
+    True = 已藏；False = 有记录且显示；None = 管不了（无完整记录，
+    例如 Apple 系统项或从未被系统跟踪过的 App），调用方据此回退拖拽。
+    """
+    try:
+        _, recs = _load()
+    except Exception:
+        return None
+    by_bid = {}
+    for rec in recs:
+        if "isAllowed" not in rec:
+            continue
+        b = record_bid(rec)
+        if b:
+            by_bid[b] = rec
+    rec = by_bid.get(match_bid(bid, set(by_bid)))
+    if rec is None:
+        return None
+    return rec["isAllowed"] is False
+
+
 def match_bid(bid, known):
     """在已知 bid 集合里找 bid 的落点：精确优先，退化为包名前缀。
 

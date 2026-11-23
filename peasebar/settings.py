@@ -87,7 +87,7 @@ from ApplicationServices import AXIsProcessTrusted
 
 import ServiceManagement as SM
 
-from peasebar import capture, ccnative, inventory, layout_table, menubar_drag, sections
+from peasebar import capture, ccnative, inventory, layout_table, menubar_drag, panel, sections
 
 # 方向键的 keyCode（AppKit 的 NS*ArrowFunctionKey 取值，写数字谁也看不懂）
 KEY_LEFT, KEY_RIGHT, KEY_DOWN, KEY_UP = 123, 124, 125, 126
@@ -556,6 +556,11 @@ class SettingsController(NSObject):
         """
         all_items, unavailable = inventory.list_items()
         self.items = [m for m in all_items if not m.is_stash_button]
+        # 原生通道（isAllowed=false）藏起的图标不进 AX 盘点（MenuBarAgent 不再
+        # 暴露它）：补伪项进布局页，否则「弹窗显示」区在设置里是空的，用户想
+        # 调整已藏图标（显回/移到永久隐藏）根本找不到入口（与救援面板同口径）
+        self.items = self.items + panel.native_hidden_items(
+            self.items, sections.load_config())
         self.images, self.no_permission = capture.capture_icons(self.items)
         # 选中项可能已消失（App 退出），丢掉悬空引用
         if self.selected_key not in self.images:
@@ -1362,25 +1367,44 @@ class SettingsController(NSObject):
 
     @objc.python_method
     def _real_hide(self, item, always=False):
-        """逐枚隐藏一枚图标：走合成 ⌘-拖（真机唯一双向、即时、什么都不重启的可靠路）。
+        """逐枚隐藏一枚图标：CC 按 App 开关优先（无容量限制、双向即时），
 
-        取证结论：直写布局权重表每次都要重载 MenuBarAgent（菜单栏瞬间重建），
-        且“显示”有滞后不可靠，已放弃作为主机制；只保留拖拽。拖拽内部已带
-        验证与重试，返回是否真的隐藏成功。
+        不可用时回退合成 ⌘-拖（塞系统收纳条，有容量上限）。CC 通道真机实证
+        （2026-11-23）：写 isAllowed=false + killall cfprefsd/MenuBarAgent →
+        图标消失而 App 照跑；记录侧车以便启动同步将来显回。
         """
+        bid = getattr(item, "owner_bundle_id", "") or ""
+        st = ccnative.is_app_hidden(bid)
+        if st is True:
+            return True  # 已是隐藏态：幂等成功
+        if st is False:
+            try:
+                changed = ccnative.set_apps_allowed([bid], False)
+                if changed:
+                    ccnative.record_hidden(changed)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] CC 隐藏失败（{bid}）：{exc}，回退拖拽")
         try:
             return menubar_drag.movable(item) and menubar_drag.hide(item)
         except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 拖拽隐藏失败（{getattr(item,'owner_bundle_id','?')}）：{exc}")
+            print(f"[PeaseBar] 拖拽隐藏失败（{bid}）：{exc}")
             return False
 
     @objc.python_method
     def _real_reveal(self, item):
-        """取消隐藏一枚图标：合成拖拽拖回可见段（带验证与重试）。"""
+        """取消隐藏一枚图标：CC 按 App 开关优先，无记录可管时回退合成拖拽。"""
+        bid = getattr(item, "owner_bundle_id", "") or ""
+        if ccnative.is_app_hidden(bid) is not None:
+            try:
+                ccnative.set_apps_allowed([bid], True)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                print(f"[PeaseBar] CC 显回失败（{bid}）：{exc}，回退拖拽")
         try:
             return menubar_drag.reveal(item)
         except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 拖拽显示失败（{getattr(item,'owner_bundle_id','?')}）：{exc}")
+            print(f"[PeaseBar] 拖拽显示失败（{bid}）：{exc}")
             return False
 
     @objc.python_method
@@ -1579,6 +1603,9 @@ class SettingsController(NSObject):
                     except Exception as exc:  # noqa: BLE001
                         probe["write_error"] = repr(exc)
                     r = probe
+                elif owner == "__SETTINGSWIN__":
+                    # 取证：主线程开设置窗口（布局页），4s 后截屏 + 三区清单落盘
+                    r = self._settings_open_test()
                 else:
                     ident = spec[1] if len(spec) > 1 else owner
                     title = spec[2] if len(spec) > 2 else ident
@@ -1719,6 +1746,15 @@ class SettingsController(NSObject):
                 0.1, self, "panelOpen:", None, False)
             NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
             print("[PeaseBar] 面板取证：启动同步完成，已安排主线程开面板")
+
+        # __SETTINGSWIN__ 取证：启动同步全部跑完再开设置窗（布局页），
+        # 4s 后截屏 + 三区清单落盘（验证「已藏图标在设置里可见可管」）
+        if getattr(self, "_settings_test_armed", False):
+            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
+            t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                0.1, self, "settingsOpen:", None, False)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
+            print("[PeaseBar] 设置取证：启动同步完成，已安排主线程开设置窗")
 
         # __POSTCHECK__ 取证：启动同步收敛完，盘点最终收纳状态（只读不动）
         if getattr(self, "_postcheck_armed", False):
@@ -2476,6 +2512,62 @@ class SettingsController(NSObject):
         self._panel_test_armed = True
         return {"panel_test_scheduled": True,
                 "note": "启动同步完成后开面板 → 4s 后截屏落盘"}
+
+    @objc.python_method
+    def _settings_open_test(self):
+        """__SETTINGSWIN__ 取证入口：置标志，启动同步全部完成后开设置窗（布局页）。"""
+        self._settings_test_armed = True
+        return {"settings_test_scheduled": True,
+                "note": "启动同步完成后开设置窗 → 4s 后截屏 + 三区清单落盘"}
+
+    def settingsOpen_(self, timer):
+        """主线程回调 1（__SETTINGSWIN__ 取证）：开设置窗（布局页），4s 后截屏。"""
+        from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
+        self.show()  # show() 一律从布局页起步
+        t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+            4.0, self, "settingsShot:", None, False)
+        NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
+
+    def settingsShot_(self, timer):
+        """主线程回调 2（__SETTINGSWIN__ 取证）：全屏截图 + 三区清单落盘 + 关窗。"""
+        import json as _json
+        import time as _t
+        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType
+        r = {"time": _t.strftime("%H:%M:%S")}
+        try:
+            cfg = sections.load_config()
+            buckets = sections.plan_sections(self.items, cfg)
+            r["sections"] = {sec: [sections.item_key(m) for m in buckets[sec]]
+                              for sec in _SECTION_ORDER}
+        except Exception as exc:  # noqa: BLE001
+            r["sections_error"] = str(exc)
+        try:
+            s = NSScreen.mainScreen().frame()
+            img = Quartz.CGWindowListCreateImage(
+                Quartz.CGRectMake(0, 0, int(s.size.width), int(s.size.height)),
+                Quartz.kCGWindowListOptionOnScreenOnly,
+                Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
+            if img is not None:
+                rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
+                if rep is not None:
+                    data = rep.representationUsingType_properties_(NSPNGFileType, None)
+                    r["shot_ok"] = bool(data.writeToFile_atomically_(
+                        os.path.expanduser("~/Project/PeaseBar/tmp/settings_shot.png"),
+                        True))
+        except Exception as exc:  # noqa: BLE001
+            r["shot_error"] = str(exc)
+        try:
+            if self.window is not None:
+                self.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            with open(os.path.expanduser(
+                    "~/Project/PeaseBar/tmp/settings_result.json"),
+                    "w", encoding="utf-8") as f:
+                _json.dump(r, f, ensure_ascii=False, indent=2, default=str)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 设置取证：结果写入失败：{exc}")
 
     def onLaunchToggle_(self, sender):
         """开机自启开关（SMAppService）：改完以系统回读为准，UI 不自说自话（P95 判据）。"""
