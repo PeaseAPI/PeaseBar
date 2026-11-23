@@ -1538,6 +1538,9 @@ class SettingsController(NSObject):
                 elif owner == "__PARKRESTORE__":
                     # 恢复停车实验改过的所有权重 + 清垃圾键 + 重启 Agent
                     r = self._park_restore_all()
+                elif owner == "__PANEL__":
+                    # 取证：主线程把救援面板打开，供外部截屏看面板现状
+                    r = self._panel_open_test()
                 else:
                     ident = spec[1] if len(spec) > 1 else owner
                     title = spec[2] if len(spec) > 2 else ident
@@ -1598,6 +1601,16 @@ class SettingsController(NSObject):
                     break
         if hidden:
             print(f"[PeaseBar] 启动同步：把 {hidden} 个「弹窗/永久隐藏」图标收进真实收纳区")
+
+        # __PANEL__ 取证：启动同步已全部跑完，这里才把「开面板」安排进主 runloop
+        # （0.1s 后 fire）——不能在触发文件处直接调度：reconcile 在后台线程跑，
+        # 主 runloop 一直在转，过早调度会让面板在拖拽进行中打开、截到中间态。
+        if getattr(self, "_panel_test_armed", False):
+            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
+            t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                0.1, self, "panelOpen:", None, False)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
+            print("[PeaseBar] 面板取证：启动同步完成，已安排主线程开面板")
 
     @objc.python_method
     def reconcile_real_bar_async(self, delay=1.5):
@@ -1827,6 +1840,188 @@ class SettingsController(NSObject):
         subprocess.run(["killall", "MenuBarAgent"], capture_output=True)
         time.sleep(3.0)
         return {"restored": upd, "write": wr, "cleanup": clean}
+
+    def panelOpen_(self, timer):
+        """主线程回调 1（__PANEL__ 取证）：打开救援面板，安排 4s 后截屏落盘。"""
+        try:
+            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
+            from AppKit import NSApp
+            panel = getattr(NSApp.delegate(), "rescue", None)
+            if panel is None:
+                print("[PeaseBar] 面板取证：找不到 rescue 控制器")
+                return
+            panel.show()
+            # 第二段：秒开渲染用的是旧快照，后台采集刷新完（就地更新）再截屏，
+            # 4s 足够采集+网格重排；期间 runloop 正常空转，不阻塞渲染。
+            t2 = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                4.0, self, "panelShot:", None, False)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(t2, NSRunLoopCommonModes)
+            print("[PeaseBar] 面板取证：已 show，4s 后截屏落盘")
+        except Exception as exc:  # noqa: BLE001
+            import traceback
+            traceback.print_exc()
+
+    def panelShot_(self, timer):
+        """主线程回调 2（__PANEL__ 取证）：全屏截图+面板格子清单落盘+关面板。
+
+        结果覆盖写 tmp/peasebar_exp_result.json（启动同步先写的是「已调度」占位）。
+        面板实际渲染的格子 = rescue._snapshot["group"]，直接抓它核对有没有漏列。
+        """
+        import json as _json
+        import time as _t
+        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType, NSApp
+        r = {"time": _t.strftime("%H:%M:%S"), "panel_opened": True}
+        panel = None
+        try:
+            panel = getattr(NSApp.delegate(), "rescue", None)
+            snap = getattr(panel, "_snapshot", None)
+            if snap is None:
+                r["panel_grid"] = None
+                r["panel_grid_why"] = "快照为 None：面板从未采集成功，格子应为空态"
+            else:
+                r["panel_grid"] = [
+                    {"app": m.owner_app, "label": m.label,
+                     "stashed": bool(m.stashed), "notched": bool(m.notched)}
+                    for m in snap.get("group", [])]
+                r["panel_grid_count"] = len(r["panel_grid"])
+        except Exception as exc:  # noqa: BLE001
+            r["panel_grid_error"] = str(exc)
+        # 全屏截图（含菜单栏 + 展开的面板本体；App 有屏幕录制权限）
+        try:
+            s = NSScreen.mainScreen().frame()
+            img = Quartz.CGWindowListCreateImage(
+                Quartz.CGRectMake(0, 0, int(s.size.width), int(s.size.height)),
+                Quartz.kCGWindowListOptionOnScreenOnly,
+                Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
+            if img is not None:
+                rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
+                if rep is not None:
+                    data = rep.representationUsingType_properties_(NSPNGFileType, None)
+                    r["shot_ok"] = bool(data.writeToFile_atomically_(
+                        os.path.expanduser("~/Project/PeaseBar/tmp/panel_shot.png"),
+                        True))
+        except Exception as exc:  # noqa: BLE001
+            r["shot_error"] = str(exc)
+        # 截完关面板，恢复现场（面板 8s 超时也兜底，这里主动关更干净）
+        try:
+            if panel is not None:
+                panel.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            with open(os.path.expanduser(
+                    "~/Project/PeaseBar/tmp/peasebar_exp_result.json"),
+                    "w", encoding="utf-8") as f:
+                _json.dump(r, f, ensure_ascii=False, indent=2, default=str)
+            print(f"[PeaseBar] 面板取证：截图={r.get('shot_ok')}，"
+                  f"格子数={r.get('panel_grid_count')}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 面板取证：结果写入失败：{exc}")
+        # 第三段：2s 后模拟点击面板格子（ToDesk 优先），真机验证「点击即用」
+        try:
+            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
+            t3 = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                2.0, self, "panelClick:", None, False)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(t3, NSRunLoopCommonModes)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 面板取证：安排点击段失败：{exc}")
+
+    def panelClick_(self, timer):
+        """主线程回调 3（__PANEL__ 取证）：模拟点击面板格子，验证「点击即用」。
+
+        与真实点击完全同路：面板先收 → 后台 trigger 阶梯（AXPress → AXShowMenu
+        → 合成右键），done 回调里记录触发方式与「新窗口出现」判据，随后截屏留证。
+        """
+        from peasebar import trigger as _trigger  # 包内绝对导入：顶层 import 在打包环境必挂
+        from AppKit import NSApp
+        panel = getattr(NSApp.delegate(), "rescue", None)
+        snap = getattr(panel, "_snapshot", None) if panel is not None else None
+        group = (snap or {}).get("group", [])
+        target = None
+        # 优先「被收纳」项（面板核心场景：收纳项只能靠 AX 投递，最该验证）
+        for want in ("com.youqu.todesk.mac", None):
+            for m in group:
+                if not m.stashed:
+                    continue
+                if want is not None and (m.owner_bundle_id or "") != want:
+                    continue
+                target = m
+                break
+            if target is not None:
+                break
+        if target is None and group:
+            target = group[0]
+        r = {"click_target": (f"{target.owner_app}/{target.label}"
+                              if target is not None else None)}
+        self._panel_click_result = r
+        if panel is not None:
+            panel.close()  # 忠实模拟真实点击：面板先收再触发
+        if target is None:
+            print("[PeaseBar] 面板取证：面板无格子可点击")
+            return
+
+        def done(how, seen):
+            r["trigger_how"] = str(how)
+            r["trigger_seen"] = bool(seen)
+            print(f"[PeaseBar] 面板取证：触发 {r['click_target']}：{how}，"
+                  f"反应={'有' if seen else '无'}")
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "panelShot2:", None, False)
+
+        try:
+            _trigger.open_item_async(target, done)
+        except Exception as exc:  # noqa: BLE001
+            r["click_error"] = str(exc)
+            print(f"[PeaseBar] 面板取证：触发异常：{exc}")
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "panelShot2:", None, False)
+        # 兜底：done 里 open_item 若崩在子线程不回调，12s 后强制落盘截屏
+        try:
+            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
+            t4 = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                12.0, self, "panelShot2:", None, False)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(t4, NSRunLoopCommonModes)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 面板取证：安排兑底截屏失败：{exc}")
+
+    def panelShot2_(self, timer):
+        """主线程回调 4（__PANEL__ 取证）：触发后截屏（原生菜单应已在屏）+ 落最终结果。"""
+        import json as _json
+        import time as _t
+        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType
+        r = dict(getattr(self, "_panel_click_result", {}) or {})
+        r["time"] = _t.strftime("%H:%M:%S")
+        try:
+            s = NSScreen.mainScreen().frame()
+            img = Quartz.CGWindowListCreateImage(
+                Quartz.CGRectMake(0, 0, int(s.size.width), int(s.size.height)),
+                Quartz.kCGWindowListOptionOnScreenOnly,
+                Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
+            if img is not None:
+                rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
+                if rep is not None:
+                    data = rep.representationUsingType_properties_(NSPNGFileType, None)
+                    r["menu_shot_ok"] = bool(data.writeToFile_atomically_(
+                        os.path.expanduser(
+                            "~/Project/PeaseBar/tmp/panel_menu_shot.png"), True))
+        except Exception as exc:  # noqa: BLE001
+            r["menu_shot_error"] = str(exc)
+        try:
+            with open(os.path.expanduser(
+                    "~/Project/PeaseBar/tmp/peasebar_exp_result.json"),
+                    "w", encoding="utf-8") as f:
+                _json.dump(r, f, ensure_ascii=False, indent=2, default=str)
+            print(f"[PeaseBar] 面板取证：触发后截图={r.get('menu_shot_ok')}，"
+                  f"反应={r.get('trigger_seen')}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PeaseBar] 面板取证：结果写入失败：{exc}")
+
+    @objc.python_method
+    def _panel_open_test(self):
+        """__PANEL__ 取证入口：只置标志，启动同步全部完成后才开面板（见 reconcile 末尾）。"""
+        self._panel_test_armed = True
+        return {"panel_test_scheduled": True,
+                "note": "启动同步完成后开面板 → 4s 后截屏落盘"}
 
     def onLaunchToggle_(self, sender):
         """开机自启开关（SMAppService）：改完以系统回读为准，UI 不自说自话（P95 判据）。"""
