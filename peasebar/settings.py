@@ -568,8 +568,57 @@ class SettingsController(NSObject):
         if forced and any(k == forced for k, _l, _s in pages()):
             self.page = forced
         self._rebuild()
+        self._testStep()  # 取证钩子：见方法注释（无环境变量时零动作）
         self.window.makeKeyAndOrderFront_(None)
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+    @objc.python_method
+    def _testStep(self):
+        """取证钩子：PEASEBAR_TEST_STEP=move;apply 依次执行——真机逐页测试时
+        动作改在代码里直接走（与 UI 同一入口），免掉模拟点击的辅助功能依赖。
+        move：选中「菜单栏显示」第一枚并移到「弹窗显示」（进草稿，不落盘）；
+        apply：点「应用改动」；setlang:<码>：切界面语言并整窗重建。"""
+        steps = (os.environ.get("PEASEBAR_TEST_STEP") or "").split(";")
+        for step in steps:
+            step = step.strip()
+            try:
+                if step == "move":
+                    vis = self.buckets.get(sections.SECTION_VISIBLE) or []
+                    if not vis:
+                        print("[PeaseBar] 取证：move 跳过（显示区没有格子）")
+                        continue
+                    key = sections.item_key(vis[0])  # 分桶存的是 MenuItem 对象，取配置键再走换区
+                    self.selected_key = key
+                    self.applyMove_to_(key, sections.SECTION_HIDDEN)
+                    print(f"[PeaseBar] 取证：已暂存换区 {key}"
+                          f" pending={self._pending_cfg is not None}")
+                elif step == "apply":
+                    self.onApplyLayout_(None)
+                    print("[PeaseBar] 取证：已触发应用改动")
+                elif step.startswith("setlang:"):
+                    code = step.split(":", 1)[1]
+                    if i18n.set_lang(code):
+                        print(f"[PeaseBar] 取证：语言切为 {code}")
+                    self._rebuild()
+                elif step == "menu":
+                    # B8 取证：把控制图标右键菜单标题打印到日志（弹前刷新链同路），
+                    # 免掉无法自动化的真实右键；面板/菜单都挂在 app 委托上
+                    app = NSApplication.sharedApplication()
+                    ctl = getattr(app.delegate(), "control", None)
+                    if ctl is not None:
+                        ctl.refresh_menu_texts()
+                        menu = getattr(ctl, "menu", None)
+                        titles = [str(mi.title()) for mi in menu.itemArray()] if menu else []
+                        print(f"[PeaseBar] 取证：右键菜单标题={titles}")
+                elif step == "panel":
+                    # B9 取证：直接弹救援面板（窗口可被窗Id抓到）
+                    app = NSApplication.sharedApplication()
+                    rescue = getattr(app.delegate(), "rescue", None)
+                    if rescue is not None:
+                        rescue.show()
+                        print("[PeaseBar] 取证：已弹救援面板")
+            except Exception as exc:  # noqa: BLE001  钩子失败只记录，不弄崩真机
+                print(f"[PeaseBar] 取证：步骤 {step!r} 异常：{exc}")
 
     def close(self):
         if self.window is not None:

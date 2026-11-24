@@ -206,10 +206,21 @@ class AppDelegate(NSObject):
             NSRunLoop.mainRunLoop().addTimer_forMode_(tick, NSRunLoopCommonModes)
             self.settings.tick_timer = tick
             print("[PeaseBar] CC 周期核对已挂（60s，无漂移零动作）")
+        # 取证钩子：PEASEBAR_OPEN_PAGE=<页键> 启动即自动开设置窗到该页——
+        # 真机逐页截图时免去点击菜单栏图标（沙箱里模拟点击会被静默丢弃）
+        if os.environ.get("PEASEBAR_OPEN_PAGE"):
+            probe_timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                1.5, self, "openSettingsForProbe:", None, False)
+            NSRunLoop.mainRunLoop().addTimer_forMode_(probe_timer, NSRunLoopCommonModes)
 
     def _refresh_panel_if_open(self):
         """设置变更后：作废位图缓存并刷新面板（重活在后台，不卡设置窗）。"""
         self.rescue.refresh_now()
+
+    def openSettingsForProbe_(self, timer):
+        """取证钩子定时器：延迟 1.5s 开设置窗，等状态项/盘点摆稳再弹。"""
+        print("[PeaseBar] 取证：启动自动开设置窗")
+        self.settings.show()
 
     def pollInstanceSocket_(self, timer):
         """哨兵 socket 轮询：收到二次启动的 connect 即弹出救援面板（F10）。"""
