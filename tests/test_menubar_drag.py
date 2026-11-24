@@ -6,12 +6,23 @@
 落点坐标。真正发 CGEvent 的 command_drag 一律 monkeypatch 成记录器，绝不碰真鼠标，
 也不要求屏幕录制/辅助功能权限。
 
+注意：模块总闸 SYNTH_DRAG_ENABLED 默认 False（用户定调 2026-11-24：任何时候都
+不控制鼠标），本文件测的是拖拽原语本身的逻辑，各用例在 setUp 里临时开闸——
+command_drag 全被桩掉，开闸也不会真动鼠标。
+
 运行：项目根目录下 `python3 -m unittest discover -s tests -t .`
 """
 import types
 import unittest
 
 from peasebar import menubar_drag
+
+
+def _gate_on(case):
+    """临时打开拖拽总闸并在用例结束后还原：command_drag 已被各用例桩掉，不会真动鼠标。"""
+    case.addCleanup(setattr, menubar_drag, "SYNTH_DRAG_ENABLED",
+                    menubar_drag.SYNTH_DRAG_ENABLED)
+    menubar_drag.SYNTH_DRAG_ENABLED = True
 
 
 def fake(bid="com.tencent.qq", frame=(100.0, 0.0, 24.0, 24.0),
@@ -26,6 +37,9 @@ def fake(bid="com.tencent.qq", frame=(100.0, 0.0, 24.0, 24.0),
 
 class TestMovable(unittest.TestCase):
     """movable：只有可点的第三方图标允许合成 ⌘-拖，苹果系统项与收纳按钮拒绝。"""
+
+    def setUp(self):
+        _gate_on(self)
 
     def test_正常第三方图标可拖(self):
         self.assertTrue(menubar_drag.movable(fake()))
@@ -60,6 +74,7 @@ class TestEarlyReturn(unittest.TestCase):
     """非可拖项：三原语都在发事件前返回 False（command_drag 被打桩成会炸的记录器）。"""
 
     def setUp(self):
+        _gate_on(self)
         self.calls = []
         self._orig_drag = menubar_drag.command_drag
         self._orig_notch = menubar_drag._notch_mid_x
@@ -92,6 +107,7 @@ class TestReorderCoords(unittest.TestCase):
     """reorder：落点 x 落在锚点边界外侧（after 右 +6、否则左 -6），y 取源中心。"""
 
     def setUp(self):
+        _gate_on(self)
         self.rec = []
         self._orig_drag = menubar_drag.command_drag
         menubar_drag.command_drag = lambda src, dst, *a, **k: self.rec.append((src, dst))
@@ -122,6 +138,7 @@ class TestHideCoords(unittest.TestCase):
     """
 
     def setUp(self):
+        _gate_on(self)
         self.rec = []
         self._orig_drag = menubar_drag.command_drag
         self._orig_stash = menubar_drag._stash_drop_x
@@ -156,6 +173,37 @@ class TestHideCoords(unittest.TestCase):
         menubar_drag._wait_state = lambda *a, **k: False
         self.assertFalse(menubar_drag.hide(item))
         self.assertEqual(len(self.rec), 3)
+
+
+class TestGate(unittest.TestCase):
+    """总闸默认关（用户定调：任何时候都不控制鼠标）：三入口全部短路。"""
+
+    def setUp(self):
+        # 故意不开闸：命令拖被打桩成会炸，确保任何路径都不碰鼠标
+        self._orig_drag = menubar_drag.command_drag
+        menubar_drag.command_drag = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("总闸关闭时不该调用 command_drag"))
+        self.addCleanup(setattr, menubar_drag, "command_drag", self._orig_drag)
+
+    def test_默认总闸是关的(self):
+        self.assertFalse(menubar_drag.SYNTH_DRAG_ENABLED)
+
+    def test_关闸下command_drag无动作(self):
+        # 这条测的是真函数本体的短路：临时换回原实现再调，应当直接返回不碰鼠标
+        menubar_drag.command_drag = self._orig_drag
+        menubar_drag.command_drag((10, 10), (20, 20))  # 不抛即通过
+
+    def test_关闸下movable一律拒拖(self):
+        self.assertFalse(menubar_drag.movable(fake()))
+
+    def test_关闸下hide早退不发事件(self):
+        self.assertFalse(menubar_drag.hide(fake()))
+
+    def test_关闸下reorder不发事件(self):
+        self.assertFalse(menubar_drag.reorder(fake(), fake()))
+
+    def test_关闸下reveal不发事件(self):
+        self.assertFalse(menubar_drag.reveal(fake()))
 
 
 if __name__ == "__main__":

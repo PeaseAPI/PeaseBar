@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""真实菜单栏镜像接线单测（Phase 10）。
+"""真实菜单栏镜像接线单测（Phase 10，2026-11-24 鼠标停用后语义）。
 
-只验证「设置里的编辑动作是否把对的显隐原语调起来」这一层接缝：
+验证「设置里的编辑动作到真实菜单栏这一层接缝」在新语义下的行为：
 - real_bar 关 → 一律不调；
-- 移区：进弹窗/永久隐藏调 hide，回菜单栏显示调 reveal；
-- 同区改序：只有「菜单栏显示」区调 reorder，其余区不动；
-- 不可拖项（movable=False）→ 不调；
-- CC 通道可管（is_app_hidden 非 None）→ 优先 set_apps_allowed，不碰拖拽。
+- 移区：只走 CC 静默通道（set_apps_allowed），**任何情况下都不再碰拖拽原语**
+  （用户定调：合成 ⌘-拖会控制鼠标，已彻底停用）；
+- CC 管不了/写失败 → 明确失败，不回退拖拽；
+- 同区改序：镜像逻辑仍只对「菜单栏显示」区调 reorder（生产代码里
+  movable 被总闸挡死→实为早退；_Rec 桩掉 movable 仅为钉住接线逻辑本身）。
 
-menubar_drag 的三个原语与 movable、ccnative 的查态/写表全部打桩（默认模拟
-「CC 管不了」→ 走拖拽回退），因此不碰真鼠标、不碰真 CC plist、不需要
-辅助功能/录屏权限。真实 ⌘-拖与 CC 直写能否改系统菜单栏由 tmp/ 探针 +
-本机截图取证，不在这里测。
+menubar_drag 的三个原语与 movable、ccnative 的查态/写表全部打桩，
+因此不碰真鼠标、不碰真 CC plist、不需要辅助功能/录屏权限。
 """
 import types
 import unittest
@@ -31,9 +30,9 @@ def fake(bid="com.tencent.qq", label="QQ", key_part="", frame=(100.0, 0.0, 24.0,
 class _Rec:
     """把 menubar_drag 三原语 + movable、ccnative 查态/写表换成记录器。
 
-    cc=None 模拟「CC 通道管不了」（is_app_hidden 恒 None → 上层回退拖拽），
-    这正是本文件测拖拽接缝的前提；传 callable 则模拟 CC 可管，验证优先走
-    set_apps_allowed 且拖拽原语不被碰。
+    cc=None 模拟「CC 通道管不了」（is_app_hidden 恒 None）——新语义下
+    上层应明确失败而**不是**回退拖拽；传 callable 则模拟 CC 可管，
+    验证走 set_apps_allowed 且拖拽原语同样不被碰。
     """
 
     def __init__(self, movable=True, cc=None):
@@ -90,20 +89,21 @@ class TestWiring(unittest.TestCase):
             self.ctrl._mirror_section_reorder(sections.SECTION_VISIBLE, "com.tencent.qq|QQ")
         self.assertEqual(rec.calls, [])
 
-    def test_移到弹窗显示调hide(self):
+    def test_移到弹窗显示不触发拖拽(self):
+        # 新语义：CC 管不了（cc=None）时明确失败，绝不回退到 hide 拖拽
         with _Rec() as rec:
             self.ctrl._mirror_section_move("com.tencent.qq|QQ", sections.SECTION_HIDDEN)
-        self.assertEqual(rec.names(), ["hide"])
+        self.assertEqual(rec.calls, [])
 
-    def test_移到永久隐藏也调hide(self):
+    def test_移到永久隐藏不触发拖拽(self):
         with _Rec() as rec:
             self.ctrl._mirror_section_move("com.tencent.qq|QQ", sections.SECTION_ALWAYS_HIDDEN)
-        self.assertEqual(rec.names(), ["hide"])
+        self.assertEqual(rec.calls, [])
 
-    def test_移回菜单栏显示调reveal(self):
+    def test_移回菜单栏显示不触发拖拽(self):
         with _Rec() as rec:
             self.ctrl._mirror_section_move("com.tencent.qq|QQ", sections.SECTION_VISIBLE)
-        self.assertEqual(rec.names(), ["reveal"])
+        self.assertEqual(rec.calls, [])
 
     def test_不可拖项不动真实菜单栏(self):
         with _Rec(movable=False) as rec:
@@ -168,22 +168,22 @@ class TestCCPreferred(unittest.TestCase):
         self.assertEqual(rec.names(), ["cc_set"])
         self.assertIs(rec.calls[0][2], True)
 
-    def test_CC失败时回退拖拽hide(self):
-        # set_apps_allowed 抛异常（如 TCC 拒绝写盘）→ except → 走拖拽
+    def test_CC失败时不回退拖拽hide(self):
+        # set_apps_allowed 抛异常（如 TCC 拒绝写盘）→ except → 明确失败，不碰鼠标
         def boom(bids, allowed):
             raise PermissionError("Operation not permitted")
         with _Rec(cc=lambda bid: False) as rec:
             ccnative.set_apps_allowed = boom
             self.ctrl._mirror_section_move("com.tencent.qq|QQ", sections.SECTION_HIDDEN)
-        self.assertEqual(rec.names(), ["hide"])
+        self.assertEqual(rec.calls, [])  # hide 拖拽原语不得被调
 
-    def test_CC失败时回退拖拽reveal(self):
+    def test_CC失败时不回退拖拽reveal(self):
         def boom(bids, allowed):
             raise PermissionError("Operation not permitted")
         with _Rec(cc=lambda bid: False) as rec:
             ccnative.set_apps_allowed = boom
             self.ctrl._mirror_section_move("com.tencent.qq|QQ", sections.SECTION_VISIBLE)
-        self.assertEqual(rec.names(), ["reveal"])
+        self.assertEqual(rec.calls, [])
 
 
 class TestInputMenuSync(unittest.TestCase):

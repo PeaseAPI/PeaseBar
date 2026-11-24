@@ -31,6 +31,13 @@ from peasebar.axutil import notch_region
 _CMD_KEYCODE = 0x37  # 55：左 Command
 _HID = Quartz.kCGHIDEventTap
 
+# 用户定调（2026-11-24）：任何时候都不允许控制鼠标——合成 ⌘-拖会让光标自己
+# 飘到菜单栏来回拖，体验上像中毒。总闸关掉后 command_drag/movable 直接短路，
+# 上层（显隐/换序/放出收纳区）自动退化为只做 CC 静默同步。
+# 显隐本来就有无鼠标的 CC 通道；真实菜单栏的「顺序」需要拖拽才能改，
+# 停用后面板/设置页顺序仍正确，只是栏上物理顺序不再被代劳。
+SYNTH_DRAG_ENABLED = False
+
 
 def _post_mouse(kind, pt, flags, click=None):
     e = Quartz.CGEventCreateMouseEvent(None, kind, pt, Quartz.kCGMouseButtonLeft)
@@ -44,9 +51,9 @@ def _post_mouse(kind, pt, flags, click=None):
 def command_drag(src, dst, steps=16, hold=0.02):
     """⌘ 按住，从 src=(x,y) 直线拖到 dst=(x,y) 再松手。
 
-    菜单栏状态项的 ⌘-拖有个坑：按下后得先短暂停留并小幅移动，系统才把它识别成
-    「拖拽抓取」；按下即高速平移会被当成一次点击，拖不动。所以这里：warp 后交还
-    光标→按下→原地抖两下起手→再匀速拖到 dst。"""
+    总闸 SYNTH_DRAG_ENABLED 关掉时直接返回（不碰鼠标），下面真实拖拽仅作历史保留。"""
+    if not SYNTH_DRAG_ENABLED:
+        return
     CMD = Quartz.kCGEventFlagMaskCommand
     Quartz.CGWarpMouseCursorPosition(src)
     # 交还光标与硬件的关联，避免 warp 后事件坐标与实际指针不一致
@@ -83,7 +90,10 @@ def _center(frame):
 
 def movable(item):
     """能不能被真实拖动：必须是可点的第三方图标（Apple 系统项与收纳按钮拒绝合成拖）。
-    字段一律 getattr 容错：桩对象/缺属性的项直接判不可拖，不抛。"""
+    字段一律 getattr 容错：桩对象/缺属性的项直接判不可拖，不抛。
+    总闸关掉时一律判不可拖：所有调用方（换序/隐藏/放出）据此立刻短路，不碰鼠标。"""
+    if not SYNTH_DRAG_ENABLED:
+        return False
     if item is None:
         return False
     if getattr(item, "frame", None) is None or getattr(item, "el", None) is None:
@@ -190,6 +200,8 @@ def reveal(item):
     先展开溢出区拿到它的真实坐标，再拖到可见区最右；拖完轮询 stashed 是否转 False。
     返回是否真的显示成功。
     """
+    if not SYNTH_DRAG_ENABLED:
+        return False
     if item is None or getattr(item, "el", None) is None:
         return False
     if getattr(item, "is_stash_button", False):

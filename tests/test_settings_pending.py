@@ -94,16 +94,17 @@ class TestApply(PendingCase):
         self.assertFalse(self.ctrl._applying)  # 同步链路里 applyDone 已收尾
         self.assertEqual(self.reloaded, [True])  # 生效后重盘点刷面板
 
-    def test_real_bar开时应用走真实菜单栏链路(self):
-        """real_bar 开：应用后台链路调 sync_cc_now（打桩计数），不直接拖拽。"""
+    def test_real_bar开时应用只做CC静默同步(self):
+        """real_bar 开：应用后台链路只调 sync_cc_now（打桩计数）。
+
+        拖拽镜像（收纳区放出/顺序对齐）已按用户要求彻底停用（2026-11-24），
+        应用流程不再碰任何鼠标控制。"""
         calls = []
         self.edit("b|B", sections.SECTION_HIDDEN)
         self.ctrl.real_bar = True
         self.ctrl.sync_cc_now = lambda: calls.append("cc") or {"writable": True}
-        self.ctrl._reveal_all_stashed = lambda: calls.append("reveal")
-        self.ctrl._align_section_order = lambda: calls.append("align")
         self.ctrl.onApplyLayout_(None)
-        self.assertEqual(calls, ["cc", "reveal", "align"])  # 顺序固定：先 CC 再放出再排
+        self.assertEqual(calls, ["cc"])  # 只剩静默 CC 同步
         self.assertEqual(self.cfg()["sections"].get("b|B"), sections.SECTION_HIDDEN)
 
     def test_real_bar关时应用不碰真实菜单栏(self):

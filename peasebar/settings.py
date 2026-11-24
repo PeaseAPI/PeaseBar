@@ -1503,15 +1503,9 @@ class SettingsController(NSObject):
             summary = {}
             try:
                 if self.opt("real_bar"):
+                    # 只做静默的 CC plist 显隐同步；拖拽镜像（收纳区放出/顺序对齐）
+                    # 按用户要求彻底停用——任何路径都不再控制鼠标（2026-11-24）
                     summary["cc"] = self.sync_cc_now()
-                    try:
-                        self._reveal_all_stashed()
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"[PeaseBar] 应用：收纳区放出失败：{exc}")
-                    try:
-                        self._align_section_order()
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"[PeaseBar] 应用：顺序对齐失败：{exc}")
             except Exception as exc:  # noqa: BLE001
                 summary["error"] = str(exc)
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -1635,12 +1629,10 @@ class SettingsController(NSObject):
                     ccnative.record_hidden(changed)
                 return True
             except Exception as exc:  # noqa: BLE001
-                print(f"[PeaseBar] CC 隐藏失败（{bid}）：{exc}，回退拖拽")
-        try:
-            return menubar_drag.movable(item) and menubar_drag.hide(item)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 拖拽隐藏失败（{bid}）：{exc}")
-            return False
+                print(f"[PeaseBar] CC 隐藏失败（{bid}）：{exc}")
+        # 拖拽回退已按用户要求永久停用（任何路径都不控制鼠标），只剩明确失败
+        print(f"[PeaseBar] 隐藏未生效（{bid}）：CC 通道不可用且已禁用拖拽")
+        return False
 
     @objc.python_method
     def _real_reveal(self, item):
@@ -1654,12 +1646,10 @@ class SettingsController(NSObject):
                 ccnative.set_apps_allowed([bid], True)
                 return True
             except Exception as exc:  # noqa: BLE001
-                print(f"[PeaseBar] CC 显回失败（{bid}）：{exc}，回退拖拽")
-        try:
-            return menubar_drag.reveal(item)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 拖拽显示失败（{bid}）：{exc}")
-            return False
+                print(f"[PeaseBar] CC 显回失败（{bid}）：{exc}")
+        # 同上：拖拽回退停用，不控制鼠标
+        print(f"[PeaseBar] 显回未生效（{bid}）：CC 通道不可用且已禁用拖拽")
+        return False
 
     @objc.python_method
     def _drag_cycle_test(self, owner, label):

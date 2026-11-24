@@ -80,7 +80,11 @@ def _synth_right_click(item, settle=SETTLE):
 
     只对坐标可信的图标有用（T66：8/25 开窗，被收纳的 9 项 0/25 全落空）。
     返回 (说明, 是否看到新窗口)。
+
+    已按用户要求停用（2026-11-24）：这一步会先把光标 warp 到菜单栏坐标，
+    而用户零容忍任何鼠标被控制——触发阶梯只剩纯 AX 两档（AXPress/AXShowMenu）。
     """
+    return "合成点击已停用（不控制鼠标）", False
     fx, fy, fw, fh = item.frame
     cx, cy = fx + fw / 2.0, fy + fh / 2.0
     src = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
