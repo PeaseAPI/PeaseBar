@@ -217,6 +217,10 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
                 if item is not None:
                     break
                 time.sleep(0.3)
+            if item is not None:
+                # 刚重连的图标先稳一下再投（报障八取证一轮：刚出现在盘点里就
+                # AXPress，回执正常但 App 没开窗，白点一次）
+                time.sleep(0.6)
             if item is None:
                 # 显回没出来：盘上改回 false 即可（栏上本来就没它），
                 # 不兜底重画——白闪一次没有任何收益
