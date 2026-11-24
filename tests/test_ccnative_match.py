@@ -244,6 +244,9 @@ class TestSoftApply(unittest.TestCase):
         pt = mock.patch.object(ccnative, "_soft_timer", None)
         pt.start()
         self.addCleanup(pt.stop)
+        st = mock.patch.object(ccnative, "_soft_targets", {})
+        st.start()
+        self.addCleanup(st.stop)
         self._write_rec("com.acme.app", True)
 
     def _mk_timer(self, delay, fn):
@@ -266,6 +269,8 @@ class TestSoftApply(unittest.TestCase):
         self.assertEqual(got, {"com.acme.app"})
         self.assertEqual(self.killed(), ["cfprefsd"])  # 绝不能碰 MenuBarAgent
         self.assertTrue(ccnative._pending_soft)
+        # 软写目标要登记进免检清单（周期核对/自检据此不把它当漂移）
+        self.assertEqual(ccnative.soft_pending_bids(), {"com.acme.app"})
 
     def test_hard写重启全部并抹平pending(self):
         ccnative.set_apps_allowed({"com.acme.app"}, False, hard=False)
@@ -273,6 +278,7 @@ class TestSoftApply(unittest.TestCase):
         ccnative.set_apps_allowed({"com.acme.app"}, True)  # 默认 hard
         self.assertEqual(self.killed(), ["cfprefsd", "MenuBarAgent"])
         self.assertFalse(ccnative._pending_soft)  # hard apply 顺带抹平软写
+        self.assertEqual(ccnative.soft_pending_bids(), set())
 
     def test_schedule去抖只留最后一个(self):
         ccnative.schedule_hard_apply(delay=15.0)
@@ -303,6 +309,24 @@ class TestSoftApply(unittest.TestCase):
         ccnative.schedule_hard_apply(delay=15.0)
         self.timers[-1].fn()  # 模拟到期回调
         self.assertEqual(self.runs, [])
+
+    def test_兜底到期先补写盘再重画(self):
+        """软写窗口里系统把旧值回写覆盖：兜底必须补写目标态再重画，
+        否则只是把旧态重画回去，图标赖在栏上不收（报障#5 同源）。"""
+        import plistlib
+        ccnative.set_apps_allowed({"com.acme.app"}, False, hard=False)
+        self._write_rec("com.acme.app", True)  # 模拟系统回写覆盖盘上值
+        del self.runs[:]
+        ccnative.schedule_hard_apply(delay=15.0)
+        self.timers[-1].fn()  # 模拟到期
+        # 补写一轮 cfprefsd + apply_now 的 cfprefsd/MenuBarAgent
+        self.assertEqual(self.killed(),
+                         ["cfprefsd", "cfprefsd", "MenuBarAgent"])
+        self.assertFalse(plistlib.loads(
+            plistlib.load(open(self.plist, "rb"))["trackedApplications"]
+        )[0]["isAllowed"])
+        self.assertFalse(ccnative._pending_soft)
+        self.assertEqual(ccnative.soft_pending_bids(), set())
 
 
 if __name__ == "__main__":

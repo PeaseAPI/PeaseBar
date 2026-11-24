@@ -237,13 +237,26 @@ def set_apps_allowed(bids, allowed, hard=True):
         subprocess.run(["killall", "cfprefsd"], capture_output=True)
         global _pending_soft
         _pending_soft = True
+        with _soft_lock:
+            for b in changed:
+                _soft_targets[b] = allowed
     return changed
 
 
 # 软写后待重画标记：True=盘上状态与栏上实况可能不一致，需要一次 hard apply
 _pending_soft = False
 _soft_timer = None
+# 软写自标清单 {bid: allowed}：兜底到期先补写盘（防系统回写旧值）再重画；
+# 周期核对/实效自检据此免检「收回还挂在栏上」的正常中间态（2026-11-24
+# 用户报障#5：刚点完应用就被自检当成漂移强制收回，菜单栏又闪一下）。
+_soft_targets = {}
 _soft_lock = threading.Lock()
+
+
+def soft_pending_bids():
+    """处于「已写盘、等重画」软生效中间的 bid 集合（调用方据此免检）。"""
+    with _soft_lock:
+        return set(_soft_targets)
 
 
 def apply_now():
@@ -259,6 +272,7 @@ def apply_now():
             _soft_timer.cancel()
             _soft_timer = None
         _pending_soft = False
+        _soft_targets.clear()
     for proc in ("cfprefsd", "MenuBarAgent"):
         subprocess.run(["killall", proc], capture_output=True)
     # 给 launchd 拉起与首帧重画一点时间
@@ -279,9 +293,17 @@ def schedule_hard_apply(delay=15.0):
             global _soft_timer
             with _soft_lock:
                 _soft_timer = None
-            if _pending_soft:
-                print("[PeaseBar] CC 软写兜底：后台重画一次，抹平待生效的显隐改动")
-                apply_now()
+                targets = dict(_soft_targets)
+            if not _pending_soft:
+                return
+            print("[PeaseBar] CC 软写兜底：后台重画一次，抹平待生效的显隐改动")
+            # 先把软写目标补写盘一次：软写窗口里系统可能把旧值回写覆盖，
+            # 不补写就只是把旧态重画回去，图标会「赖在栏上不收」
+            for allowed in (True, False):
+                bids = {b for b, a in targets.items() if a == allowed}
+                if bids:
+                    set_apps_allowed(bids, allowed, hard=False)
+            apply_now()
 
         _soft_timer = threading.Timer(delay, _fire)
         _soft_timer.daemon = True

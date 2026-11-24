@@ -300,6 +300,21 @@ class TestTriggerConflictSync(unittest.TestCase):
         self.assertNotIn("still_visible", out)
         self.assertEqual(self.applied, [])
 
+    def test_软写待生效项不被自检提前收回(self):
+        """报障#5：点了隐藏图标后收回走软写，栏上短暂残留是正常中间态；
+        自检/收回写必须免检这些 bid，不能当成漂移当场硬 apply 闪栏。"""
+        self.online = [fake(bid="com.acme.todesk", label="ToDesk"),
+                       fake(bid="com.pease.peasebar", label="PeaseBar")]
+        orig = ccnative.soft_pending_bids
+        ccnative.soft_pending_bids = lambda: {"com.acme.todesk"}
+        try:
+            out = self.ctrl.sync_cc_now()
+        finally:
+            ccnative.soft_pending_bids = orig
+        self.assertNotIn("com.acme.todesk", self._hide_bids())
+        self.assertNotIn("still_visible", out)
+        self.assertEqual(self.applied, [])  # 零硬 apply：等 15s 兜底自然抹平
+
 
 if __name__ == "__main__":
     unittest.main()

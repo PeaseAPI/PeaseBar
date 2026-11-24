@@ -1741,6 +1741,10 @@ class SettingsController(NSObject):
             # 显回窗口硬收回会多闪一次栏，还把用户的菜单点击窗口抽走了
             # （2026-11-24 闪断真凶；流程结束后由软写+兜底自然抹平）
             inflight = set(panel._inflight)  # 入口快照：只用于显回侧粗筛
+            # 软写待生效的收回（点了图标后已写盘、等 15s 兜底重画）也不是
+            # 漂移：免检免重写，否则刚点完应用就被自检提前硬收回又闪一下
+            # （2026-11-24 报障#5）
+            soft_pending = ccnative.soft_pending_bids()
             # 显回的只限「自己上轮藏过、现在配置改显示」的：用户在系统设置
             # 里手动关掉的（配置是显示）不动，尊重手动选择。
             prev = ccnative.last_hidden()
@@ -1753,7 +1757,8 @@ class SettingsController(NSObject):
                 if sections.section_of(cfg, sections.item_key(m)) == sections.SECTION_VISIBLE:
                     to_show.add(m.owner_bundle_id)
             out["hide"] = len(ccnative.set_apps_allowed(
-                set(cfg_hidden_bids) - set(panel._inflight), False))
+                set(cfg_hidden_bids) - set(panel._inflight) - soft_pending,
+                False))
             out["show"] = len(ccnative.set_apps_allowed(to_show, True))
             # 实效自检：写成功≠生效（2026-11-24 事故教训：格式写坏后每次幂等
             # 跳过，图标全在栏上却无人报错）。给 MenuBarAgent 重读留一拍再
@@ -1767,7 +1772,9 @@ class SettingsController(NSObject):
             # inflight 取实时值而非函数入口快照：同步线程盘点慢，入口时
             # 面板 trigger 可能还没登记，拿旧快照会把刚显回的图标当漂移
             # 提前硬收回（真机闪断第二暗窗，2026-11-24）
-            still = [b for b in sorted(set(cfg_hidden_bids) - set(panel._inflight))
+            still = [b for b in sorted(set(cfg_hidden_bids)
+                                       - set(panel._inflight)
+                                       - ccnative.soft_pending_bids())
                      if not ccnative.is_protected(b)
                      and ccnative.match_bid(b, set(online_bids))]
             if still:
