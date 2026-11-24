@@ -45,7 +45,10 @@ def state_path():
 
 
 def record_hidden(bids):
-    """把本轮 PeaseBar 藏的 bundle id 落盘（去重保序）。"""
+    """把本轮 PeaseBar 藏的 bundle id 落盘（去重保序）。
+
+    幂等短路：目标集与盘上已一致就不重写文件——否则 60s tick 每分钟
+    都摸一次 mtime，监控/备份会被假变更刷屏（体检 S1-2 残留）。"""
     import json
     try:
         with open(state_path(), "r", encoding="utf-8") as f:
@@ -53,6 +56,8 @@ def record_hidden(bids):
     except Exception:
         prev = []
     merged = [b for b in prev if b not in bids] + sorted(bids)
+    if merged == prev:
+        return merged
     try:
         with open(state_path(), "w", encoding="utf-8") as f:
             json.dump(merged, f, ensure_ascii=False)
