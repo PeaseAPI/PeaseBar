@@ -1907,7 +1907,17 @@ class SettingsController(NSObject):
             # 不可控名单也免检：它们永远在线，重试无意义且会触发闪断。
             # soft 模式跳过自检（周期核对只写盘，不等效果，不闪）。
             if not soft:
+                # 重启瞬态（报障十：点「应用更改」菜单栏没十几秒的真凶）：
+                # apply 重启 MenuBarAgent 后，各家 App 的状态项会短暂重新注册——
+                # 这一刻盘点会把「其实已成功隐藏」的 App 也看成在线。旧版单读
+                # 一次就把 9 枚托管得住的（Alcove/OneDrive/Q…）一刀切误标成不可控，
+                # 连带 refresh_live_panels 重采 + 后续重闪。改为双读确认：只有连续
+                # 两读都在栏上的才是真不可控；瞬态那枚第二读已落回隐藏，自动排除。
                 time.sleep(2.0)
+                first_read = {m.owner_bundle_id
+                              for m in inventory.list_items()[0]
+                              if not m.is_stash_button}
+                time.sleep(1.5)
                 online_bids = [m.owner_bundle_id
                                for m in inventory.list_items()[0]
                                if not m.is_stash_button]
@@ -1917,9 +1927,10 @@ class SettingsController(NSObject):
                                            - ccnative.soft_pending_bids()
                                            - ccnative.unmanageable_set())
                          if not ccnative.is_protected(b)
-                         and ccnative.match_bid(b, online_set)]
+                         and ccnative.match_bid(b, online_set)
+                         and ccnative.match_bid(b, first_read)]
                 if still:
-                    print(f"[PeaseBar] 实效自检：{len(still)} 个配置隐藏项仍在菜单栏上"
+                    print(f"[PeaseBar] 实效自检：{len(still)} 个配置隐藏项连续两读仍在菜单栏上"
                           f"（{', '.join(still[:4])}...），标记不可控并停止重试")
                     ccnative.mark_unmanageable(set(still))
                     out["still_visible"] = still

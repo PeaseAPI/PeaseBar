@@ -168,30 +168,48 @@ def _app_running(bid):
 
 
 def try_reopen(bid, settle=1.6):
-    """免显回捷径：reopen 事件（等价于再点一次 Dock 图标）唤起 App 主窗口。
+    """免显回捷径：reopen 事件（等价于再点一次 Dock 图标）唤起 App。
 
-    报障九（2026-11-24）预研实测（tmp/reopen_probe.py）：部分 App 直接开窗
-（Alcove/Snapzy），部分根本不理 reopen（OneDrive/Synology）——所以配合
-    _reopen_learned 逐 App 学习：命中记 True（以后左键零闪秒开），落空记
-    False（不再白等，直接走显回链）。零鼠标、零写盘、零杀进程。
+    成功判据两样，任一即算直达（都零鼠标、零写盘、零杀进程）：
+    ① 冒出新窗口（Alcove/Snapzy 这类重开主窗）；
+    ② App 被提到前台（QQ/微信这类已有窗口、reopen 只把它激活到最前）。
+    报障十真机实测：QQ 已有主窗，`open -b com.tencent.qq` 0.4s 就把前台
+    切到 QQ——旧版只数新窗口，把这条命中误判成落空又去走显回链，白闪两下
+    还没开窗（用户「点千问/QQ 半天才出来、要回菜单栏」的根因）。
+    配合 _reopen_learned 逐 App 学习：命中记 True（以后左键零闪秒开），
+    落空记 False（不再白等，直接走显回链）。
     """
     import subprocess
 
     from AppKit import NSWorkspace
-    app = next((a for a in NSWorkspace.sharedWorkspace().runningApplications()
+    ws = NSWorkspace.sharedWorkspace()
+    app = next((a for a in ws.runningApplications()
                 if (a.bundleIdentifier() or "") == bid), None)
     if app is None:
         return False
+    pid = app.processIdentifier()
     base = trigger._snapshot()
     try:
         subprocess.run(["open", "-b", bid], capture_output=True)
     except Exception:  # noqa: BLE001 - open 调不动就当没反
         return False
-    return bool(trigger._wait_open(base, app.processIdentifier(), settle))
+    # 双判据轮询：新窗口 or 该 App 成前台，任一命中即零闪直达
+    end = time.time() + settle
+    while time.time() < end:
+        if trigger._opened_since(base, pid):
+            return True
+        front = ws.frontmostApplication()
+        if front is not None and front.processIdentifier() == pid:
+            return True
+        time.sleep(trigger.POLL)
+    return False
 
 
 # bid → 左键能否用 reopen 直达（未试过的不在表里，首试后必有 True/False）
 _reopen_learned = {}
+# 右键试过但弹不出菜单的 bid（QQ/钉钉那一家无可操作 AX 元素、合成右键又已停用）：
+# 记下来后右键直接如实告知，不再白走一遍显回→收回（报障十「白闪两下没反应」）
+_menu_unsupported = set()
 
 
 def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
@@ -215,6 +233,14 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
         print(f"[PeaseBar] {bid} 上一发唤起还在进行中，本次不叠加")
         if on_done is not None:
             on_done("上一发唤起还在进行中（已在等图标回栏），本次点击不叠加", False)
+        return
+    if prefer_menu and bid in _menu_unsupported:
+        # 已学到：这个 App 的原生状态菜单只认菜单栏上的真实右键，弹窗内
+        # 触发要么无 AX 元素、要么合成右键已停用——再走显回链只会白闪两下还
+        # 弹不出菜单（报障十 QQ 右键）。如实告知，零闪。
+        if on_done is not None:
+            on_done("这个 App 的原生菜单只能在菜单栏上直接右键触发（弹窗内不控制"
+                    "鼠标做不到），已免去一次白闪", False)
         return
 
     def run():
@@ -285,6 +311,10 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
                 # （报障八 Qoder 案例：回执正常但没开窗），隔 0.8s 再试
                 time.sleep(0.8)
                 result = trigger.open_item(item, prefer_menu=prefer_menu)
+            if prefer_menu and not result[1]:
+                # 右键弹了两次都没弹出菜单：记下这个 bid，下次右键直接告知、
+                # 不再白走显回→收回（报障十 QQ/钉钉那一家无可操作 AX元素）
+                _menu_unsupported.add(bid)
             time.sleep(HIDE_DELAY)  # 菜单还开着就继续点，到点收回
             # 收回走硬 apply，但距显回只隔 HIDE_DELAY，必撞去抖窗口→自动顺延
             # 到窗口尾一次生效：图标多赖几秒但整栏零死屏；旧版此处直杀吃

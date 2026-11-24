@@ -341,6 +341,19 @@ class TestTriggerConflictSync(unittest.TestCase):
         self.assertNotIn("still_visible", out)
         self.assertEqual(self.applied, [])
 
+    def test_重启瞬态第二读已藏回不误标不可控(self):
+        """报障十主因：apply 重启 MenuBarAgent 后各家图标短暂重注册，自检第一
+        读撞上的「在线」是瞬态——第二读已落回隐藏就不该误标不可控。旧版单读
+        一次就把托管得住的 9 枚一刀切标进名单，引发连锁重闪（菜单栏没十几秒）。"""
+        seq = iter([[fake(bid="com.acme.todesk", label="ToDesk")],   # to_show 循环
+                    [fake(bid="com.acme.todesk", label="ToDesk")],   # 自检第一读：瞬态在线
+                    [],                                             # 自检第二读：已藏回
+                    []])                                            # leftover
+        settings.inventory.list_items = lambda: (next(seq), [])
+        out = self.ctrl.sync_cc_now()
+        self.assertNotIn("still_visible", out)
+        self.assertNotIn("com.acme.todesk", self.unman)  # 没被误标进名单
+
     def test_配置隐藏项不因键后缀漂移被显回(self):
         """报障二根因铁证：CleanMyMac5.Menu 的配置键带名字后缀，
         盘点时算出的 item_key 后缀不一致 → section_of 精确 miss 回 visible，

@@ -299,5 +299,105 @@ class TestReentry(unittest.TestCase):
         self.assertEqual(calls, [False])  # 只回调了「不叠加」，没进任何链路
 
 
+class TestTryReopenActivation(unittest.TestCase):
+    """try_reopen 双判据（报障十）：reopen 没开新窗但把 App 提到前台也算命中，
+    不能只数新窗口——QQ/微信这类已有主窗、reopen 只激活，旧版误判落空又走显回链。"""
+
+    BID = "com.example.qq"
+
+    class _App:
+        def __init__(self, pid, bid):
+            self._p, self._b = pid, bid
+
+        def bundleIdentifier(self):
+            return self._b
+
+        def processIdentifier(self):
+            return self._p
+
+    def _run(self, front_pid, opened):
+        import AppKit
+        ws = mock.MagicMock()
+        ws.runningApplications.return_value = [self._App(4242, self.BID)]
+        ws.frontmostApplication.return_value = self._App(front_pid, "x")
+        clock = {"t": 0.0}
+        with mock.patch.object(AppKit, "NSWorkspace") as NSW, \
+             mock.patch("subprocess.run"), \
+             mock.patch.object(panel.trigger, "_snapshot", lambda: {}), \
+             mock.patch.object(panel.trigger, "_opened_since",
+                               lambda b, p: opened), \
+             mock.patch.object(panel, "time", types.SimpleNamespace(
+                 sleep=lambda _s: None,
+                 time=lambda: clock.__setitem__("t", clock["t"] + 1.0)
+                 or clock["t"])):
+            NSW.sharedWorkspace.return_value = ws
+            return panel.try_reopen(self.BID)
+
+    def test_无新窗但前台激活算命中(self):
+        self.assertTrue(self._run(4242, opened=[]))
+
+    def test_无新窗又没激活则落空(self):
+        self.assertFalse(self._run(9999, opened=[]))
+
+    def test_冒新窗也算命中(self):
+        self.assertTrue(self._run(9999, opened=[(1, 2, (0, 0, 100, 100))]))
+
+
+class TestMenuUnsupportedLearning(unittest.TestCase):
+    """右键弹不出菜单的学习与直通（报障十 QQ 右键白闪两下）：无可操作 AX
+    元素的 App 首弹学过之后，右键不再白走显回→收回，零闪如实告知。"""
+
+    BID = "com.example.qq"
+
+    def _click(self, unsupported):
+        calls, done = [], []
+        n = {"i": 0}
+
+        def _list_items():
+            # 守门①不在栏上（逼出③）；显回后轮询才拿到重连图标
+            n["i"] += 1
+            return (([_seen_item(self.BID)], []) if n["i"] > 1 else ([], []))
+
+        clock = {"t": 0.0}
+
+        class _SyncThread:
+            def __init__(self, target=None, daemon=None):
+                self._target = target
+
+            def start(self):
+                self._target()
+
+        with mock.patch.object(panel.inventory, "list_items", _list_items), \
+             mock.patch.object(panel, "_app_running", return_value=True), \
+             mock.patch.object(panel, "_reopen_learned", {self.BID: False}), \
+             mock.patch.object(panel, "_menu_unsupported", unsupported), \
+             mock.patch.object(panel.ccnative, "set_apps_allowed",
+                               lambda bids, allowed, hard=True:
+                               calls.append((allowed, hard)) or set(bids)), \
+             mock.patch.object(panel.trigger, "open_item",
+                               side_effect=lambda m, prefer_menu=False:
+                               ("链上弹不了", False)), \
+             mock.patch.object(panel.threading, "Thread", _SyncThread), \
+             mock.patch.object(panel, "time", types.SimpleNamespace(
+                 sleep=lambda _s: None,
+                 time=lambda: clock.__setitem__("t", clock["t"] + 1.0)
+                 or clock["t"])):
+            panel.open_native_hidden_async(
+                self.BID, lambda how, seen: done.append((how, seen)),
+                prefer_menu=True)
+        return calls, done
+
+    def test_首弹落空学到bid(self):
+        unsupported = set()
+        calls, _done = self._click(unsupported)
+        self.assertEqual(calls, [(True, True), (False, True)])  # 首弹仍显回+收回
+        self.assertIn(self.BID, unsupported)                     # 但学到了
+
+    def test_学过之后右键直通零闪零写盘(self):
+        calls, done = self._click({self.BID})
+        self.assertEqual(calls, [])          # 不再碰 plist = 零闪断
+        self.assertTrue(done and done[0][1] is False)
+
+
 if __name__ == "__main__":
     unittest.main()
