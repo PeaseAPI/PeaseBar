@@ -201,7 +201,10 @@ def open_native_hidden_async(bid, on_done=None):
             ccnative.set_apps_allowed([bid], True)
             time.sleep(1.2)  # MenuBarAgent 重启后 AX 树重建需要时间，先歇再问
             item = None
-            end = time.time() + 8.0
+            # 等待窗口要盖住「显回被去抖顺延」的情形（报障七：连杀撞 launchd
+            # 节流，apply_now 改为窗口内顺延）：图标会到顺延重画后才出现，
+            # 多等一会儿比白点一次强；常态（直通重画）仍 2s 内命中
+            end = time.time() + 8.0 + ccnative.HARD_APPLY_MIN_GAP
             while time.time() < end:
                 for m in inventory.list_items()[0]:
                     if m.owner_bundle_id == bid and not m.is_stash_button:
@@ -219,9 +222,9 @@ def open_native_hidden_async(bid, on_done=None):
                 return
             result = trigger.open_item(item)
             time.sleep(HIDE_DELAY)  # 菜单还开着就继续点，到点收回
-            # 收回必须硬生效：软写只落盘不重画，图标会在栏上赖到 15s 兜底，
-            # 用户视角就是「点完图标根本不回去」（2026-11-24 报障）；
-            # 重画代价合并进这一次，不另加定时器再闪第二轮
+            # 收回走硬 apply，但距显回只隔 HIDE_DELAY，必撞去抖窗口→自动顺延
+            # 到窗口尾一次生效：图标多赖几秒但整栏零死屏；旧版此处直杀吃
+            # launchd 节流 9s，就是报障七「点弹窗图标后菜单栏没十几秒」主因
             ccnative.set_apps_allowed([bid], False)
             if on_done is not None:
                 on_done(*result)

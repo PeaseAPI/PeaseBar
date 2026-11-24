@@ -360,7 +360,7 @@ def set_apps_allowed(bids, allowed, hard=True):
     except Exception as exc:  # noqa: BLE001
         print(f"[PeaseBar] CC 写后校验异常：{exc}")
     if hard:
-        apply_now()
+        apply_now(pending={b: allowed for b in changed})
     else:
         # 软生效：只清偏好缓存（不重启 MenuBarAgent，零闪断）；标记待重画，
         # 等下一次 hard apply 或 schedule_hard_apply 兜底把它抹平。
@@ -389,14 +389,49 @@ def soft_pending_bids():
         return set(_soft_targets)
 
 
-def apply_now():
-    """让改动生效：清 cfprefsd 缓存（launchd 秒拉起）+ 重启 MenuBarAgent 重画。
+# 去抖窗口：launchd 实测节流约 9s（连杀第 2 次 9.07s、第 3 次 9.04s），留足余量
+HARD_APPLY_MIN_GAP = 11.0
+_last_hard_apply = 0.0  # 上次真正 killall MenuBarAgent 的时刻（0=从未，首次必直通）
 
-    注意：MenuBarAgent 是整条菜单栏（含 Apple 菜单/应用菜单/右侧图标）的渲染
-    宿主，重启期间全栏清空约 0.3s——这就是用户看到的「菜单栏消失一下」。
+
+def apply_now(pending=None):
+    """让改动生效：清 cfprefsd 缓存 + 重启 MenuBarAgent 重画（带 throttle 去抖）。
+
+    真机铁证（2026-11-24 报障七）：launchd 对 MenuBarAgent 异常退出做指数退避
+    （plist properties 带 exponential throttling）——首次 killall 0.03s 拉起，
+    但 9s 内连杀第 2/3 次各要等 9s，全栏死屏叠加就是用户看到的「消失十几秒」
+    （点弹窗图标=显回+收回两次 kill，应用改动后再点弹窗=又撞上窗口期）。
+    去抖：距上次重画不足 HARD_APPLY_MIN_GAP 时不杀（旧实例照常渲染、菜单栏
+    零感知），顺延到窗口结束后一次快重启（schedule_hard_apply 到期时 gap 已
+    够，必走即时分支）。
+
+    返回 True=本次真的重画了；False=被去抖顺延（改动已落盘，稍后生效）。
+    pending：本次已写盘的 bid→目标态 dict（或 bid 集合）；被去抖时登记进
+    「待重画」软写中间态，实效自检/周期核对据此免检，不把中间态误判成漂移。
     仅在必须立即反映实况时走这里；可延迟的场景用 set_apps_allowed(hard=False)。
     """
-    global _pending_soft, _soft_timer
+    global _pending_soft, _soft_timer, _last_hard_apply
+    now = time.time()
+    with _soft_lock:
+        gap = now - _last_hard_apply
+        throttled = 0 < gap < HARD_APPLY_MIN_GAP
+        if throttled:
+            if pending:
+                pairs = list(pending.items()) if isinstance(pending, dict) \
+                    else [(b, None) for b in pending]
+                for b, a in pairs:
+                    _soft_targets[b] = True if a is None else a
+            # 无条件置待重画：哪怕本轮没有显隐目标（纯改序的 apply_now），
+            # 顺延到期也必须真重画一次，否则新权重永不上栏
+            _pending_soft = True
+        else:
+            _last_hard_apply = now
+    if throttled:
+        wait = HARD_APPLY_MIN_GAP - gap + 0.4
+        print(f"[PeaseBar] CC 重画去抖：距上次重启仅 {round(gap, 1)}s，"
+              f"顺延 {round(wait, 1)}s 合并生效（避开 launchd 节流的全栏空白）")
+        schedule_hard_apply(wait)
+        return False
     with _soft_lock:
         if _soft_timer is not None:
             _soft_timer.cancel()
@@ -407,6 +442,7 @@ def apply_now():
         subprocess.run(["killall", proc], capture_output=True)
     # 给 launchd 拉起与首帧重画一点时间
     time.sleep(0.6)
+    return True
 
 
 def schedule_hard_apply(delay=15.0):

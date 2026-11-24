@@ -4,6 +4,7 @@
 import os
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -221,6 +222,8 @@ class TestSoftApply(unittest.TestCase):
             self.cancelled = True
 
     def setUp(self):
+        # 可控时钟：用例自己 now += 模拟去抖窗口过去；首次 apply 前从未重画
+        self.now = 1000.0
         self.plist = os.path.join(tempfile.mkdtemp(), "cc.plist")
         p = mock.patch.object(ccnative, "CC_PLIST", self.plist)
         p.start()
@@ -230,7 +233,8 @@ class TestSoftApply(unittest.TestCase):
                                lambda cmd, **kw: self.runs.append(list(cmd)))
         sp.start()
         self.addCleanup(sp.stop)
-        sl = mock.patch.object(ccnative.time, "sleep", lambda _s: None)
+        sl = mock.patch.object(ccnative, "time", types.SimpleNamespace(
+            time=lambda: self.now, sleep=lambda _s: None))
         sl.start()
         self.addCleanup(sl.stop)
         self.timers = []
@@ -247,6 +251,9 @@ class TestSoftApply(unittest.TestCase):
         st = mock.patch.object(ccnative, "_soft_targets", {})
         st.start()
         self.addCleanup(st.stop)
+        la = mock.patch.object(ccnative, "_last_hard_apply", 0.0)
+        la.start()
+        self.addCleanup(la.stop)
         self._write_rec("com.acme.app", True)
 
     def _mk_timer(self, delay, fn):
@@ -327,6 +334,52 @@ class TestSoftApply(unittest.TestCase):
         )[0]["isAllowed"])
         self.assertFalse(ccnative._pending_soft)
         self.assertEqual(ccnative.soft_pending_bids(), set())
+
+    # ---- throttle 去抖（报障七：连杀撞 launchd 指数节流，全栏死屏十几秒）----
+
+    def test_窗口内连杀第二次被去抖顺延(self):
+        self.assertTrue(ccnative.apply_now())          # 首次直通重画
+        self.assertIn("MenuBarAgent", self.killed())
+        del self.runs[:]
+        self.now += 5.0                                # 距上次重启只 5s
+        self.assertFalse(ccnative.apply_now())         # 去抖：不再杀
+        self.assertNotIn("MenuBarAgent", self.killed())
+        self.assertEqual(len(self.timers), 1)          # 顺延到窗口尾
+        self.assertTrue(ccnative._pending_soft)        # 纯重画也要记待办
+
+    def test_去抖到期后一次快重启(self):
+        ccnative.apply_now()
+        del self.runs[:]
+        self.now += 5.0
+        ccnative.apply_now()
+        self.assertEqual(self.killed(), [])
+        self.now += 12.0                               # 到顺延期满
+        self.timers[-1].fn()
+        self.assertIn("MenuBarAgent", self.killed())   # 到期真重画
+        self.assertFalse(ccnative._pending_soft)
+
+    def test_去抖时pending登记进免检清单(self):
+        """被顺延的显隐写要进软写中间态：自检/周期核对据此免检，
+        不把「配置要藏但还在栏上」误判成漂移而落错不可控名单。"""
+        ccnative.apply_now()
+        self.now += 3.0
+        ccnative.apply_now(pending={"com.acme.app": False})
+        self.assertEqual(ccnative.soft_pending_bids(), {"com.acme.app"})
+        self.assertTrue(ccnative._pending_soft)
+
+    def test_直通重画清空免检与待办(self):
+        ccnative._pending_soft = True
+        ccnative._soft_targets["com.acme.app"] = False
+        self.assertTrue(ccnative.apply_now())
+        self.assertFalse(ccnative._pending_soft)
+        self.assertEqual(ccnative.soft_pending_bids(), set())
+
+    def test_窗口外再杀又直通(self):
+        ccnative.apply_now()
+        self.now += ccnative.HARD_APPLY_MIN_GAP + 1.0  # 窗口过去
+        del self.runs[:]
+        self.assertTrue(ccnative.apply_now())
+        self.assertIn("MenuBarAgent", self.killed())
 
 
 class TestUnmanageable(unittest.TestCase):
