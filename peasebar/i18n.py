@@ -136,7 +136,7 @@ _STRINGS = {
         "opt.bar_wrap": "图标条放不下时换行",
         "opt.bar_wrap.tip": "开：整区图标一次看全（区会变高）；关：单行横向滚动",
         "opt.real_bar": "同步到真实菜单栏",
-        "opt.real_bar.tip": "开：应用改动时按配置静默同步图标显隐（走系统通道，绝不模拟鼠标）；栏上物理顺序不再代劳，设置页/面板顺序不受影响",
+        "opt.real_bar.tip": "开：应用改动时按配置静默同步图标显隐与栏上物理顺序（走系统通道，绝不模拟鼠标）；设置页/面板顺序不受影响",
         "layout.reset": "重置布局",
         "layout.reset.tip": "把弹窗显示/永久隐藏的图标全部带回菜单栏，并清空自定义顺序",
         "layout.reset.title": "重置布局？",
@@ -325,7 +325,7 @@ _STRINGS = {
         "opt.bar_wrap": "圖示條放不下時換行",
         "opt.bar_wrap.tip": "開：整區圖示一次看全（區會變高）；關：單行橫向捲動",
         "opt.real_bar": "同步到真實選單列",
-        "opt.real_bar.tip": "開：套用變更時依設定靜默同步圖示顯隱（走系統通道，絕不模擬滑鼠）；欄上實體順序不再代勞，設定頁/面板順序不受影響",
+        "opt.real_bar.tip": "開：套用變更時依設定靜默同步圖示顯隱與欄上實體順序（走系統通道，絕不模擬滑鼠）；設定頁/面板順序不受影響",
         "layout.reset": "重置佈局",
         "layout.reset.tip": "把彈出顯示/永久隱藏的圖示全部帶回選單列，並清空自訂順序",
         "layout.reset.title": "重置佈局？",
@@ -504,9 +504,9 @@ _STRINGS = {
         "opt.bar_wrap": "Wrap When Overflowing",
         "opt.bar_wrap.tip": "On: see a whole section at once (sections get taller); off: single row with scrolling",
         "opt.real_bar": "Sync to Real Menu Bar",
-        "opt.real_bar.tip": "On: applying changes silently syncs icon visibility through the system "
-                            "channel — the mouse is never simulated; physical bar order is left alone, "
-                            "settings/panel ordering still works",
+        "opt.real_bar.tip": "On: applying changes silently syncs icon visibility and physical "
+                            "bar order through the system channel — the mouse is never "
+                            "simulated; settings/panel ordering still works",
         "layout.reset": "Reset Layout",
         "layout.reset.tip": "Bring all popup/permanently hidden icons back to the menu bar and clear custom order",
         "layout.reset.title": "Reset Layout?",
@@ -689,8 +689,8 @@ _STRINGS = {
         "opt.bar_wrap.tip": "Вкл: вся секция сразу (секция выше); выкл: одна строка с прокруткой",
         "opt.real_bar": "Синхрон. с реальной панелью",
         "opt.real_bar.tip": "Вкл.: применение изменений молча синхронизирует видимость значков "
-                            "через системный канал — мышь никогда не имитируется; физический "
-                            "порядок на панели не трогается, порядок в настройках/панели работает",
+                            "и физический порядок на панели через системный канал — мышь "
+                            "никогда не имитируется; порядок в настройках/панели работает",
         "layout.reset": "Сбросить раскладку",
         "layout.reset.tip": "Вернуть все значки в строку меню и сбросить порядок",
         "layout.reset.title": "Сбросить раскладку?",
@@ -871,8 +871,8 @@ _STRINGS = {
         "opt.bar_wrap.tip": "Activé : toute la section d'un coup (plus haute) ; désactivé : une ligne défilante",
         "opt.real_bar": "Synchroniser avec la barre",
         "opt.real_bar.tip": "Activé : l'application des modifications synchronise en silence la "
-                            "visibilité via le canal système — la souris n'est jamais simulée ; "
-                            "l'ordre physique de la barre n'est plus modifié, l'ordre réglages/panneau est conservé",
+                            "visibilité et l'ordre physique de la barre via le canal système — "
+                            "la souris n'est jamais simulée ; l'ordre réglages/panneau est conservé",
         "layout.reset": "Réinitialiser la disposition",
         "layout.reset.tip": "Ramener toutes les icônes dans la barre et effacer l'ordre personnalisé",
         "layout.reset.title": "Réinitialiser la disposition ?",

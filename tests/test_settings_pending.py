@@ -12,15 +12,27 @@
 """
 import os
 import tempfile
+import threading
 import types
 import unittest
+from unittest import mock
 
-from peasebar import sections, settings
+from peasebar import mbrprefs, sections, settings
 
 
 def item(bid, label):
     return types.SimpleNamespace(owner_bundle_id=bid, label=label, key_part="",
                                  owner_app=label)
+
+
+class _SyncThread:
+    """把后台生效线程变成就地执行：单测断言不再和线程调度赛跑。"""
+
+    def __init__(self, target=None, args=(), daemon=None, **kw):
+        self._target, self._args = target, args
+
+    def start(self):
+        self._target(*self._args)
 
 
 class PendingCase(unittest.TestCase):
@@ -41,6 +53,12 @@ class PendingCase(unittest.TestCase):
         # 后台生效部分同步执行：real_bar=False 已不碰 CC/拖拽，applyDone 直调
         self.ctrl.performSelectorOnMainThread_withObject_waitUntilDone_ = (
             lambda sel, obj, wait: self.ctrl.applyDone_(obj))
+        # 全局防护：后台线程就地跑；权重表写入打桩（单测绝不碰真表/不 killall）
+        p1 = mock.patch.object(threading, "Thread", _SyncThread)
+        p2 = mock.patch.object(mbrprefs, "apply_visible_order",
+                               lambda bids, match: {"changed": 0, "error": None})
+        p1.start(); p2.start()
+        self.addCleanup(p1.stop); self.addCleanup(p2.stop)
 
     def tearDown(self):
         sections.config_path = self._real_path
@@ -95,16 +113,22 @@ class TestApply(PendingCase):
         self.assertEqual(self.reloaded, [True])  # 生效后重盘点刷面板
 
     def test_real_bar开时应用只做CC静默同步(self):
-        """real_bar 开：应用后台链路只调 sync_cc_now（打桩计数）。
+        """real_bar 开：应用后台链路 = 权重表改序（打桩）+ sync_cc_now。
 
-        拖拽镜像（收纳区放出/顺序对齐）已按用户要求彻底停用（2026-11-24），
-        应用流程不再碰任何鼠标控制。"""
+        拖镜像（合成 ⌘-拖）已按用户要求彻底停用（2026-11-24 报障#6），
+        改序走 com.apple.MenuBar 权重表（mbrprefs，这里打桩不碰真表），
+        应用流程不碰任何鼠标控制。"""
         calls = []
         self.edit("b|B", sections.SECTION_HIDDEN)
         self.ctrl.real_bar = True
         self.ctrl.sync_cc_now = lambda: calls.append("cc") or {"writable": True}
-        self.ctrl.onApplyLayout_(None)
-        self.assertEqual(calls, ["cc"])  # 只剩静默 CC 同步
+        # 基类已把线程同步化、序表写入已桩成记录 order 调用
+        with mock.patch.object(
+                mbrprefs, "apply_visible_order",
+                lambda bids, match: calls.append("order")
+                or {"changed": 0, "error": None}):
+            self.ctrl.onApplyLayout_(None)
+        self.assertEqual(calls, ["order", "cc"])  # 先写序表再显隐同步，共用一次重启
         self.assertEqual(self.cfg()["sections"].get("b|B"), sections.SECTION_HIDDEN)
 
     def test_real_bar关时应用不碰真实菜单栏(self):

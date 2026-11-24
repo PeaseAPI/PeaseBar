@@ -88,7 +88,7 @@ from ApplicationServices import AXIsProcessTrusted
 
 import ServiceManagement as SM
 
-from peasebar import capture, ccnative, i18n, inventory, layout_table, menubar_drag, panel, sections
+from peasebar import capture, ccnative, i18n, inventory, layout_table, mbrprefs, menubar_drag, panel, sections
 from peasebar.i18n import t as tr
 
 # 方向键的 keyCode（AppKit 的 NS*ArrowFunctionKey 取值，写数字谁也看不懂）
@@ -524,7 +524,7 @@ class SettingsController(NSObject):
         self.drag_key = None      # 正在拖的图标配置键（没拖时 None）
         self.use_captured = False  # 布局页选项：默认用 App 图标（真实像素会把未读数等拍进格子）
         self.bar_wrap = True      # 布局页选项：图标条装不下就换行而不是横向滚动
-        self.real_bar = True      # 布局页选项：换区/改序镜像到真实菜单栏（合成 ⌘-拖）
+        self.real_bar = True      # 布局页选项：显隐/顺序同步到真实菜单栏（系统通道，零鼠标）
         self.buckets = {}     # 最近一次 _rebuild 的分桶结果（键盘编辑读它，不二次盘点）
         self._undo = []       # 撤销栈：每格是 {sections, order} 快照
         # 布局草稿（暂存+应用模式，2026-11-24 用户定调「编辑完点应用立刻生效」）：
@@ -1512,9 +1512,22 @@ class SettingsController(NSObject):
             summary = {}
             try:
                 if self.opt("real_bar"):
-                    # 只做静默的 CC plist 显隐同步；拖拽镜像（收纳区放出/顺序对齐）
-                    # 按用户要求彻底停用——任何路径都不再控制鼠标（2026-11-24）
+                    cfg = sections.load_config()
+                    # 显隐同步 + 权重表改序，全程零鼠标（2026-11-24 报障#6：
+                    # 用户要求点「应用改动」真实栏顺序就变，不许动鼠标）。
+                    # 先写顺序表再跑显隐同步：同步里的硬 apply 会顺带把新序
+                    # 重画出来，两件事共用一次重启，只闪一次
+                    order = self._bar_order_target(cfg)
+                    if order:
+                        summary["order"] = mbrprefs.apply_visible_order(
+                            order, ccnative.match_bid)
                     summary["cc"] = self.sync_cc_now()
+                    o = summary.get("order") or {}
+                    if o.get("changed") and not (
+                            (summary.get("cc") or {}).get("show")):
+                        # 显隐同步没触发硬 apply（幂等零动作）时补一次重启，
+                        # 否则新权重要等下个兜底周期才上栏
+                        ccnative.apply_now()
             except Exception as exc:  # noqa: BLE001
                 summary["error"] = str(exc)
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -1536,6 +1549,11 @@ class SettingsController(NSObject):
             print(f"[PeaseBar] 应用：实效自检重写 {len(cc['still_visible'])} 枚")
         if cc.get("error"):
             print(f"[PeaseBar] 应用：CC 对齐异常：{cc['error']}")
+        order = summary.get("order") or {}
+        if order.get("changed"):
+            print(f"[PeaseBar] 应用：栏上顺序已按权重表重排（{order['changed']} 键）")
+        if order.get("error"):
+            print(f"[PeaseBar] 应用：顺序表写入异常：{order['error']}")
         if summary.get("error"):
             print(f"[PeaseBar] 应用：异常：{summary['error']}")
         self._reload_items()
@@ -1545,55 +1563,20 @@ class SettingsController(NSObject):
         print("[PeaseBar] 设置：应用改动完成")
 
     @objc.python_method
-    def _align_section_order(self):
-        """应用时把「菜单栏显示」区整区目标顺序一次对齐到真实菜单栏。
+    def _bar_order_target(self, cfg):
+        """「菜单栏显示」区的目标序（左→右）：按 order 表排完后的 bid 序列。
 
-        按目标序逐项拖到左邻右边；每步拖完刷一遍实时坐标再动下一项（合成
-        ⌘-拖会重排菜单栏，旧坐标会拖空）。实况已是目标序就不折腾——合成拖拽
-        哪怕幂等也会让图标抖一下。系统项拖不动，但永远占着前排，正好当锚。
+        权重表改序的输入；去重保序（同 App 多枚图标在真实栏上共用一个 bundle
+        权重段）。少于两项就没有「序」可言，返回空列表让调用方跳过。
         """
-        if not self.opt("real_bar"):
-            return
-        group = self.buckets.get(sections.SECTION_VISIBLE) or []
-        if len(group) < 2:
-            return
-        import time
-        try:
-            fresh = [sections.item_key(m) for m in inventory.list_items()[0]
-                     if not m.is_stash_button]
-            pos = {k: i for i, k in enumerate(fresh)}
-            seq = [pos[k] for k in (sections.item_key(it) for it in group) if k in pos]
-            if seq == sorted(seq):
-                return  # 实况相对序已等于目标序：无需动手
-        except Exception:  # noqa: BLE001
-            pass
-        # CC 刚显回的项可能还没进盘点缓存：补一次全量盘点再动手
-        try:
-            all_items, _ = inventory.list_items()
-            have = {sections.item_key(m) for m in self.items}
-            for m in all_items:
-                if not m.is_stash_button and sections.item_key(m) not in have:
-                    self.items.append(m)
-        except Exception:  # noqa: BLE001
-            pass
-        self._resync_frames()
-        prev = None
-        moved = 0
-        for it in group:
-            src = self._item_by_key(sections.item_key(it))
-            if prev is not None and src is not None and menubar_drag.movable(src):
-                anchor = self._item_by_key(sections.item_key(prev))
-                if anchor is not None:
-                    try:
-                        if menubar_drag.reorder(src, anchor, after=True):
-                            moved += 1
-                            time.sleep(0.35)  # 给系统一拍重排，下一项的坐标才新
-                            self._resync_frames()
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"[PeaseBar] 应用：顺序对齐失败（{it.label}）：{exc}")
-            prev = it
-        if moved:
-            print(f"[PeaseBar] 应用：「菜单栏显示」区顺序对齐 {moved} 项")
+        keys = [k for k in (cfg.get("order") or [])
+                if sections.section_of(cfg, k) == sections.SECTION_VISIBLE]
+        out = []
+        for k in keys:
+            bid = k.split("|", 1)[0]
+            if bid and not ccnative.is_protected(bid) and bid not in out:
+                out.append(bid)
+        return out if len(out) > 1 else []
 
     @objc.python_method
     def _reveal_all_stashed(self):
