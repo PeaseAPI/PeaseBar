@@ -314,18 +314,25 @@ class TestTriggerConflictSync(unittest.TestCase):
         即使存在漂移，tick 时刻菜单栏也必须零闪断（用户痛点根因）。"""
         self.online = [fake(bid="com.acme.todesk", label="ToDesk")]
         calls = []
-        ccnative.set_apps_allowed = (
-            lambda bids, allowed, hard=True:
-            calls.append((frozenset(bids), allowed, hard)) or set())
+
+        def _write(bids, allowed, hard=True):
+            calls.append((frozenset(bids), allowed, hard))
+            return set(bids)  # 非空：模拟真实改动，供硬模式判定是否重画
+        ccnative.set_apps_allowed = _write
         out = self.ctrl.sync_cc_now(soft=True)
         self.assertTrue(calls)                              # 写盘照做
         self.assertTrue(all(h is False for _, _, h in calls))  # 全部软写
         self.assertEqual(self.applied, [])                 # 不重启 Agent
         self.assertNotIn("still_visible", out)             # 跳过实效自检
-        # 对照：硬模式（用户点应用）才允许自检点名与兜底 apply
+        # 对照：硬模式（用户点应用）——写盘仍全走 hard=False（只落盘），
+        # 藏/放合并后的唯一一次重画靠同步末尾显式 apply_now（一次重启，
+        # 不再是两次硬写互翻），并报 still_visible 供自检
         calls.clear()
+        self.applied.clear()
         self.ctrl.sync_cc_now()
-        self.assertTrue(all(h is True for _, _, h in calls))
+        self.assertTrue(calls)
+        self.assertTrue(all(h is False for _, _, h in calls))  # 写盘不各自重启
+        self.assertEqual(len(self.applied), 1)                 # 合并后只重画一次
 
     def test_无漂移时自检零动作(self):
         """栏上只剩 protected：幂等，不写不重画（钉住旧空转回归）。"""
@@ -333,6 +340,29 @@ class TestTriggerConflictSync(unittest.TestCase):
         out = self.ctrl.sync_cc_now()
         self.assertNotIn("still_visible", out)
         self.assertEqual(self.applied, [])
+
+    def test_配置隐藏项不因键后缀漂移被显回(self):
+        """报障二根因铁证：CleanMyMac5.Menu 的配置键带名字后缀，
+        盘点时算出的 item_key 后缀不一致 → section_of 精确 miss 回 visible，
+        旧逻辑就把该藏的记录又补写 true，与藏写互相翻转、每启动重启两次
+        MenuBarAgent（先没一下又出现）。新契约：按 bid 级别排除配置明确要藏
+        的项，绝不进显回（allowed=True）写。"""
+        self.online = [fake(bid="com.acme.todesk", label="ToDesk",
+                            key_part="Dock"),  # 与配置键 |ToDesk 后缀不一致
+                       fake(bid="com.pease.peasebar", label="PeaseBar")]
+        shown = set()
+        orig = ccnative.set_apps_allowed
+
+        def _capture(bids, allowed, hard=True):
+            if allowed:
+                shown.update(bids)
+            return orig(bids, allowed, hard)
+        ccnative.set_apps_allowed = _capture
+        try:
+            self.ctrl.sync_cc_now()
+        finally:
+            ccnative.set_apps_allowed = orig
+        self.assertNotIn("com.acme.todesk", shown)  # 配置要藏，不得被显回
 
     def test_软写待生效项不被自检提前收回(self):
         """报障#5：点了隐藏图标后收回走软写，栏上短暂残留是正常中间态；

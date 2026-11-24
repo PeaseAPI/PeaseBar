@@ -90,9 +90,15 @@ def is_writable():
 # 不可控名单：写入 isAllowed=false 并 apply 后图标仍在线的 bid——系统不托管
 # 这类 App 的状态项显隐（它们不走 trackedApplications 开关）。记入名单后
 # 自检/周期核对不再对其重试，彻底消灭「每分钟闪断」循环。
-# 名单持久化到 .cc_unmanageable，App 重启后自动出名单重试一次（系统行为可能变）。
+# 出名单机制是 TTL 而不是启动清空（2026-11-24 报障「每次启动先没一下」）：
+# 启动清名单会让同步链路对这些 bid 重新写 false、有实效差异就硬 apply
+# 重启 MenuBarAgent——每次开机白闪一次，「重试一次」的代价整周期化。
+# 现在条目带记入时间戳，满 UNMANAGEABLE_TTL 天才随读盘自动出名单重试一次
+# （系统行为可能随版本/登录态变化，靠 TTL 兜住重试机会）。
 # ---------------------------------------------------------------------------
+UNMANAGEABLE_TTL = 7 * 86400  # 名单条目有效期：7 天后自动出名单重试一次
 _unmanageable = set()  # 进程内缓存
+_unmanageable_ts = {}  # bid -> 记入时刻（落盘用，过期判定依据）
 _unmanageable_loaded = False
 
 
@@ -101,13 +107,32 @@ def _unmanageable_path():
 
 
 def load_unmanageable():
-    """启动时调用：从磁盘读入不可控名单。"""
-    global _unmanageable, _unmanageable_loaded
+    """懒加载：从磁盘读入不可控名单，过期条目随读盘淘汰（即自动重试窗口）。"""
+    global _unmanageable, _unmanageable_ts, _unmanageable_loaded
     import json
+    import time
     _unmanageable_loaded = True
+    _unmanageable, _unmanageable_ts = set(), {}
     try:
         with open(_unmanageable_path(), "r", encoding="utf-8") as f:
-            _unmanageable = set(json.load(f))
+            raw = json.load(f)
+        now = time.time()
+        if isinstance(raw, dict):  # 新格式 {bid: 记入时刻}
+            kept, expired = {}, []
+            for b, ts in raw.items():
+                if isinstance(ts, (int, float)) and now - ts < UNMANAGEABLE_TTL:
+                    kept[b] = ts
+                else:
+                    expired.append(b)
+            _unmanageable_ts = kept
+            _unmanageable = set(kept)
+            if expired:
+                print(f"[PeaseBar] CC 不可控名单到期出名单 {len(expired)} 项"
+                      f"（满 {UNMANAGEABLE_TTL // 86400} 天，重试探测）："
+                      f"{', '.join(sorted(expired)[:5])}")
+        else:  # 旧格式 bid 数组：兼容读入，统一按当前时刻续期
+            _unmanageable = {b for b in raw if isinstance(b, str)}
+            _unmanageable_ts = {b: now for b in _unmanageable}
     except Exception:
         _unmanageable = set()
 
@@ -120,18 +145,20 @@ def is_unmanageable(bid):
 
 
 def mark_unmanageable(bids):
-    """把写后仍在线的 bid 加入不可控名单并落盘。"""
-    global _unmanageable
+    """把写后仍在线的 bid 加入不可控名单并落盘（带时间戳，TTL 后自动出名单）。"""
+    global _unmanageable, _unmanageable_ts
     if not _unmanageable_loaded:
         load_unmanageable()
     new = {b for b in bids if b not in _unmanageable and not is_protected(b)}
     if not new:
         return
+    import time
     _unmanageable |= new
+    _unmanageable_ts.update({b: time.time() for b in new})
     import json
     try:
         with open(_unmanageable_path(), "w", encoding="utf-8") as f:
-            json.dump(sorted(_unmanageable), f, ensure_ascii=False)
+            json.dump(_unmanageable_ts, f, ensure_ascii=False)
     except Exception:
         pass
     print(f"[PeaseBar] CC 不可控名单新增 {len(new)} 项（系统不托管其显隐，"
@@ -146,9 +173,10 @@ def unmanageable_set():
 
 
 def clear_unmanageable():
-    """启动时重置名单：让所有 bid 获得一次重试机会（系统行为可能已变）。"""
-    global _unmanageable, _unmanageable_loaded
+    """清空名单（仅测试/排障用——启动链路不再调用，出名单靠 TTL）。"""
+    global _unmanageable, _unmanageable_ts, _unmanageable_loaded
     _unmanageable = set()
+    _unmanageable_ts = {}
     _unmanageable_loaded = True
 
 

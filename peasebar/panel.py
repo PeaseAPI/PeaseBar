@@ -103,6 +103,17 @@ HIDE_DELAY = 6  # 点按原生隐藏格后，临时显回的图标几秒后收�
 # sync_cc_now 的启动/周期同步必须避开这些——撞进显回窗口把它硬收回会重启
 # MenuBarAgent 闪整条栏，还剥夺用户的菜单点击窗口（2026-11-24 闪断真凶之一）。
 _inflight = set()
+_live = []  # 活着的 RescuePanel 实例：不可控名单变化后据此重采，作废过期格子
+
+
+def refresh_live_panels():
+    """名单新落定时重采面板：过期格子里「其实就在栏上」的图标不该再当
+    原生隐藏呈现——点它们会白闪一次菜单栏（自检落名单前的空窗期就是这样）。"""
+    for p in list(_live):
+        try:
+            p.refresh_now()
+        except Exception:  # noqa: BLE001 - 刷新失败不影响名单本身
+            pass
 
 
 def native_hidden_items(items, cfg):
@@ -142,15 +153,47 @@ def native_hidden_items(items, cfg):
     return out
 
 
-def open_native_hidden_async(bid, on_done=None):
-    """点「原生隐藏」格子：临时显回 → 等 AX 元素出现 → 正常阶梯触发 → 延迟收回。
+def _app_running(bid):
+    """App 此刻是否在跑（显回前的一票否决）：只查运行列表，不启进程。"""
+    try:
+        from AppKit import NSWorkspace
+        return any((a.bundleIdentifier() or "") == bid
+                   for a in NSWorkspace.sharedWorkspace().runningApplications())
+    except Exception:  # noqa: BLE001 - 查不动就当在跑，宁可多试一次不可误拦
+        return True
 
-    被 isAllowed=false 藏掉的图标不在 AX 树里（点击打不到），只能三步走：
-    先写 isAllowed=true 显回菜单栏，等盘点拿到它的 AX 元素后照常 AXPress
-    弹菜单，最后隔 HIDE_DELAY 秒收回（给菜单跟踪循环留点击窗口；点慢了
-    菜单会被收回，再点一次格子即可）。全程后台线程，异常时也收回图标。
+
+def open_native_hidden_async(bid, on_done=None):
+    """点「原生隐藏」格子：先守门，真被藏着的才走显回→触发→收回。
+
+    为什么需要守门（2026-11-24 用户报障「点格子闪两下、图标还不回去」）：
+    显回/收回各重启一次 MenuBarAgent = 两次闪断，而下面两种情形根不用闪：
+    ① 图标此刻就画在栏上（不可控名单、或面板快照过期）——直接触发真项；
+      给这类 App 写 isAllowed=false 根无效（系统不托管），收回永远收不成，
+      用户看到的就是「图标始终在栏上没回去」；
+    ② App 没在跑——显回也变不出图标（实测空等 8s），如实告知即可。
+    只有真被藏着的（③）才值得付一次显回闪断。
     """
     def run():
+        online = next((m for m in inventory.list_items()[0]
+                       if m.owner_bundle_id == bid and not m.is_stash_button),
+                      None)
+        if online is not None:
+            # ① 就在栏上：不碰 plist、不重启 Agent，直接 AX 触发（零闪断）
+            try:
+                how, seen = trigger.open_item(online)
+                how = f"图标本来就在菜单栏上，直接触发：{how}"
+            except Exception as exc:  # noqa: BLE001
+                how, seen = f"直接触发异常（{exc}）", False
+            if on_done is not None:
+                on_done(how, seen)
+            return
+        if not _app_running(bid):
+            # ② App 没在跑：免掉一整轮白闪
+            if on_done is not None:
+                on_done("App 没在跑（没图标可显回，已免去一次菜单栏重启）", False)
+            return
+        # ③ 真被原生通道藏着的：显回→等图标→触发→收回
         _inflight.add(bid)
         try:
             ccnative.set_apps_allowed([bid], True)
@@ -166,28 +209,26 @@ def open_native_hidden_async(bid, on_done=None):
                     break
                 time.sleep(0.3)
             if item is None:
-                # 没等到也收回（软写零闪断，靠兜底/下次点击抹平），保持一致
+                # 显回没出来：盘上改回 false 即可（栏上本来就没它），
+                # 不兜底重画——白闪一次没有任何收益
                 ccnative.set_apps_allowed([bid], False, hard=False)
-                ccnative.schedule_hard_apply()
                 if on_done is not None:
                     on_done("显回菜单栏后没等到它的图标（App 可能没在跑）", False)
                 return
             result = trigger.open_item(item)
             time.sleep(HIDE_DELAY)  # 菜单还开着就继续点，到点收回
-            # 收回走软生效：不重启 MenuBarAgent 就不闪整条菜单栏（用户报障
-            # 2026-11-24：点完图标栏白两下）。图标实际消失由 15s 兜底或下一次
-            # 显回点击的 hard apply 合并完成——闪断挪到用户不看菜单栏的时刻。
-            ccnative.set_apps_allowed([bid], False, hard=False)
-            ccnative.schedule_hard_apply()
+            # 收回必须硬生效：软写只落盘不重画，图标会在栏上赖到 15s 兜底，
+            # 用户视角就是「点完图标根本不回去」（2026-11-24 报障）；
+            # 重画代价合并进这一次，不另加定时器再闪第二轮
+            ccnative.set_apps_allowed([bid], False)
             if on_done is not None:
                 on_done(*result)
         except Exception:  # noqa: BLE001
             import traceback
             traceback.print_exc()
             try:
-                # 异常也别把图标长期留在栏上：软写+兜底，同样不闪断
-                ccnative.set_apps_allowed([bid], False, hard=False)
-                ccnative.schedule_hard_apply()
+                # 异常也别把图标长期留在栏上：硬收回，当场回去
+                ccnative.set_apps_allowed([bid], False)
             except Exception:  # noqa: BLE001
                 pass
         finally:
@@ -214,6 +255,7 @@ class RescuePanel(NSObject):
         if self is None:
             return None
         self.anchor_provider = anchor_provider
+        _live.append(self)  # 供 refresh_live_panels 找到这个实例
         self.items = []
         self.panel = None
         self._monitor = None  # 全局鼠标按下监听（失焦收回，不依赖 key 状态）

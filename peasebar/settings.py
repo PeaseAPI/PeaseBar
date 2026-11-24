@@ -684,6 +684,17 @@ class SettingsController(NSObject):
                     else:
                         from peasebar import trigger
                         trigger.open_item_async(it, _done)
+                elif step.startswith("nativeclick:"):
+                    # 取证：不管格子标不标 native_hidden，直接走原生隐藏格同款
+                    # 入口（守门三分支的真机可验性靠它：过期格子手不出来）
+                    bid = step.split(":", 1)[1]
+                    from peasebar.panel import open_native_hidden_async
+
+                    def _done_native(how, seen, _b=bid):
+                        print(f"[PeaseBar] 取证：nativeclick {_b}：{how}，"
+                              f"反应={'有' if seen else '无'}")
+
+                    open_native_hidden_async(bid, _done_native)
             except Exception as exc:  # noqa: BLE001  钩子失败只记录，不弄崩真机
                 print(f"[PeaseBar] 取证：步骤 {step!r} 异常：{exc}")
 
@@ -730,6 +741,17 @@ class SettingsController(NSObject):
             hints.append(tr("hint.stashed", n=self.stashed_count))
         if self.notched_count:
             hints.append(tr("hint.notched", n=self.notched_count))
+        # 配置写着隐藏、系统却不肯托管显隐的那些（不可控名单）：它们被按栏上
+        # 实况排在可见区，不说明的话用户会以为「拖动没生效」或「图标读不到」
+        unman = self._unman_visible()
+        if unman:
+            cfg = self._layout_cfg()
+            n = sum(1 for it in self.buckets.get(sections.SECTION_VISIBLE, [])
+                    if it.owner_bundle_id in unman
+                    and sections.section_of(cfg, sections.item_key(it))
+                    in (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN))
+            if n:
+                hints.append(tr("hint.unmanageable", n=n))
         # 有权限却一张真像素都没截到 = 菜单栏此刻没画出来（全屏 App 遮住）。
         # 不说清楚的话，用户只会看到一屏「不像本人」的 App 图标又找不到原因（T76）。
         if not self.stats["cropped"] and self.stats["permission"] and not self.stats["bar_drawn"]:
@@ -1695,17 +1717,30 @@ class SettingsController(NSObject):
             prev = ccnative.last_hidden()
             to_show = {b for b in prev
                        if ccnative.match_bid(b, cfg_visible_bids)} - inflight
-            # 盘点到的可见项也补写 true（幂等，防中途被谁动过）
+            # 盘点到的可见项也补写 true（幂等，防中途被谁动过）：但先按 bid
+            # 级别排除配置明确要藏的那些——item_key 后缀与配置键漂移时
+            # section_of 会 miss 回 visible，不拦就会把该藏的记录又写 true，
+            # 与上一行藏写互相翻转、同一轮重启两次 MenuBarAgent（2026-11-24
+            # 报障「先没一下又出现」实为两次重启；CleanMyMac5.Menu 铁证）
             for m in inventory.list_items()[0]:
                 if m.is_stash_button or ccnative.is_protected(m.owner_bundle_id):
                     continue
+                if m.owner_bundle_id in cfg_hidden_bids:
+                    continue
                 if sections.section_of(cfg, sections.item_key(m)) == sections.SECTION_VISIBLE:
                     to_show.add(m.owner_bundle_id)
-            out["hide"] = len(ccnative.set_apps_allowed(
+            # 藏/放两步都先只写盘（hard=False），最后一次 apply 重画：
+            # 分方向两次硬写 = 同一轮重启两次 MenuBarAgent（2026-11-24 诊断
+            # 铁证：CleanMyMac5.Menu 的记录先被写 false 又被写 true，每启动闪两下）
+            _h = ccnative.set_apps_allowed(
                 set(cfg_hidden_bids) - set(panel._inflight) - soft_pending
                 - ccnative.unmanageable_set(),
-                False, hard=not soft))
-            out["show"] = len(ccnative.set_apps_allowed(to_show, True, hard=not soft))
+                False, hard=False)
+            _s = ccnative.set_apps_allowed(to_show, True, hard=False)
+            out["hide"] = len(_h)
+            out["show"] = len(_s)
+            if not soft and (_h or _s):
+                ccnative.apply_now()  # 合并后的唯一一次重画
             # 实效自检：写成功≠生效（2026-11-24 事故教训：格式写坏后每次幂等
             # 跳过，图标全在栏上却无人报错）。给 MenuBarAgent 重读留一拍再
             # 盘点栏上实况，配置要藏的 bid 仍在线就重写一轮并如实上报。
@@ -1728,6 +1763,9 @@ class SettingsController(NSObject):
                           f"（{', '.join(still[:4])}...），标记不可控并停止重试")
                     ccnative.mark_unmanageable(set(still))
                     out["still_visible"] = still
+                    # 面板里可能还挂着它们的「原生隐藏」过期格子（启动清名单后
+                    # 重标之前的快照）：点上去会白闪一次菜单栏，这里顺手重采掉
+                    panel.refresh_live_panels()
             # 侧车记「此刻系统藏着的、且是配置让它藏的」全集：配置日后改成
             # 「显示」时同步据此负责显回。
             # 过滤不可控名单（它们虽然 isAllowed=false 但实际不生效，不应记录）

@@ -330,9 +330,10 @@ class TestSoftApply(unittest.TestCase):
 
 
 class TestUnmanageable(unittest.TestCase):
-    """不可控名单（2026-11-24 新增）：写后仍在线的 bid 免检免重试，
-    重启出名单重试一次；protected 永不进名单。通用设计：不预设任何 App，
-    发布给所有用户运行时自适应。"""
+    """不可控名单（2026-11-24 新增）：写后仍在线的 bid 免检免重试；
+    出名单靠条目 TTL（满周过期），不再启动清空——启动清名单等于每次
+    开机重试写 false、有实效差异就硬 apply 重启 MenuBarAgent，白闪一次
+    （2026-11-24 报障「每次启动先没一下」）。protected 永不进名单。"""
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -362,10 +363,40 @@ class TestUnmanageable(unittest.TestCase):
         self.assertEqual(ccnative.unmanageable_set(), set())
 
     def test_clear出名单重试(self):
-        """启动清名单：上次被标的 bid 重新获得一次探测机会。"""
+        """clear 仅作为测试/排障手段保留：清后重新获得探测机会。"""
         ccnative.mark_unmanageable({"com.x.y"})
         ccnative.clear_unmanageable()
         self.assertFalse(ccnative.is_unmanageable("com.x.y"))
+
+    def test_ttl未过期读回保留(self):
+        ccnative.mark_unmanageable({"com.x.y"})
+        ccnative._unmanageable_loaded = False
+        ccnative._unmanageable = set()
+        self.assertTrue(ccnative.is_unmanageable("com.x.y"))
+
+    def test_ttl到期自动出名单(self):
+        """条目记入时刻满 TTL：随读盘淘汰，重新获得重试机会（不靠启动清空）。"""
+        import json
+        ccnative.mark_unmanageable({"com.x.y", "com.z.w"})
+        # 把 com.x.y 的记入时刻拨到 TTL 之前，模拟隔周未运行
+        ts = dict(ccnative._unmanageable_ts)
+        ts["com.x.y"] -= ccnative.UNMANAGEABLE_TTL + 60
+        with open(self.path + ".cc_unmanageable", "w", encoding="utf-8") as f:
+            json.dump(ts, f)
+        ccnative._unmanageable_loaded = False
+        ccnative._unmanageable = set()
+        self.assertFalse(ccnative.is_unmanageable("com.x.y"))
+        self.assertTrue(ccnative.is_unmanageable("com.z.w"))
+
+    def test_旧格式数组兼容读入(self):
+        """升级前的盘上名单是 bid 数组：不丢条目，统一按当前时刻续期。"""
+        import json
+        with open(self.path + ".cc_unmanageable", "w", encoding="utf-8") as f:
+            json.dump(["com.old.app"], f)
+        ccnative._unmanageable_loaded = False
+        ccnative._unmanageable = set()
+        self.assertTrue(ccnative.is_unmanageable("com.old.app"))
+        self.assertIn("com.old.app", ccnative._unmanageable_ts)
 
     def test_set是快照外部改动不污染(self):
         ccnative.mark_unmanageable({"com.x.y"})

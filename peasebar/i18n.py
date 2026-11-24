@@ -153,6 +153,7 @@ _STRINGS = {
         "hint.stashed": "有 {n} 项被系统收纳：菜单栏挤不下，"
                         "可在右键菜单「展开收纳区」找回，或选中后改为弹窗显示。",
         "hint.notched": "有 {n} 项被刘海遮挡：够不着，可改为弹窗显示腾位置。",
+        "hint.unmanageable": "有 {n} 项系统不肯托管显隐（写了隐藏也不会消失），已按栏上实况排在可见区；每隔一周会自动重试一次。",
         "hint.nobar": "菜单栏当前没画出图标（多半被全屏应用遮住）：格子暂用 App 图标/系统符号，"
                       "退出全屏后点「重新抓取图标」恢复真实像素。",
         "common.system": "系统", "common.cancel": "取消",
@@ -193,7 +194,7 @@ _STRINGS = {
         "vis.sidecar.help": "PeaseBar 藏过的 App 记在这本账上；配置改回「菜单栏显示」时按它显回。",
         "vis.unman.title": "不可控名单",
         "vis.unman.status": "{n} 项系统不托管显隐",
-        "vis.unman.help": "这些 App 的图标系统不肯按开关隐藏，PeaseBar 不再白耗重启去重试；它们会按栏上实况显示在布局页，每次启动自动重试一次。",
+        "vis.unman.help": "这些 App 的图标系统不肯按开关隐藏，PeaseBar 不再白耗重启去重试；它们会按栏上实况显示在布局页，每隔一周自动重试一次。",
         "vis.tick": "自动核对",
         "vis.tick.row": "每分钟自动核对显隐",
         "vis.tick.help": "App 断线重连或系统漂移会让隐藏悄悄失效；开着就每分钟自动对齐你的分区"
@@ -341,6 +342,7 @@ _STRINGS = {
         "hint.stashed": "有 {n} 項被系統收納：選單列擠不下，"
                         "可在右鍵選單「展開收納區」找回，或選取後改為彈出顯示。",
         "hint.notched": "有 {n} 項被瀏海遮擋：夠不著，可改為彈出顯示騰位置。",
+        "hint.unmanageable": "有 {n} 項系統不肯託管顯隱（寫了隱藏也不會消失），已按欄上實況排在可見區；每隔一週會自動重試一次。",
         "hint.nobar": "選單列目前沒畫出圖示（多半被全螢幕 App 遮住）：格子暫用 App 圖示/系統符號，"
                       "離開全螢幕後按「重新抓取圖示」恢復真實像素。",
         "common.system": "系統", "common.cancel": "取消",
@@ -378,8 +380,8 @@ _STRINGS = {
         "vis.sidecar.status": "{n} 枚由 PeaseBar 隱藏中",
         "vis.sidecar.help": "PeaseBar 藏過的 App 記在這本帳上；設定改回「選單列顯示」時按它顯回。",
         "vis.unman.title": "不可控名單",
-        "vis.unman.status": "{n} 項系統不托管顯隱",
-        "vis.unman.help": "這些 App 的圖示系統不肯按開關隱藏，PeaseBar 不再白耗重試；它們會按欄上實況顯示在佈局頁，每次啟動自動重試一次。",
+        "vis.unman.status": "{n} 項系統不託管顯隱",
+        "vis.unman.help": "這些 App 的圖示系統不肯按開關隱藏，PeaseBar 不再白耗重試；它們會按欄上實況顯示在佈局頁，每隔一週自動重試一次。",
         "vis.tick": "自動核對",
         "vis.tick.row": "每分鐘自動核對顯隱",
         "vis.tick.help": "App 斷線重連或系統漂移會讓隱藏悄悄失效；開著就每分鐘自動對齊你的分區"
@@ -524,6 +526,7 @@ _STRINGS = {
         "hint.stashed": "{n} item(s) are overflow-hidden by the system (the menu bar ran out of room); "
                         "right-click → Expand Overflow to find them, or select and move to popup.",
         "hint.notched": "{n} item(s) are hidden behind the notch (unreachable); move them to the popup to free space.",
+        "hint.unmanageable": "{n} item(s) can't be hidden by macOS itself (they stay even when marked hidden); shown in the visible section as they really are, retried about weekly.",
         "hint.nobar": "The menu bar isn't drawn right now (usually covered by a fullscreen app): tiles "
                       "temporarily use App/system symbols; leave fullscreen and click Recapture Icons.",
         "common.system": "System", "common.cancel": "Cancel",
@@ -562,7 +565,7 @@ _STRINGS = {
         "vis.sidecar.help": "Apps PeaseBar has hidden are logged here; when a config returns to Menu Bar, they're restored by this ledger.",
         "vis.unman.title": "Unmanageable List",
         "vis.unman.status": "{n} not hideable by the system",
-        "vis.unman.help": "macOS refuses to hide these apps' icons via the toggle, so PeaseBar stops retrying; they appear in Layout as they really are, retried once per launch.",
+        "vis.unman.help": "macOS refuses to hide these apps' icons via the toggle, so PeaseBar stops retrying; they appear in Layout as they really are, retried about once a week.",
         "vis.tick": "Auto Re-check",
         "vis.tick.row": "Re-check Visibility Every Minute",
         "vis.tick.help": "App reconnects and system drift silently undo hiding; when on, your sections are "
@@ -706,6 +709,7 @@ _STRINGS = {
         "hint.stashed": "{n} знач. убраны системой (не хватает места); верните через «Развернуть "
                         "хранилище» или переместите в панель.",
         "hint.notched": "{n} знач. скрыты за «чёлкой» (недосягаемы); переместите в панель.",
+        "hint.unmanageable": "{n} знач. macOS не скрывает вовсе (остаются, даже помеченные скрытыми); показаны в видимой зоне как есть, повтор примерно раз в неделю.",
         "hint.nobar": "Строка меню сейчас не нарисована (обычно закрыта полноэкранным приложением): "
                       "плитки временно на значках App; выйдите из полного экрана и переснимите.",
         "common.system": "Система", "common.cancel": "Отмена",
@@ -744,7 +748,7 @@ _STRINGS = {
         "vis.sidecar.help": "Скрытые PeaseBar App записаны сюда; при возврате в строку меню восстанавливаются по нему.",
         "vis.unman.title": "Неуправляемые",
         "vis.unman.status": "{n}: система не скрывает",
-        "vis.unman.help": "macOS не скрывает эти значки через переключатель — PeaseBar больше не тратит перезапуски; они показаны в Разметке как есть, повтор при каждом запуске.",
+        "vis.unman.help": "macOS не скрывает эти значки через переключатель — PeaseBar больше не тратит перезапуски; они показаны в Разметке как есть, повтор примерно раз в неделю.",
         "vis.tick": "Автопроверка",
         "vis.tick.row": "Сверять видимость каждую минуту",
         "vis.tick.help": "Переподключения и дрейф системы тихо ломают скрытие; включите — каждую минуту "
@@ -886,6 +890,7 @@ _STRINGS = {
         "hint.stashed": "{n} élément(s) rangés par le système (barre pleine) ; retrouvez-les via "
                         "« Déplier le rangement » ou déplacez-les vers le panneau.",
         "hint.notched": "{n} élément(s) masqués par l'encoche ; déplacez-les vers le panneau.",
+        "hint.unmanageable": "{n} élément(s) que macOS refuse de masquer (ils restent même marqués cachés) ; affichés dans la zone visible tels qu'ils sont, réessai environ chaque semaine.",
         "hint.nobar": "La barre n'est pas dessinée (souvent couverte par une app plein écran) : tuiles "
                       "temporaires en symboles ; quittez le plein écran puis « Recapturer les icônes ».",
         "common.system": "Système", "common.cancel": "Annuler",
@@ -924,7 +929,7 @@ _STRINGS = {
         "vis.sidecar.help": "Les apps masquées sont journalisées ici ; au retour « barre », elles reviennent selon ce registre.",
         "vis.unman.title": "Liste ingouvernable",
         "vis.unman.status": "{n} que le système ne cache pas",
-        "vis.unman.help": "macOS refuse de masquer ces icônes via l'interrupteur ; PeaseBar cesse de réessayer. Elles s'affichent telles quelles dans la Disposition, un réessai par lancement.",
+        "vis.unman.help": "macOS refuse de masquer ces icônes via l'interrupteur ; PeaseBar cesse de réessayer. Elles s'affichent telles quelles dans la Disposition, un réessai environ par semaine.",
         "vis.tick": "Vérification auto",
         "vis.tick.row": "Vérifier chaque minute",
         "vis.tick.help": "Reconnexions et dérive défont le masquage en silence ; activé, vos sections sont "
@@ -1066,6 +1071,7 @@ _STRINGS = {
         "hint.stashed": "{n} Element(e) vom System abgelegt (Leiste voll); über „Ablage einblenden“ holen "
                         "oder ins Popup verschieben.",
         "hint.notched": "{n} Element(e) hinter der Notch (unerreichbar); ins Popup verschieben.",
+        "hint.unmanageable": "{n} Element(e), die macOS gar nicht ausblendet (bleiben trotz „verbergen“); wie real im sichtbaren Bereich gezeigt, alle zwei Wochen erneut versucht.",
         "hint.nobar": "Die Menüleiste ist gerade nicht gezeichnet (meist von Vollbild verdeckt): Kacheln "
                       "nutzen App-Symbole; Vollbild verlassen und „Symbole neu aufnehmen“.",
         "common.system": "System", "common.cancel": "Abbrechen",
@@ -1104,7 +1110,7 @@ _STRINGS = {
         "vis.sidecar.help": "Verborgene Apps werden hier vermerkt; bei Rückkehr zur Menüleiste danach wiederhergestellt.",
         "vis.unman.title": "Unverwaltbare Liste",
         "vis.unman.status": "{n} vom System nicht ausblendbar",
-        "vis.unman.help": "macOS verweigert das Ausblenden dieser Icons per Schalter – PeaseBar versucht es nicht mehr; sie erscheinen in der Layout-Seite wie real, bei jedem Start einmal erneut versucht.",
+        "vis.unman.help": "macOS verweigert das Ausblenden dieser Icons per Schalter – PeaseBar versucht es nicht mehr; sie erscheinen in der Layout-Seite wie real, etwa einmal pro Woche erneut versucht.",
         "vis.tick": "Auto-Prüfung",
         "vis.tick.row": "Sichtbarkeit jede Minute prüfen",
         "vis.tick.help": "Reconnects und Systemdrift heben Ausblenden still auf; aktiv wird jede Minute "

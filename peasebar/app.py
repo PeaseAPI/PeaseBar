@@ -190,9 +190,10 @@ class AppDelegate(NSObject):
         print("[PeaseBar] 控制图标与救援面板就绪（左键图标/⌥⌘B 弹出，点击图标可弹其原生菜单）")
         # 预热快照（T98）：后台采一次，第一次点开面板也能秒出
         self.rescue.prewarm()
-        # 不可控名单每次启动清空重试一次：系统对某些图标的显隐托管行为可能随
-        # 版本/登录态变化，运行时重新探测（不预设任何 App，发布给所有用户自适应）。
-        ccnative.clear_unmanageable()
+        # 不可控名单不再启动清空（2026-11-24 报障「每次启动先没一下」）：
+        # 清一次就等于每次开机都重试写 false、有实效差异就硬 apply 重启
+        # MenuBarAgent，白闪一次。现在靠条目 TTL（ccnative.UNMANAGEABLE_TTL）
+        # 满周自动出名单重试，系统托管行为变化（版本/登录态）照样能自适应。
         # 启动同步（用户痛点「设为弹窗显示的图标还在菜单栏」）：把上次保存的分区
         # 一次性镜像回真实菜单栏（后台线程、稍延，等状态项摆稳且有辅助功能权限）。
         self.settings.reconcile_real_bar_async()

@@ -8,6 +8,7 @@
 """
 import unittest
 from unittest import mock
+import types
 from types import SimpleNamespace
 
 from peasebar import ccnative, panel, sections
@@ -101,6 +102,75 @@ class TestNativeHiddenItems(unittest.TestCase):
         self.assertIsNone(m.frame)  # capture.image_for_item 对 None frame 走兜底
         self.assertFalse(m.is_stash_button)
         self.assertGreater(len(m.owner_bundle_id.rsplit(".", 1)[-1]), 0)
+
+
+class TestNativeTileClickGuards(unittest.TestCase):
+    """点「原生隐藏」格的守门：不该闪菜单栏的情形绝不进显回链路
+    （2026-11-24 用户报障：点格子菜单栏白闪两下、图标还不回去）。"""
+
+    BID = "com.example.app"
+
+    def _click(self, online, running, found=None):
+        """同步跑 open_native_hidden_async，返回 (写盘调用, 触发项)。"""
+        calls, trig = [], []
+        # 假时钟：每次 time() 走 1s，保证空等循环能自然结束
+        clock = {"t": 0.0}
+
+        def _list_items():
+            # 守门①先拿一次（看图标在不在栏上），进入显回后的轮询才拿 found
+            _list_items.n += 1
+            return (found or [], []) if _list_items.n > 1 else (online, [])
+
+        _list_items.n = 0
+
+        class _SyncThread:
+            def __init__(self, target=None, daemon=None):
+                self._target = target
+
+            def start(self):
+                self._target()
+
+        def _allowed(bids, allowed, hard=True):
+            calls.append((tuple(bids), allowed, hard))
+            return set(bids)
+
+        with mock.patch.object(panel.inventory, "list_items", _list_items), \
+             mock.patch.object(panel, "_app_running", return_value=running), \
+             mock.patch.object(panel.ccnative, "set_apps_allowed", _allowed), \
+             mock.patch.object(panel.ccnative, "schedule_hard_apply",
+                               lambda *a: calls.append(("兜底",))), \
+             mock.patch.object(panel.trigger, "open_item",
+                               side_effect=lambda m: (trig.append(m),
+                                                      ("AXPress", True))[1]), \
+             mock.patch.object(panel.threading, "Thread", _SyncThread), \
+             mock.patch.object(panel, "time", types.SimpleNamespace(
+                 sleep=lambda _s: None,
+                 time=lambda: clock.__setitem__("t", clock["t"] + 1.0)
+                 or clock["t"])):
+            panel.open_native_hidden_async(self.BID)
+        return calls, trig
+
+    def test_图标就在栏上时直接触发零闪断(self):
+        """不可控名单/快照过期：真项就在盘点里 → 不碰 plist、不重启 Agent。"""
+        calls, trig = self._click([_seen_item(self.BID)], running=True)
+        self.assertEqual(calls, [])            # 零写盘 = 零闪断
+        self.assertEqual(len(trig), 1)          # 但图标照样能触发
+
+    def test_App没在跑时不白闪(self):
+        """显回变不出不存在的图标（实测空等 8s）：直接告知，零写盘。"""
+        calls, trig = self._click([], running=False)
+        self.assertEqual(calls, [])
+        self.assertEqual(trig, [])
+
+    def test_真藏着的显回与收回都是硬生效(self):
+        """只有这种才付闪断：显回 hard，收回也 hard（图标当场回去，
+        不再软写赖到 15s 兜底），也不另排兜底定时器。"""
+        calls, trig = self._click([], running=True,
+                                  found=[_seen_item(self.BID)])
+        self.assertEqual([(c[1], c[2]) for c in calls],
+                         [(True, True), (False, True)])
+        self.assertNotIn(("兜底",), calls)
+        self.assertEqual(len(trig), 1)
 
 
 if __name__ == "__main__":
