@@ -8,7 +8,7 @@ Phase 9 真机踩到的两个坑都在这里钉死：
 """
 import unittest
 
-from peasebar.settings import ROW_TOL, drop_index_in_rows
+from peasebar.settings import ROW_TOL, drop_index_in_rows, list_drop_target
 
 W, H, GAP = 40.0, 38.0, 4.0
 
@@ -61,6 +61,41 @@ class TestDropIndexRows(unittest.TestCase):
         self.assertEqual(drop_index_in_rows(rs, 60, 20), 1)    # 落在宽格中心左边→1 个已过
         self.assertEqual(drop_index_in_rows(rs, 130, 20), 2)   # 已过窄格中心（122）→ 挂在窄格后面
         self.assertEqual(drop_index_in_rows(rs, 140, 20), 2)
+
+
+class TestListDropTarget(unittest.TestCase):
+    """单列清单落点（2026-11-24 对标竞品改版）：区的归属跟着落点旁的行走，
+    区内序号只数同区的行——拖进别的区行段即换区。纯函数，不碰 AppKit。"""
+
+    V, H, A = "visible", "hidden", "always"
+    RH = 40
+
+    def _rows(self):
+        seq = [(self.V, "v1"), (self.V, "v2"), (self.H, "h1"),
+               (self.H, "h2"), (self.A, "a1")]
+        return [(sec, k, (0, i * self.RH, 600, self.RH))
+                for i, (sec, k) in enumerate(seq)]
+
+    def test_首行上方插本区最前(self):
+        self.assertEqual(list_drop_target(self._rows(), -10), (self.V, 0))
+
+    def test_行中心之上插该行前(self):
+        # v2 中60；y=50 在它中心之上 → 插在 v2 前，V 区已有 1 行在前 → (V, 1)
+        self.assertEqual(list_drop_target(self._rows(), 50), (self.V, 1))
+
+    def test_跨区边界落新区段首(self):
+        # y=70 过了 v2 中心、在 h1 中心（100）之上 → 归 H 区、前面同区 0 行
+        self.assertEqual(list_drop_target(self._rows(), 70), (self.H, 0))
+
+    def test_区内序号只数同区行(self):
+        # y=150 过了 h2 中心（140）、在 a1 中心（180）之上 → 归 A 区插最前
+        self.assertEqual(list_drop_target(self._rows(), 150), (self.A, 0))
+
+    def test_末行之下挂末区末尾(self):
+        self.assertEqual(list_drop_target(self._rows(), 9999), (self.A, 1))
+
+    def test_没有行没得落(self):
+        self.assertIsNone(list_drop_target([], 10))
 
 
 if __name__ == "__main__":

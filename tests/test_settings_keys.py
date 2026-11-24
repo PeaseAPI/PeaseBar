@@ -215,6 +215,51 @@ class TestCommandKeys(KeyCase):
         self.assertEqual(len(self.ctrl._undo), settings.UNDO_LIMIT)
 
 
+class TestRowCheck(KeyCase):
+    """单列清单行首复选框（2026-11-24 对标竞品）：勾选态驱动显隐，
+    走 applyMove_to_ 同一条链 —— 进草稿不落盘、⌘Z 可撤、应用才生效。"""
+
+    class _Sender:
+        """假 NSButton：控制器只读 representedObject()/state() 两样。"""
+
+        def __init__(self, key, state):
+            self._key, self._state = key, state
+
+        def representedObject(self):
+            return self._key
+
+        def state(self):
+            return self._state
+
+    def test_取消勾选收进弹窗进草稿(self):
+        self.ctrl.onRowCheck_(self._Sender("a|A", 0))
+        self.assertEqual(self.draft()["sections"].get("a|A"), sections.SECTION_HIDDEN)
+        self.assertEqual(self.cfg()["sections"].get("a|A"), None)  # 盘上未动
+        self.assertEqual(self.rebuilt, [True])  # 改一次刷一次
+
+    def test_再勾选移回菜单栏显示(self):
+        self.ctrl.onRowCheck_(self._Sender("a|A", 0))   # 先收进弹窗
+        self.ctrl.onRowCheck_(self._Sender("a|A", 1))   # 再勾回来
+        self.assertEqual(sections.section_of(self.draft(), "a|A"),
+                         sections.SECTION_VISIBLE)
+        # 两次都是真改动：撤销栈里应有两个快照（⌘Z 能逐步回退）
+        self.assertEqual(len(self.ctrl._undo), 2)
+
+    def test_勾选态与现状一致不算改动(self):
+        """a 本来就在可见区，再勾一次=没改：不开草稿、不记撤销点。"""
+        self.ctrl.onRowCheck_(self._Sender("a|A", 1))
+        self.assertIsNone(self.ctrl._pending_cfg)
+        self.assertEqual(self.ctrl._undo, [])
+        self.assertEqual(self.rebuilt, [])
+
+    def test_应用后落盘(self):
+        """草稿链不变：勾选改动要等「应用改动」才写盘。"""
+        self.ctrl.onRowCheck_(self._Sender("b|B", 0))
+        self.assertEqual(self.cfg()["sections"].get("b|B"), None)
+        self.apply_now()
+        self.assertEqual(self.cfg()["sections"].get("b|B"), sections.SECTION_HIDDEN)
+
+
 class TestTileIdentity(KeyCase):
     """定调钉桩：格子上只有图标，身份 = 配置键（取证脚本靠 AXIdentifier 认位，T77）。"""
 

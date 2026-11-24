@@ -364,6 +364,29 @@ class TestTriggerConflictSync(unittest.TestCase):
             ccnative.set_apps_allowed = orig
         self.assertNotIn("com.acme.todesk", shown)  # 配置要藏，不得被显回
 
+    def test_勾回可见删键后显回不丢(self):
+        """报障五取证回归：隐藏后勾回显示 —— set_section 回可见是**删键**，
+        配置里没有显式 visible 标记；旧判定拿 cfg_visible_bids（只含显式标记）
+        匹配 prev，从藏改显的项永远进不了显回 —— isAllowed=false 永驻盘上、
+        图标回不了栏。新判定：prev 里「现在配置不再要藏」的都该显回。"""
+        self.cfg = {"sections": {}}                    # todesk 已勾回可见（键已删）
+        self.online = [fake(bid="com.acme.todesk", label="ToDesk")]
+        ccnative.last_hidden = lambda: {"com.acme.todesk"}  # 上轮是我们藏的
+        shown = set()
+        orig = ccnative.set_apps_allowed
+
+        def _capture(bids, allowed, hard=True):
+            if allowed:
+                shown.update(bids)
+            return set(bids)  # 模拟真实改动集，供 out["show"] 计数
+        ccnative.set_apps_allowed = _capture
+        try:
+            out = self.ctrl.sync_cc_now()
+        finally:
+            ccnative.set_apps_allowed = orig
+        self.assertIn("com.acme.todesk", shown)  # 删键的可见也要能显回
+        self.assertEqual(out["show"], 1)
+
     def test_软写待生效项不被自检提前收回(self):
         """报障#5：点了隐藏图标后收回走软写，栏上短暂残留是正常中间态；
         自检/收回写必须免检这些 bid，不能当成漂移当场硬 apply 闪栏。"""
