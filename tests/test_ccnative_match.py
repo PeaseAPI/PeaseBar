@@ -329,5 +329,50 @@ class TestSoftApply(unittest.TestCase):
         self.assertEqual(ccnative.soft_pending_bids(), set())
 
 
+class TestUnmanageable(unittest.TestCase):
+    """不可控名单（2026-11-24 新增）：写后仍在线的 bid 免检免重试，
+    重启出名单重试一次；protected 永不进名单。通用设计：不预设任何 App，
+    发布给所有用户运行时自适应。"""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.dir.name, "config.json")
+        self._orig = (ccnative._unmanageable, ccnative._unmanageable_loaded,
+                      sections.config_path)
+        sections.config_path = lambda: self.path
+        ccnative.clear_unmanageable()
+        self.addCleanup(self._restore)
+        self.addCleanup(self.dir.cleanup)
+
+    def _restore(self):
+        (ccnative._unmanageable, ccnative._unmanageable_loaded,
+         sections.config_path) = self._orig
+
+    def test_mark落盘与读回(self):
+        ccnative.mark_unmanageable({"com.x.y", "com.z.w"})
+        self.assertTrue(ccnative.is_unmanageable("com.x.y"))
+        self.assertTrue(os.path.exists(self.path + ".cc_unmanageable"))
+        # 模拟新进程：清内存后从盘读回
+        ccnative._unmanageable_loaded = False
+        ccnative._unmanageable = set()
+        self.assertTrue(ccnative.is_unmanageable("com.z.w"))
+
+    def test_protected永不进名单(self):
+        ccnative.mark_unmanageable({"com.pease.peasebar", "com.apple.clock"})
+        self.assertEqual(ccnative.unmanageable_set(), set())
+
+    def test_clear出名单重试(self):
+        """启动清名单：上次被标的 bid 重新获得一次探测机会。"""
+        ccnative.mark_unmanageable({"com.x.y"})
+        ccnative.clear_unmanageable()
+        self.assertFalse(ccnative.is_unmanageable("com.x.y"))
+
+    def test_set是快照外部改动不污染(self):
+        ccnative.mark_unmanageable({"com.x.y"})
+        snap = ccnative.unmanageable_set()
+        snap.add("com.evil")
+        self.assertNotIn("com.evil", ccnative.unmanageable_set())
+
+
 if __name__ == "__main__":
     unittest.main()

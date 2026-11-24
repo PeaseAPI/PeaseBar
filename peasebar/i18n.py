@@ -114,8 +114,8 @@ _STRINGS = {
         # ---- 布局页 ----
         "layout.title": "菜单栏布局 · 单击选中，拖动改位置，⌥←/→ 改顺序",
         "layout.count": "{sec} · {n} 项",
-        "layout.hint.drag": "把图标在区之间拖动即可换区，条内拖动改顺序；"
-                            "也可用 ⌥←/→ 改顺序、⌥↑/↓ 换区，⌘Z 撤销。",
+        "layout.hint.drag": "把图标在区之间拖动即可换区，条内拖动改顺序；真实菜单栏上可按住 ⌘ 直接拖动图标排序或拖走；"
+                            "也可 ⌥←/→ 改顺序、⌥↑/↓ 换区，⌘Z 撤销。",
         "layout.sort.byname": "按名称排序",
         "layout.sort.more": "更多排序",
         "layout.sort.more.ax": "{sec}的更多排序",
@@ -146,10 +146,6 @@ _STRINGS = {
         "layout.apply": "应用改动",
         "layout.applying": "应用中…",
         "layout.apply.tip": "把本次所有布局改动写盘并立刻生效（显隐与顺序一次对齐真实菜单栏）",
-        "layout.grant.ok": "布局表已授权 ✓",
-        "layout.grant": "授权布局表…",
-        "layout.grant.tip": "逐枚隐藏改为直写系统菜单栏布局权重表（可逆、不重启、无数量限制）；"
-                            "需你亲自选中 group.com.apple.controlcenter.plist 授权这一个文件的访问。",
         "layout.sel.none": "未选择图标 · 单击图标选中，也可右键直接弹移区菜单",
         "layout.sel.item": "已选：{label}（{owner}）· 当前：{sec} 第 {idx}/{total} 格",
         "layout.tile.tip": "{label}\n{owner}（{bid}）\n当前：{sec}",
@@ -226,7 +222,7 @@ _STRINGS = {
         "priv.table.help": "更新 macOS 保存的菜单栏布局，这是它把项目放进各区与顺序的方式。",
         "priv.screen.title": "屏幕录制",
         "priv.opt": "可选",
-        "priv.ax.help": "检测 Mac 上菜单栏项目及其位置；移动项目以重排或隐藏；代表你点击项目。",
+        "priv.ax.help": "检测 Mac 上菜单栏项目及其位置，并代表你点击项目；显隐与改序走系统记录文件，不模拟鼠标。",
         "priv.screen.help": "显示菜单栏项目的实时预览、取样颜色、并通过视觉识别查找项目。",
         "priv.can": "PeaseBar 可以看到",
         "priv.grab": "立即抓取",
@@ -303,8 +299,8 @@ _STRINGS = {
         "group.manage": "管理",
         "layout.title": "選單列版面 · 單擊選取，拖曳移動，⌥←/→ 改順序",
         "layout.count": "{sec} · {n} 項",
-        "layout.hint.drag": "將圖示拖曳到其他區即可換區，條內拖曳改順序；"
-                            "也可用 ⌥←/→ 改順序、⌥↑/↓ 換區，⌘Z 復原。",
+        "layout.hint.drag": "將圖示拖曳到其他區即可換區，條內拖曳改順序；真實選單列上可按住 ⌘ 直接拖曳圖示排序或拖走；"
+                            "也可 ⌥←/→ 改順序、⌥↑/↓ 換區，⌘Z 復原。",
         "layout.sort.byname": "按名稱排序",
         "layout.sort.more": "更多排序",
         "layout.sort.more.ax": "{sec} 的更多排序",
@@ -335,10 +331,6 @@ _STRINGS = {
         "layout.apply": "套用變更",
         "layout.applying": "套用中…",
         "layout.apply.tip": "把本次所有佈局變更寫入並立刻生效（顯隱與順序一次對齊真實選單列）",
-        "layout.grant.ok": "佈局表已授權 ✓",
-        "layout.grant": "授權佈局表…",
-        "layout.grant.tip": "逐枚隱藏改為直寫系統選單列佈局權重表（可逆、不重啟、無數量限制）；"
-                            "需你親自選中 group.com.apple.controlcenter.plist 授權這一個檔案的存取。",
         "layout.sel.none": "未選取圖示 · 單擊圖示選取，也可右鍵直接彈移區選單",
         "layout.sel.item": "已選：{label}（{owner}）· 目前：{sec} 第 {idx}/{total} 格",
         "layout.tile.tip": "{label}\n{owner}（{bid}）\n目前：{sec}",
@@ -410,7 +402,7 @@ _STRINGS = {
         "priv.table.help": "更新 macOS 儲存的選單列佈局，這是它把項目放進各區與順序的方式。",
         "priv.screen.title": "螢幕錄製",
         "priv.opt": "可選",
-        "priv.ax.help": "偵測 Mac 上選單列項目及其位置；移動項目以重排或隱藏；代表你點擊項目。",
+        "priv.ax.help": "偵測 Mac 上選單列項目及其位置，並代表你點擊項目；顯隱與改序走系統記錄檔案，不模擬滑鼠。",
         "priv.screen.help": "顯示選單列項目的即時預覽、取樣顏色、並透過視覺識別尋找項目。",
         "priv.can": "PeaseBar 可以看到",
         "priv.grab": "立即抓取",
@@ -483,8 +475,9 @@ _STRINGS = {
         "group.manage": "Manage",
         "layout.title": "Menu Bar Layout · Click to select, drag to move, ⌥←/→ to reorder",
         "layout.count": "{sec} · {n} items",
-        "layout.hint.drag": "Drag icons between sections to move them, drag within a bar to "
-                            "reorder; or ⌥←/→ to reorder, ⌥↑/↓ to change sections, ⌘Z to undo.",
+        "layout.hint.drag": "Drag icons between sections to move them, drag within a bar to reorder; "
+                            "on the real menu bar, hold ⌘ and drag icons directly. "
+                            "⌥←/→ reorders, ⌥↑/↓ changes sections, ⌘Z undoes.",
         "layout.sort.byname": "Sort by Name",
         "layout.sort.more": "More Sorting",
         "layout.sort.more.ax": "More sorting for {sec}",
@@ -518,11 +511,6 @@ _STRINGS = {
         "layout.applying": "Applying…",
         "layout.apply.tip": "Save all staged layout changes and take effect now (visibility & order "
                             "aligned to the real menu bar in one go)",
-        "layout.grant.ok": "Layout Table Granted ✓",
-        "layout.grant": "Grant Layout Table…",
-        "layout.grant.tip": "Switch per-icon hiding to writing the system menu-bar layout weight table "
-                            "directly (reversible, no restart, no limits); you must personally grant "
-                            "access to group.com.apple.controlcenter.plist.",
         "layout.sel.none": "No icon selected · Click an icon to select, or right-click for the move menu",
         "layout.sel.item": "Selected: {label} ({owner}) · Now: {sec}, slot {idx}/{total}",
         "layout.tile.tip": "{label}\n{owner} ({bid})\nNow: {sec}",
@@ -594,7 +582,7 @@ _STRINGS = {
         "priv.table.help": "Updates the menu bar layout macOS saves — how items land in sections and order.",
         "priv.screen.title": "Screen Recording",
         "priv.opt": "Optional",
-        "priv.ax.help": "Detect menu bar items and positions; move items to reorder or hide; click items on your behalf.",
+        "priv.ax.help": "Detect menu bar items and positions, and click items on your behalf; hiding and reordering go through system record files, never simulated mouse.",
         "priv.screen.help": "Live previews of menu bar items, color sampling, and finding items visually.",
         "priv.can": "What PeaseBar Can See",
         "priv.grab": "Capture Now",
@@ -668,6 +656,7 @@ _STRINGS = {
         "layout.title": "Раскладка строки меню · клик — выбор, перетаскивание — перенос, ⌥←/→ — порядок",
         "layout.count": "{sec} · {n} шт.",
         "layout.hint.drag": "Перетаскивайте значки между секциями, внутри панели — для порядка; "
+                            "на реальной строке меню зажмите ⌘ и перетаскивайте значки прямо там. "
                             "⌥←/→ — порядок, ⌥↑/↓ — секция, ⌘Z — отмена.",
         "layout.sort.byname": "По имени",
         "layout.sort.more": "Ещё сортировка",
@@ -701,11 +690,6 @@ _STRINGS = {
         "layout.apply": "Применить",
         "layout.applying": "Применение…",
         "layout.apply.tip": "Сохранить все изменения и применить сейчас (видимость и порядок сразу)",
-        "layout.grant.ok": "Таблица доступа есть ✓",
-        "layout.grant": "Дать доступ к таблице…",
-        "layout.grant.tip": "Скрытие через прямую запись таблицы весов строки меню (обратимо, без "
-                            "перезапуска и лимитов); нужно лично разрешить доступ к "
-                            "group.com.apple.controlcenter.plist.",
         "layout.sel.none": "Значок не выбран · Кликните для выбора, правый клик — меню перемещения",
         "layout.sel.item": "Выбрано: {label} ({owner}) · Сейчас: {sec}, позиция {idx}/{total}",
         "layout.tile.tip": "{label}\n{owner} ({bid})\nСейчас: {sec}",
@@ -776,7 +760,7 @@ _STRINGS = {
         "priv.table.help": "Обновляет раскладку, сохраняемую macOS — секции и порядок пунктов.",
         "priv.screen.title": "Запись экрана",
         "priv.opt": "Опционально",
-        "priv.ax.help": "Определять пункты и позиции; перемещать для порядка/скрытия; нажимать за вас.",
+        "priv.ax.help": "Определять пункты и позиции и нажимать за вас; скрытие и порядок — через системные файлы записей, без симуляции мыши.",
         "priv.screen.help": "Живые превью пунктов, снятие цветов и визуальный поиск.",
         "priv.can": "Что видит PeaseBar",
         "priv.grab": "Снять сейчас",
@@ -850,7 +834,8 @@ _STRINGS = {
         "layout.title": "Disposition · Clic pour sélectionner, glisser pour déplacer, ⌥←/→ pour réordonner",
         "layout.count": "{sec} · {n} éléments",
         "layout.hint.drag": "Glissez les icônes entre les sections pour les déplacer, dans une barre "
-                            "pour réordonner ; ⌥←/→ réordonne, ⌥↑/↓ change de section, ⌘Z annule.",
+                            "pour réordonner ; dans la vraie barre de menus, maintenez ⌘ pour les "
+                            "déplacer directement. ⌥←/→ réordonne, ⌥↑/↓ change de section, ⌘Z annule.",
         "layout.sort.byname": "Trier par nom",
         "layout.sort.more": "Plus de tri",
         "layout.sort.more.ax": "Plus de tri pour {sec}",
@@ -882,11 +867,6 @@ _STRINGS = {
         "layout.apply": "Appliquer",
         "layout.applying": "Application…",
         "layout.apply.tip": "Enregistrer tous les changements et appliquer maintenant (visibilité et ordre)",
-        "layout.grant.ok": "Table accordée ✓",
-        "layout.grant": "Accorder la table…",
-        "layout.grant.tip": "Masquage par écriture directe de la table de pondération (réversible, sans "
-                            "redémarrage ni limite) ; vous devez accorder l'accès à "
-                            "group.com.apple.controlcenter.plist.",
         "layout.sel.none": "Aucune icône sélectionnée · Cliquez pour sélectionner, clic droit pour le menu",
         "layout.sel.item": "Sélection : {label} ({owner}) · Actuel : {sec}, emplacement {idx}/{total}",
         "layout.tile.tip": "{label}\n{owner} ({bid})\nActuel : {sec}",
@@ -957,7 +937,7 @@ _STRINGS = {
         "priv.table.help": "Met à jour la disposition enregistrée par macOS — sections et ordre des éléments.",
         "priv.screen.title": "Enregistrement d'écran",
         "priv.opt": "Optionnel",
-        "priv.ax.help": "Détecter les éléments et positions ; déplacer pour réordonner/masquer ; cliquer pour vous.",
+        "priv.ax.help": "Détecter les éléments et positions et cliquer pour vous ; masquage et ordre via les fichiers système, sans jamais simuler la souris.",
         "priv.screen.help": "Aperçus en direct, échantillonnage de couleurs et recherche visuelle.",
         "priv.can": "Ce que PeaseBar voit",
         "priv.grab": "Capturer",
@@ -1031,7 +1011,8 @@ _STRINGS = {
         "layout.title": "Menüleisten-Layout · Klicken zum Auswählen, ziehen zum Verschieben, ⌥←/→ zum Sortieren",
         "layout.count": "{sec} · {n} Einträge",
         "layout.hint.drag": "Symbole zwischen Bereichen ziehen verschiebt sie, innerhalb einer Leiste "
-                            "sortiert um; ⌥←/→ sortiert, ⌥↑/↓ wechselt den Bereich, ⌘Z widerruft.",
+                            "sortiert um; in der echten Menüleiste ⌘ halten und Symbole direkt ziehen. "
+                            "⌥←/→ sortiert, ⌥↑/↓ wechselt den Bereich, ⌘Z widerruft.",
         "layout.sort.byname": "Nach Name sortieren",
         "layout.sort.more": "Mehr Sortierung",
         "layout.sort.more.ax": "Mehr Sortierung für {sec}",
@@ -1063,11 +1044,6 @@ _STRINGS = {
         "layout.apply": "Änderungen anwenden",
         "layout.applying": "Wende an…",
         "layout.apply.tip": "Alle Änderungen speichern und sofort wirksam machen (Sichtbarkeit & Reihenfolge)",
-        "layout.grant.ok": "Layouttabelle erlaubt ✓",
-        "layout.grant": "Layouttabelle erlauben…",
-        "layout.grant.tip": "Ausblenden durch direktes Schreiben der Gewichtstabelle (umkehrbar, ohne "
-                            "Neustart, ohne Limit); Sie müssen group.com.apple.controlcenter.plist "
-                            "persönlich erlauben.",
         "layout.sel.none": "Kein Symbol gewählt · Klicken zum Auswählen, Rechtsklick fürs Menü",
         "layout.sel.item": "Gewählt: {label} ({owner}) · Aktuell: {sec}, Platz {idx}/{total}",
         "layout.tile.tip": "{label}\n{owner} ({bid})\nAktuell: {sec}",
@@ -1138,7 +1114,7 @@ _STRINGS = {
         "priv.table.help": "Aktualisiert die von macOS gespeicherte Leistenlayout — Bereiche und Ordnung.",
         "priv.screen.title": "Bildschirmaufnahme",
         "priv.opt": "Optional",
-        "priv.ax.help": "Elemente und Positionen erfassen; zum Sortieren/Ausblenden verschieben; für Sie klicken.",
+        "priv.ax.help": "Elemente und Positionen erfassen und für Sie klicken; Ausblenden und Sortieren über System-Attributedateien, ohne Maussimulation.",
         "priv.screen.help": "Live-Vorschau, Farbauswahl und visuelle Suche.",
         "priv.can": "Was PeaseBar sieht",
         "priv.grab": "Jetzt aufnehmen",

@@ -88,7 +88,7 @@ from ApplicationServices import AXIsProcessTrusted
 
 import ServiceManagement as SM
 
-from peasebar import capture, ccnative, i18n, inventory, layout_table, mbrprefs, menubar_drag, panel, sections
+from peasebar import capture, ccnative, i18n, inventory, mbrprefs, menubar_drag, panel, sections
 from peasebar.i18n import t as tr
 
 # 方向键的 keyCode（AppKit 的 NS*ArrowFunctionKey 取值，写数字谁也看不懂）
@@ -741,8 +741,8 @@ class SettingsController(NSObject):
             if not buckets[sec]:
                 continue
             h += SECTION_H + self._bar_height(buckets[sec]) + GAP
-        # 拖拽提示行 + 选项卡片（Phase 9 新增，与 _build_layout_page 的排版一一对应）
-        h += ROW_H + 4 + OPT_CARD_H + 8
+        # 拖拽提示行（两行折行，与 _build_layout_page 同源）+ 选项卡片（Phase 9 新增）
+        h += 2 * ROW_H + 4 + OPT_CARD_H + 8
         h += (BOTTOM_ROWS + len(self._hints())) * (ROW_H + 8) + EDGE
         return int(h)
 
@@ -939,15 +939,17 @@ class SettingsController(NSObject):
         # ---------- 底部（自上而下）：拖拽提示 / 提示行 / 选中提示 / 移区 / 顺序 / 选项 / 重置 ----------
         # 权限提醒与重抓、超时都搬到对应页（疑难解答/通用），这页只留编辑相关
 
-        # 拖拽提示（对标 Thaw LayoutBarsSection 的 dragHint，翻成中文）：
-        # 新界面得告诉用户「能拖」，不然没人知道鼠标按住图标可以动
-        hint = NSTextField.labelWithString_(tr("layout.hint.drag"))
+        # 拖拽提示（对标 Thaw LayoutBarsSection 的 dragHint）：两行折行放下
+        # 全部引导——除了窗口内拖拽，还须告知 ⌘+拖真实菜单栏：多数用户不知道
+        # 系统自带这个手势，不能只靠口耳相传（2026-11-24 用户点名）
+        hint = NSTextField.wrapLabelWithString_(tr("layout.hint.drag"))
         hint.setFont_(NSFont.systemFontOfSize_(11))
         hint.setTextColor_(NSColor.secondaryLabelColor())
-        hint.setFrame_(NSMakeRect(EDGE, top - ROW_H, CONTENT_W - 2 * EDGE, ROW_H))
-        hint.cell().setLineBreakMode_(NSLineBreakByTruncatingTail)
+        hint.setFrame_(NSMakeRect(EDGE, top - 2 * ROW_H, CONTENT_W - 2 * EDGE, 2 * ROW_H))
+        hint.cell().setLineBreakMode_(4)  # NSLineBreakByWordWrapping：折两行不截尾
+        hint.cell().setMaximumNumberOfLines_(2)
         content.addSubview_(hint)
-        top -= ROW_H + 4
+        top -= 2 * ROW_H + 4
 
         # 挤不下/够不着提示（Thaw OutOfRoomWarning/.outOfReach 的位置选择，T72）
         for text in self._hints():
@@ -1031,10 +1033,14 @@ class SettingsController(NSObject):
             lab.setFont_(NSFont.systemFontOfSize_(12))
             lab.setFrame_(NSMakeRect(14, row_y + 6, 240, 18))
             card.addSubview_(lab)
-            sub = NSTextField.labelWithString_(tip)
+            sub = NSTextField.wrapLabelWithString_(tip)
             sub.setFont_(NSFont.systemFontOfSize_(10))
             sub.setTextColor_(NSColor.tertiaryLabelColor())
-            sub.setFrame_(NSMakeRect(14, row_y - 8, 380, 14))
+            # 两行折行 + 拓宽到 500px：单行 380px 会把长句截尾（体检 M-1），
+            # 行距 34px 下第二行不会压到下一行的标题（下一行标题底边 -28）
+            sub.setFrame_(NSMakeRect(14, row_y - 20, 500, 26))
+            sub.cell().setLineBreakMode_(4)  # NSLineBreakByWordWrapping
+            sub.cell().setMaximumNumberOfLines_(2)
             card.addSubview_(sub)
             sw = NSSwitch.alloc().initWithFrame_(
                 NSMakeRect(CONTENT_W - 2 * EDGE - 74, row_y, 60, 28))
@@ -1059,23 +1065,6 @@ class SettingsController(NSObject):
         btn_reset.setToolTip_(tr("layout.reset.tip"))
         content.addSubview_(btn_reset)
 
-        # 授权布局表（对标 Thaw「Grant Access to the Menu Bar Layout Table」）：
-        # 逐枚隐藏走「直写权重表」这条正路的前提，就是让用户亲自授权那一个文件。
-        # 已授权时按钮显示状态、再点可重新授权（文件挪位/书签失效时自救）。
-        try:
-            granted = layout_table.has_access()
-        except Exception:  # noqa: BLE001
-            granted = False
-        btn_grant = NSButton.alloc().initWithFrame_(
-            NSMakeRect(EDGE + 96 + 8, top - ROW_H, 132, ROW_H))
-        btn_grant.setTitle_(tr("layout.grant.ok") if granted else tr("layout.grant"))
-        btn_grant.setBezelStyle_(0)
-        btn_grant.setFont_(NSFont.systemFontOfSize_(11))
-        btn_grant.setTarget_(self)
-        btn_grant.setAction_("onGrantLayoutTable:")
-        btn_grant.setToolTip_(tr("layout.grant.tip"))
-        content.addSubview_(btn_grant)
-
         # 「应用改动」（暂存+应用模式的核心按钮）：布局页所有编辑都是草稿，
         # 点这里才写盘并一次性贴回真实菜单栏；有草稿时窗口标题挂点提醒
         btn_apply = NSButton.alloc().initWithFrame_(
@@ -1093,22 +1082,6 @@ class SettingsController(NSObject):
         content.addSubview_(btn_apply)
         self.btn_apply = btn_apply
         return content
-
-    def onGrantLayoutTable_(self, sender):
-        """弹一次中文文件选择框，请用户授权布局权重表；成功后刷新按钮。"""
-        ok = layout_table.request_access()
-        print(f"[PeaseBar] 授权布局表：{'成功' if ok else '未授权/取消'}")
-        # 临时诊断：把真实表的顶层键与 menuItemLocations 样例 dump 到 tmp/，
-        # 用于核对状态键格式（匹配不准时据此修正 resolve_key）。
-        if ok:
-            try:
-                layout_table.dump_table()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[PeaseBar] 布局表 dump 失败：{exc}")
-        # 授权成功即把已保存的布局重新贴回真实菜单栏（走权重表正路）
-        if ok and self.opt("real_bar"):
-            self.reconcile_real_bar_async(delay=0.6)
-        self._rebuild()
 
     @objc.python_method
     def _build_section_bar(self, content, group, sec, top, bar_h=None):
@@ -1568,13 +1541,15 @@ class SettingsController(NSObject):
 
         权重表改序的输入；去重保序（同 App 多枚图标在真实栏上共用一个 bundle
         权重段）。少于两项就没有「序」可言，返回空列表让调用方跳过。
+        只排除 Apple 系统项（com.apple.*），PeaseBar 自己参与改序——
+        用户能在布局页拖动 PeaseBar 图标的栏上位置。
         """
         keys = [k for k in (cfg.get("order") or [])
                 if sections.section_of(cfg, k) == sections.SECTION_VISIBLE]
         out = []
         for k in keys:
             bid = k.split("|", 1)[0]
-            if bid and not ccnative.is_protected(bid) and bid not in out:
+            if bid and not bid.startswith("com.apple.") and bid not in out:
                 out.append(bid)
         return out if len(out) > 1 else []
 
@@ -1644,52 +1619,17 @@ class SettingsController(NSObject):
         return False
 
     @objc.python_method
-    def _drag_cycle_test(self, owner, label):
-        """真机逐条取证：对一枚图标跑 hide→确认 stashed→reveal→确认回到可见。
-
-        走的是正式入口 _real_hide/_real_reveal（含拖拽验证与重试），结果落
-        tmp/peasebar_exp_result.json。选当前可见的靶标，周期结束回到可见=原状。
-        """
-        import time
-
-        def find():
-            try:
-                for m in inventory.list_items()[0]:
-                    if (m.owner_bundle_id or "").lower() == owner.lower() and (
-                            not label or label.lower() in (m.label or "").lower()):
-                        return m
-            except Exception:  # noqa: BLE001
-                pass
-            return None
-
-        m0 = find()
-        if m0 is None:
-            return {"error": f"未找到 {owner}/{label}"}
-        before = bool(getattr(m0, "stashed", False))
-        hide_ret = self._real_hide(m0)
-        time.sleep(0.4)
-        m1 = find()
-        after_hide = bool(getattr(m1, "stashed", False)) if m1 else None
-        reveal_ret = self._real_reveal(m1 or m0)
-        time.sleep(0.4)
-        m2 = find()
-        after_reveal = bool(getattr(m2, "stashed", True)) if m2 else None
-        return {"owner": owner, "label": getattr(m0, "label", label),
-                "before_stashed": before,
-                "hide_returned": hide_ret, "after_hide_stashed": after_hide,
-                "hide_ok": after_hide is True,
-                "reveal_returned": reveal_ret, "after_reveal_stashed": after_reveal,
-                "reveal_ok": after_reveal is False,
-                "reversible": (after_hide is True and after_reveal is False)}
-
-    @objc.python_method
-    def sync_cc_now(self):
+    def sync_cc_now(self, soft=False):
         """按配置全量对齐 CC 开关（启动同步与周期核对共用的正路）。
 
         真机实证：写 isAllowed=false + killall MenuBarAgent → 图标消失且 App
         照跑；true → 回来。CC plist 是持久存储，App 没跑也能写——只处理
         「此刻盘点到的」会漏掉没跑的 App（欧路词典案例）。幂等：目标态与
         现状一致时 set_apps_allowed 不写盘、不重启 Agent，周期核对零感知。
+
+        soft=True（周期核对用）：只写盘不重启 MenuBarAgent，零闪断；
+        soft=False（用户点「应用」用）：硬 apply 一次，允许闪断。
+        不可控名单（系统不托管显隐的 bid）免检免重试，永不触发 apply。
 
         返回摘要：writable / hide / show / leftover(label 列表) / error。
         """
@@ -1740,38 +1680,38 @@ class SettingsController(NSObject):
                 if sections.section_of(cfg, sections.item_key(m)) == sections.SECTION_VISIBLE:
                     to_show.add(m.owner_bundle_id)
             out["hide"] = len(ccnative.set_apps_allowed(
-                set(cfg_hidden_bids) - set(panel._inflight) - soft_pending,
-                False))
-            out["show"] = len(ccnative.set_apps_allowed(to_show, True))
+                set(cfg_hidden_bids) - set(panel._inflight) - soft_pending
+                - ccnative.unmanageable_set(),
+                False, hard=not soft))
+            out["show"] = len(ccnative.set_apps_allowed(to_show, True, hard=not soft))
             # 实效自检：写成功≠生效（2026-11-24 事故教训：格式写坏后每次幂等
             # 跳过，图标全在栏上却无人报错）。给 MenuBarAgent 重读留一拍再
             # 盘点栏上实况，配置要藏的 bid 仍在线就重写一轮并如实上报。
-            # protected（PeaseBar 自己/系统项）永不列进自检：它们永远在线
-            # 且盘上写不进，列进来就是每轮空转硬 apply 闪一次栏。
-            time.sleep(2.0)
-            online_bids = [m.owner_bundle_id
-                           for m in inventory.list_items()[0]
-                           if not m.is_stash_button]
-            # inflight 取实时值而非函数入口快照：同步线程盘点慢，入口时
-            # 面板 trigger 可能还没登记，拿旧快照会把刚显回的图标当漂移
-            # 提前硬收回（真机闪断第二暗窗，2026-11-24）
-            still = [b for b in sorted(set(cfg_hidden_bids)
-                                       - set(panel._inflight)
-                                       - ccnative.soft_pending_bids())
-                     if not ccnative.is_protected(b)
-                     and ccnative.match_bid(b, set(online_bids))]
-            if still:
-                print(f"[PeaseBar] 实效自检：{len(still)} 个配置隐藏项仍在菜单栏上"
-                      f"（{', '.join(still[:4])}...），重写一次")
-                if not ccnative.set_apps_allowed(set(still), False):
-                    # 盘上已是 false（软生效残留）：改动没得写≠不用重画，
-                    # 强制 apply_now 把软写抹到栏上，否则图标长期滞留
-                    ccnative.apply_now()
-                out["still_visible"] = still
+            # protected（PeaseBar 自己/系统项）永不列进自检。
+            # 不可控名单也免检：它们永远在线，重试无意义且会触发闪断。
+            # soft 模式跳过自检（周期核对只写盘，不等效果，不闪）。
+            if not soft:
+                time.sleep(2.0)
+                online_bids = [m.owner_bundle_id
+                               for m in inventory.list_items()[0]
+                               if not m.is_stash_button]
+                still = [b for b in sorted(set(cfg_hidden_bids)
+                                           - set(panel._inflight)
+                                           - ccnative.soft_pending_bids()
+                                           - ccnative.unmanageable_set())
+                         if not ccnative.is_protected(b)
+                         and ccnative.match_bid(b, set(online_bids))]
+                if still:
+                    print(f"[PeaseBar] 实效自检：{len(still)} 个配置隐藏项仍在菜单栏上"
+                          f"（{', '.join(still[:4])}...），标记不可控并停止重试")
+                    ccnative.mark_unmanageable(set(still))
+                    out["still_visible"] = still
             # 侧车记「此刻系统藏着的、且是配置让它藏的」全集：配置日后改成
             # 「显示」时同步据此负责显回。
+            # 过滤不可控名单（它们虽然 isAllowed=false 但实际不生效，不应记录）
             duty = {b for b in ccnative.hidden_bids_now()
                     if not ccnative.is_protected(b)
+                    and not ccnative.is_unmanageable(b)
                     and ccnative.match_bid(b, cfg_hidden_bids)}
             ccnative.record_hidden(duty)
             out["leftover"] = [
@@ -1790,14 +1730,16 @@ class SettingsController(NSObject):
         """周期核对（60s，app.py 挂钟）：系统状态会漂移——App 断线重连时重建
         图标（真机实证：Synology Drive Client 隐藏后重现），启动时一次同步
         管不住全程。后台跑一次全量对齐：无漂移时幂等零动作（不写盘、不
-        重启 Agent、菜单栏不闪），有漂移才真正落盘收回来。"""
+        重启 Agent、菜单栏不闪），有漂移时只写盘（soft=True），
+        绝不重启 MenuBarAgent——用户明确定调不要周期性闪断。
+        新漂移的图标会在用户下次点「应用改动」或下次启动时真正生效。"""
 
         def _run():
             try:
-                r = self.sync_cc_now()
+                r = self.sync_cc_now(soft=True)
                 if r.get("writable") and (r.get("hide") or r.get("show")):
                     print(f"[PeaseBar] 周期核对：收回 {r['hide']} 枚 / 显回 "
-                          f"{r['show']} 枚（系统状态漂移已纠正）")
+                          f"{r['show']} 枚（已写盘，下次应用或重启时生效，不闪栏）")
                 if r.get("input_menu") in ("hide", "show"):
                     print(f"[PeaseBar] 周期核对：输入法菜单"
                           f"{'已收回' if r['input_menu'] == 'hide' else '已显回'}"
@@ -1808,213 +1750,18 @@ class SettingsController(NSObject):
         import threading
         threading.Thread(target=_run, daemon=True).start()
 
-    def driftInject_(self, timer):
-        """主线程回调（__DRIFT__ 取证）：注入漂移——把指定 App 的 isAllowed
-        写回 true（模拟 App 重连重建图标/系统重写记录），之后 60s 周期核对
-        应自动把它收回。写盘在后台线程，主线程不卡。"""
-        bid = str(getattr(self, "_drift_bid", "") or "")
-        if not bid:
-            return
-
-        def _run():
-            try:
-                changed = ccnative.set_apps_allowed({bid}, True)
-                print(f"[PeaseBar] 漂移实验：已把 {bid} 写回显示态"
-                      f"（改动 {sorted(changed)}），等 60s 周期核对收回")
-            except Exception as exc:  # noqa: BLE001
-                print(f"[PeaseBar] 漂移实验注入失败：{exc}")
-
-        import threading
-        threading.Thread(target=_run, daemon=True).start()
-
     @objc.python_method
     def reconcile_real_bar(self):
-        """把已保存的分区一次性镜像到真实菜单栏（启动/授权后调一次）。
+        """把已保存的分区一次性镜像到真实菜单栏（启动时调一次）。
 
         用户痛点「设为弹窗显示的图标还在菜单栏上」的根因：换区只在拖动的
         那一瞬间镜像到真实菜单栏，启动时从不把「上次保存的布局」重新贴回系统。
 
-        正路（拿到布局权重表授权时）：读一次表→按每枚图标的目标分区批量调
-        权重（隐藏=停车权重、显示=还原正常值）→写一次→广播一次。权重表没有
-        溢出区容量上限，也不靠拖拽，因此一趟到位、不振荡、可逆、不重启 App。
-
-        回退（未授权布局表时）：才用合成 ⌘-拖逐枚塞进系统溢出区，并带容量
-        护栏（一旦不再让被收纳数上升说明溢出区已满，立即收手，别再硬塞）。
-        在后台线程跑（拖拽较慢时不能卡主线程/启动）。
+        唯一正路：CC 按 App 显隐开关（sync_cc_now，硬模式——用户不在场时的
+        启动同步是一次性成本，允许重启一次 MenuBarAgent）。拖拽回退已彻底
+        停用：启动期模拟鼠标会打扰用户（红线），历史真机也实证拖拽不可靠。
+        在后台线程跑，不卡启动。
         """
-        import time
-
-        # 诊断触发文件：只在开发取证时用（文件在才跑各种 dump/实验），
-        # 平时启动不落盘、不扰民。
-        trig = os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
-                            "peasebar_exp_hide")
-        if os.path.exists(trig):
-            # 落一份真实表 + 访问链诊断（离线核对权限断点与 key 格式）。
-            try:
-                layout_table.dump_table()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[PeaseBar] 启动同步：dump 布局表异常：{exc}")
-            # 把在线第三方图标清单（owner/label/key_part/stashed）落一份。
-            try:
-                import json as _json
-                items = inventory.list_items()[0]
-                rec = [{"owner_app": m.owner_app, "owner_bundle_id": m.owner_bundle_id,
-                        "label": m.label, "key_part": m.key_part, "role": m.role,
-                        "stashed": bool(getattr(m, "stashed", False)),
-                        "is_stash_button": bool(m.is_stash_button)}
-                       for m in items]
-                with open(os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
-                                       "live_inventory.json"), "w",
-                          encoding="utf-8") as f:
-                    _json.dump(rec, f, ensure_ascii=False, indent=2)
-                print(f"[PeaseBar] 启动同步：已 dump 在线图标清单 {len(rec)} 项")
-            except Exception as exc:  # noqa: BLE001
-                print(f"[PeaseBar] 启动同步：dump 在线清单异常：{exc}")
-
-        # 诊断：若 tmp/peasebar_exp_hide 存在，跑一次受控隐藏实验（写多种候选
-        # 状态键），把结果落 tmp/peasebar_exp_result.json，然后删掉触发文件。
-        try:
-            trig = os.path.join(os.path.expanduser("~/Project/PeaseBar/tmp"),
-                                "peasebar_exp_hide")
-            if os.path.exists(trig):
-                import json as _json
-                spec = open(trig, encoding="utf-8").read().strip().split("\t")
-                owner = spec[0] if spec else ""
-                if owner == "__CLEANUP__":
-                    r = layout_table.clear_table()
-                elif owner == "__REVEAL__":
-                    o = spec[1] if len(spec) > 1 else ""
-                    t = (spec[2] if len(spec) > 2 else "").lower()
-                    _it = inventory.list_items()[0]
-                    hit = None
-                    for m in _it:
-                        if (m.owner_bundle_id or "").lower() == o.lower() and (
-                                not t or t in (m.label or "").lower()):
-                            hit = m
-                            break
-                    ok = bool(hit is not None and menubar_drag.reveal(hit))
-                    r = {"revealed": ok, "owner": o,
-                         "label": getattr(hit, "label", None)}
-                elif owner == "__DRAGTEST__":
-                    r = self._drag_cycle_test(
-                        spec[1] if len(spec) > 1 else "",
-                        (spec[2] if len(spec) > 2 else ""))
-                elif owner == "__REALHIDE__":
-                    o = spec[1] if len(spec) > 1 else owner
-                    ident = spec[2] if len(spec) > 2 else o
-                    title = spec[3] if len(spec) > 3 else ident
-                    w = spec[4] if len(spec) > 4 else None
-                    try:
-                        w = (None if w in (None, "", "None") else float(w))
-                    except ValueError:
-                        w = None
-                    r = layout_table.real_hide_test(o, ident, title, w)
-                elif owner == "__REALAGENT__":
-                    o = spec[1] if len(spec) > 1 else owner
-                    ident = spec[2] if len(spec) > 2 else o
-                    title = spec[3] if len(spec) > 3 else ident
-                    w = spec[4] if len(spec) > 4 else None
-                    try:
-                        w = (None if w in (None, "", "None") else float(w))
-                    except ValueError:
-                        w = None
-                    r = layout_table.real_hide_agent_test(o, ident, title, w)
-                elif owner == "__REALPROBE__":
-                    try:
-                        _it = inventory.list_items()[0]
-                    except Exception:  # noqa: BLE001
-                        _it = []
-                    r = {"real_probe": layout_table.real_probe(_it),
-                         "cfprefs_write": layout_table.cfprefs_suite_write_probe()}
-                elif owner == "__CFWRITE__":
-                    ident = spec[1] if len(spec) > 1 else owner
-                    title = spec[2] if len(spec) > 2 else ident
-                    r = layout_table.cfprefs_write_probe(ident, title)
-                elif owner == "__INVENTORY__":
-                    # 只盘点+截图，不动任何图标：拿「此刻」真实收纳/可见状态取证
-                    r = self._inventory_diag()
-                elif owner == "__APPLYALL__":
-                    # 逐枚把「弹窗显示」收进真实收纳区，每步落日志（验容量自增强）
-                    r = self._apply_hidden_all()
-                elif owner == "__PARKTEST__":
-                    # 停车实验：写容器真表权重(≥50000)→重启MenuBarAgent→观察落点
-                    r = self._park_test(spec[1] if len(spec) > 1 else "",
-                                        spec[2] if len(spec) > 2 else "")
-                elif owner == "__PARKRESTORE__":
-                    # 恢复停车实验改过的所有权重 + 清垃圾键 + 重启 Agent
-                    r = self._park_restore_all()
-                elif owner == "__PANEL__":
-                    # 取证：主线程把救援面板打开，供外部截屏看面板现状
-                    r = self._panel_open_test()
-                elif owner == "__POSTCHECK__":
-                    # 取证：置标志，启动同步全部跑完后盘点最终收纳状态
-                    self._postcheck_armed = True
-                    r = {"postcheck_scheduled": True}
-                elif owner == "__OFFSCREEN__":
-                    # 实验：把「配置隐藏但仍在栏上」的状态项窗口 AX 移出屏幕右缘
-                    r = self._offscreen_test()
-                elif owner == "__OFFSCREEN2__":
-                    # 实验 2：AX 不暴露状态项窗口，改走 CGS 私有通道
-                    r = self._offscreen_cgs_test()
-                elif owner == "__OFFSCREEN3__":
-                    # 实验 3：修正 SkyLight 路径 + 列出菜单栏条带内全部窗口再打击
-                    r = self._offscreen_cgs_test(enumerate_all=True)
-                elif owner == "__OFFSCREEN4__":
-                    # 实验 4：状态项无独立 CG 窗口（实验 3 实证），
-                    # 改对状态项 AX 元素本身写 AXPosition 移出屏幕
-                    r = self._offscreen_ax_pos_test()
-                elif owner == "__CCPROBE__":
-                    # CC plist 通道在 PeaseBar.app 进程内的真实可用性取证：
-                    # 终端能读写不代表 app 进程能（TCC 按进程算）。读计数 +
-                    # 用 Thaw Debug 的 bid 真写一次再还原，结果落盘离线分析。
-                    probe = {"writable": ccnative.is_writable(),
-                             "now_hidden": sorted(ccnative.hidden_bids_now())}
-                    try:
-                        _o, _r = ccnative._load()
-                        probe["read_recs"] = len(_r)
-                    except Exception as exc:  # noqa: BLE001
-                        probe["read_error"] = repr(exc)
-                    try:
-                        hid = ccnative.set_apps_allowed(
-                            {"com.stonerl.Thaw.debug"}, False)
-                        probe["write_test"] = sorted(hid)
-                        if hid:  # 还原：真写 False 成功后立即写回 True
-                            ccnative.set_apps_allowed(
-                                {"com.stonerl.Thaw.debug"}, True)
-                    except Exception as exc:  # noqa: BLE001
-                        probe["write_error"] = repr(exc)
-                    r = probe
-                elif owner == "__SETTINGSWIN__":
-                    # 取证：主线程开设置窗口（布局页），4s 后截屏 + 三区清单落盘
-                    r = self._settings_open_test()
-                elif owner == "__DRIFT__":
-                    # 取证：启动同步完成后延迟注入「系统漂移」（PeaseBar 进程才有
-                    # TCC 写权，终端写会 Errno 1）——把指定 App 的 isAllowed 写回
-                    # true 模拟 App 重连重建图标，验证 60s 周期核对的自动收回
-                    self._drift_bid = spec[1] if len(spec) > 1 else ""
-                    self._drift_armed = True
-                    r = {"drift_armed": True, "bid": self._drift_bid}
-                else:
-                    ident = spec[1] if len(spec) > 1 else owner
-                    title = spec[2] if len(spec) > 2 else ident
-                    r = layout_table.run_hide_experiment(owner, ident, title)
-                with open(os.path.join(os.path.dirname(trig),
-                                       "peasebar_exp_result.json"), "w",
-                          encoding="utf-8") as f:
-                    _json.dump(r, f, ensure_ascii=False, indent=2, default=str)
-                os.remove(trig)
-                print(f"[PeaseBar] 启动同步：隐藏实验已跑，结果落 peasebar_exp_result.json")
-        except Exception as exc:  # noqa: BLE001
-            # print 进 launchd 看不见，异常全文落盘才能离线取证
-            import traceback
-            try:
-                with open(os.path.join(
-                        os.path.dirname(trig), "peasebar_exp_error.txt"),
-                        "w", encoding="utf-8") as f:
-                    traceback.print_exc(file=f)
-            except Exception:  # noqa: BLE001
-                pass
-            print(f"[PeaseBar] 启动同步：隐藏实验异常：{exc}")
 
         cfg = sections.load_config()
         if not cfg.get("real_bar", True):
@@ -2045,7 +1792,7 @@ class SettingsController(NSObject):
                 print(f"[PeaseBar] 启动同步：{len(r['leftover'])} 枚系统项"
                       f"（{'、'.join(r['leftover'])}）系统不允许第三方隐藏，跳过")
 
-        # 注：无论主通道成败都落到这里（取证调度在下方），不再走启动期拖拽。
+        # 注：无论主通道成败都落到这里，不再走启动期拖拽。
 
         # 输入法菜单（搜狗宿主）的显隐独立于 CC 通道成败，动作结果放公共尾部打印
         if r.get("input_menu") in ("hide", "show"):
@@ -2055,47 +1802,6 @@ class SettingsController(NSObject):
             print(f"[PeaseBar] 启动同步：输入法菜单显隐失败："
                   f"{r['input_menu_error']}")
 
-        # __PANEL__ 取证：启动同步已全部跑完，这里才把「开面板」安排进主 runloop
-        # （0.1s 后 fire）——不能在触发文件处直接调度：reconcile 在后台线程跑，
-        # 主 runloop 一直在转，过早调度会让面板在拖拽进行中打开、截到中间态。
-        if getattr(self, "_panel_test_armed", False):
-            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
-            t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-                0.1, self, "panelOpen:", None, False)
-            NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
-            print("[PeaseBar] 面板取证：启动同步完成，已安排主线程开面板")
-
-        # __SETTINGSWIN__ 取证：启动同步全部跑完再开设置窗（布局页），
-        # 4s 后截屏 + 三区清单落盘（验证「已藏图标在设置里可见可管」）
-        if getattr(self, "_settings_test_armed", False):
-            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
-            t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-                0.1, self, "settingsOpen:", None, False)
-            NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
-            print("[PeaseBar] 设置取证：启动同步完成，已安排主线程开设置窗")
-
-        # __DRIFT__ 取证：启动同步全部完成后再注入漂移（太早注入会被启动同步
-        # 立刻收回去，验不到周期核对），8s 足够稳
-        if getattr(self, "_drift_armed", False):
-            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
-            t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-                8.0, self, "driftInject:", None, False)
-            NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
-            print("[PeaseBar] 漂移实验：启动同步完成，8s 后注入")
-
-        # __POSTCHECK__ 取证：启动同步收敛完，盘点最终收纳状态（只读不动）
-        if getattr(self, "_postcheck_armed", False):
-            try:
-                r2 = self._inventory_diag()
-                with open(os.path.expanduser(
-                        "~/Project/PeaseBar/tmp/peasebar_exp_result.json"),
-                        "w", encoding="utf-8") as f:
-                    import json as _json
-                    _json.dump(r2, f, ensure_ascii=False, indent=2, default=str)
-                print(f"[PeaseBar] 后置盘点：已收 {len(r2.get('stashed', []))} 枚，"
-                      f"仍在栏 {len(r2.get('configured_hidden_still_visible', []))} 枚")
-            except Exception as exc:  # noqa: BLE001
-                print(f"[PeaseBar] 后置盘点失败：{exc}")
 
     @objc.python_method
     def reconcile_real_bar_async(self, delay=1.5):
@@ -2120,781 +1826,6 @@ class SettingsController(NSObject):
                 traceback.print_exc()
 
         threading.Thread(target=_run, daemon=True).start()
-
-    @objc.python_method
-    def _inventory_diag(self):
-        """诊断（__INVENTORY__ 触发）：当前真实菜单栏的收纳/可见状态 + 条带截图。
-
-        只读不动：列出已收纳、可见第三方、以及「配置为弹窗显示但仍在可见段」的项，
-        配一张顶部条带 PNG（App 有屏幕录制权限，截到真实像素），结果落 tmp/。
-        """
-        import time as _t
-        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType
-        tmp = os.path.expanduser("~/Project/PeaseBar/tmp")
-        items = inventory.list_items()[0]
-        cfg = sections.load_config()
-
-        def rec(m):
-            return {"app": m.owner_app, "bid": m.owner_bundle_id,
-                    "label": m.label,
-                    "frame": tuple(m.frame) if m.frame else None}
-
-        stashed = [m for m in items if getattr(m, "stashed", False)
-                   and not m.is_stash_button]
-        vis3 = [m for m in items if not getattr(m, "stashed", False)
-                and not m.is_stash_button
-                and (m.owner_bundle_id or "") != "com.apple.MenuBarAgent"]
-        pend = [m for m in vis3
-                if sections.section_of(cfg, sections.item_key(m)) in
-                (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN)]
-        shot = os.path.join(tmp, "menubar_strip.png")
-        shot_ok = False
-        try:
-            s = NSScreen.mainScreen().frame()
-            img = Quartz.CGWindowListCreateImage(
-                Quartz.CGRectMake(0, 0, int(s.size.width), 40),
-                Quartz.kCGWindowListOptionOnScreenOnly,
-                Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
-            if img is not None:
-                rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
-                if rep is not None:
-                    data = rep.representationUsingType_properties_(NSPNGFileType, None)
-                    shot_ok = bool(data.writeToFile_atomically_(shot, True))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 诊断截图失败：{exc}")
-        return {"time": _t.strftime("%H:%M:%S"),
-                "screenshot": shot if shot_ok else None,
-                "stashed": [rec(m) for m in stashed],
-                "visible_3rd": [rec(m) for m in vis3],
-                "configured_hidden_still_visible": [rec(m) for m in pend]}
-
-    @objc.python_method
-    def _offscreen_test(self):
-        """验证「移出屏幕」隐藏通道（不受收纳条宽度限制，Bartender/Ice 同款思路）：
-
-        把「配置隐藏但仍在栏上」的状态项窗口用跨进程 AX 写 AXPosition 移到
-        屏幕右缘之外，回答三件事：
-        1) 系统是否放行（set_err=0）；
-        2) MenuBarAgent / 图标 App 会不会拉回（移后 1s 与 6s 各回读窗口位置）；
-        3) 图标 App 是否健在（其菜单栏项 AX 元素还能读吗）。
-        实验不自动恢复：若移成功且不拉回，这正是用户要的隐藏终态；
-        若被拉回，无需恢复；before 位置已记录在结果里供手动还原。
-        """
-        import time as _t
-        from AppKit import NSScreen
-        from peasebar import axutil
-        items = inventory.list_items()[0]
-        cfg = sections.load_config()
-        try:
-            sw = int(NSScreen.mainScreen().frame().size.width)
-        except Exception:  # noqa: BLE001
-            sw = 2056
-        off_x = sw + 80  # 完全出屏（窗口全部在可视区外）
-        out = {"time": _t.strftime("%H:%M:%S"), "screen_w": sw,
-               "off_x": off_x, "moved": []}
-        targets = []
-        for m in items:
-            if m.is_stash_button or getattr(m, "stashed", False) or m.frame is None:
-                continue
-            sec = sections.section_of(cfg, sections.item_key(m))
-            if (sec in (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN)
-                    and menubar_drag.movable(m)):
-                targets.append(m)
-        out["targets"] = [f"{m.owner_app}/{m.label}" for m in targets]
-        for m in targets:
-            rec = {"target": f"{m.owner_app}/{m.label}",
-                   "before": tuple(m.frame)}
-            try:
-                app = axutil.app_element_for_pid(m.owner_pid)
-                axutil.set_messaging_timeout(app, 0.8)
-                err, wins = axutil.copy_attr(app, "AXWindows")
-                wins = axutil._as_list(wins) if err == 0 else []
-                hit = None
-                fx, fy, fw, fh = m.frame
-                for w in wins:
-                    wf = axutil.element_frame(w)
-                    if wf is None:
-                        continue
-                    wx, wy, ww, wh = wf
-                    # 状态项窗口与图标矩形重叠、贴着菜单栏（窗口通常比图标大一圈）
-                    if (wx <= fx + fw and wx + ww >= fx
-                            and abs(wy - fy) < 12 and wh <= 60):
-                        hit = w
-                        rec["win_frame"] = wf
-                        break
-                if hit is None:
-                    rec["error"] = f"没找到匹配窗口（该 App 共 {len(wins)} 个窗口）"
-                else:
-                    rec["set_err"] = axutil.set_position(hit, off_x, fy)
-                    _t.sleep(1.0)
-                    rec["after_1s"] = axutil.element_frame(hit)
-                    _t.sleep(5.0)
-                    rec["after_6s"] = axutil.element_frame(hit)
-                    el = getattr(m, "el", None)
-                    rec["el_alive"] = (axutil.element_frame(el) is not None
-                                       if el is not None else None)
-            except Exception as exc:  # noqa: BLE001
-                rec["error"] = str(exc)
-            out["moved"].append(rec)
-        return out
-
-    @objc.python_method
-    def _offscreen_cgs_test(self, enumerate_all=False):
-        """实验：CGS 私有通道隐藏状态项窗口（Bartender/Ice 同源思路）。
-
-        enumerate_all=False：按 pid+layer=25 精确找窗口；True：列出菜单栏
-        条带内（y<=30、h<=60）的全部窗口（摸清状态项窗口真实的
-        layer/owner/pid 分布），再对与目标图标重叠的窗口执行隐藏操作。
-        """
-        import ctypes
-        import time as _t
-        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType
-        items = inventory.list_items()[0]
-        cfg = sections.load_config()
-        targets = []
-        for m in items:
-            if m.is_stash_button or getattr(m, "stashed", False) or m.frame is None:
-                continue
-            sec = sections.section_of(cfg, sections.item_key(m))
-            if (sec in (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN)
-                    and menubar_drag.movable(m)):
-                targets.append(m)
-        out = {"time": _t.strftime("%H:%M:%S"),
-               "targets": [f"{m.owner_app}/{m.label}" for m in targets],
-               "pids": [m.owner_pid for m in targets], "ops": [],
-               "enumerate_all": enumerate_all}
-        # 1) CGWindowList 枚举：精确模式按 pid+layer=25；摸底模式列出条带内全部
-        wins = Quartz.CGWindowListCopyWindowInfo(
-            Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID)
-        pid_set = {m.owner_pid for m in targets}
-        found = {}  # pid -> [{win, bounds, alpha, layer, owner}]
-        strip_all = []
-        pid_all = []  # 目标 pid 的全部窗口（不过滤，摸清状态项窗口注册形态）
-        for w in wins or []:
-            try:
-                pid = w.get("kCGWindowOwnerPID")
-                layer = w.get("kCGWindowLayer")
-                num = w.get("kCGWindowNumber")
-                if num is None:
-                    continue
-                b = dict(w.get("kCGWindowBounds") or {})
-                bx, by = b.get("X", 0), b.get("Y", 0)
-                bw, bh = b.get("Width", 0), b.get("Height", 0)
-                if enumerate_all:
-                    # 菜单栏条带内的小窗口（状态项/菜单栏本体的候选）
-                    if by <= 30 and bh <= 60 and bw <= 400:
-                        strip_all.append({
-                            "win": int(num), "pid": pid,
-                            "owner": str(w.get("kCGWindowOwnerName") or ""),
-                            "name": str(w.get("kCGWindowName") or ""),
-                            "layer": layer,
-                            "bounds": (bx, by, bw, bh),
-                            "alpha": w.get("kCGWindowAlpha")})
-                    # 目标 pid 的窗口全量（不过滤 layer/bounds）——条带过滤可能
-                    # 把状态项窗口滤没了，先看它名下到底注册了什么
-                    if pid in pid_set:
-                        pid_all.append({
-                            "win": int(num),
-                            "name": str(w.get("kCGWindowName") or ""),
-                            "layer": layer,
-                            "bounds": (bx, by, bw, bh),
-                            "alpha": w.get("kCGWindowAlpha"),
-                            "onscreen": bool(
-                                w.get("kCGWindowIsOnscreen"))})
-                    continue
-                if pid in pid_set and layer == 25:
-                    found.setdefault(pid, []).append({
-                        "win": int(num),
-                        "bounds": (bx, by, bw, bh),
-                        "alpha": w.get("kCGWindowAlpha")})
-            except Exception:  # noqa: BLE001
-                continue
-        if enumerate_all:
-            strip_all.sort(key=lambda d: d["bounds"][0])
-            out["menu_bar_strip_windows"] = strip_all
-            out["target_pid_windows"] = pid_all
-        else:
-            out["cgs_windows"] = found
-        # 2) 加载 SkyLight 私有框架（macOS 27 在 PrivateFrameworks 下）
-        sk = None
-        last_err = None
-        for path in ("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
-                     "/System/Library/Frameworks/SkyLight.framework/SkyLight"):
-            try:
-                sk = ctypes.CDLL(path)
-                out["skylight_path"] = path
-                break
-            except Exception as exc:  # noqa: BLE001
-                last_err = str(exc)
-        if sk is None and last_err:
-            out["skylight_error"] = last_err
-        syms = {}
-        cid = None
-        if sk is not None:
-            try:
-                sk.CGSMainConnectionID.restype = ctypes.c_int
-                cid = sk.CGSMainConnectionID()
-            except Exception as exc:  # noqa: BLE001
-                out["cgs_cid_error"] = str(exc)
-            out["cgs_cid"] = cid
-            for name in ("CGSSetWindowAlpha", "CGSMoveWindow",
-                         "CGSSetWindowRect", "CGSSetWindowLevel"):
-                try:
-                    getattr(sk, name)
-                    syms[name] = True
-                except AttributeError:
-                    syms[name] = False
-            out["symbols"] = syms
-        # 3) 选窗：精确模式用 found；摸底模式按「窗口 bounds 与目标图标重叠」选
-        def pick_win(m):
-            if not enumerate_all:
-                cands = found.get(m.owner_pid) or []
-                return (cands[0]["win"] if cands else None)
-            fx, fy, fw, fh = m.frame
-            for row in strip_all:
-                wx, wy, ww, wh = row["bounds"]
-                if (row["pid"] == m.owner_pid
-                        and wx <= fx + fw and wx + ww >= fx
-                        and abs(wy - fy) < 12 and wh <= 60):
-                    return row["win"]
-            return None
-
-        if sk is not None and cid is not None:
-            for m in targets:
-                rec = {"target": f"{m.owner_app}/{m.label}",
-                       "pid": m.owner_pid, "before_frame": tuple(m.frame)}
-                wid = pick_win(m)
-                if wid is None:
-                    rec["error"] = "没匹配到状态项窗口"
-                    out["ops"].append(rec)
-                    continue
-                rec["win"] = wid
-                try:
-                    if syms.get("CGSSetWindowAlpha"):
-                        sk.CGSSetWindowAlpha.argtypes = [
-                            ctypes.c_int, ctypes.c_int, ctypes.c_double]
-                        rec["alpha_ret"] = int(sk.CGSSetWindowAlpha(
-                            cid, wid, ctypes.c_double(0.0)))
-                    if syms.get("CGSMoveWindow"):
-                        class _Pt(ctypes.Structure):
-                            _fields_ = [("x", ctypes.c_double),
-                                        ("y", ctypes.c_double)]
-                        sk.CGSMoveWindow.argtypes = [
-                            ctypes.c_int, ctypes.c_int, ctypes.POINTER(_Pt)]
-                        pt = _Pt(3000.0, 7.0)  # 屏幕外
-                        rec["move_ret"] = int(sk.CGSMoveWindow(
-                            cid, wid, ctypes.byref(pt)))
-                except Exception as exc:  # noqa: BLE001
-                    rec["error"] = str(exc)
-                out["ops"].append(rec)
-        # 4) 1s / 6s 后截菜单栏条带留视觉证据
-        for tag, wait in (("shot_1s", 1.0), ("shot_6s", 5.0)):
-            _t.sleep(wait)
-            try:
-                s = NSScreen.mainScreen().frame()
-                img = Quartz.CGWindowListCreateImage(
-                    Quartz.CGRectMake(0, 0, int(s.size.width), 40),
-                    Quartz.kCGWindowListOptionOnScreenOnly,
-                    Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
-                if img is not None:
-                    rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
-                    if rep is not None:
-                        data = rep.representationUsingType_properties_(
-                            NSPNGFileType, None)
-                        out[tag] = bool(data.writeToFile_atomically_(
-                            os.path.expanduser(
-                                f"~/Project/PeaseBar/tmp/offscreen_{tag}.png"),
-                            True))
-            except Exception as exc:  # noqa: BLE001
-                out[f"{tag}_error"] = str(exc)
-        return out
-
-    @objc.python_method
-    def _offscreen_ax_pos_test(self):
-        """实验 4：对状态项 AX 元素本身写 AXPosition 移出屏幕。
-
-        实验 3 实证 macOS 27 状态项无独立 CG 窗口（条带里只有 MenuBarAgent
-        的全宽容器），CGS 单窗通道没目标；但 AX 能读到状态项元素（inventory
-        本就靠它）——试对元素直接写 AXPosition（Ice/Dozer 系手法），回答：
-        1) AXPosition 是否可写（settable / err）；
-        2) 写后图标是否真的出屏（回读元素位置）；
-        3) MenuBarAgent 会不会拉回（1s/6s 后回读 + 条带截图）。
-        """
-        import time as _t
-        import ApplicationServices as AS
-        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType
-        from peasebar import axutil
-        items = inventory.list_items()[0]
-        cfg = sections.load_config()
-        targets = []
-        for m in items:
-            if m.is_stash_button or getattr(m, "stashed", False) or m.frame is None:
-                continue
-            sec = sections.section_of(cfg, sections.item_key(m))
-            if (sec in (sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN)
-                    and menubar_drag.movable(m)):
-                targets.append(m)
-        out = {"time": _t.strftime("%H:%M:%S"),
-               "targets": [f"{m.owner_app}/{m.label}" for m in targets],
-               "ops": []}
-        for m in targets:
-            rec = {"target": f"{m.owner_app}/{m.label}",
-                   "before": tuple(m.frame)}
-            try:
-                rec["settable"] = bool(AS.AXUIElementIsAttributeSettable(
-                    m.el, "AXPosition", None))
-                rec["err"] = int(axutil.set_position(m.el, 3000.0, 7.0))
-                _t.sleep(1.0)
-                f1 = axutil.element_frame(m.el)
-                rec["after_1s"] = tuple(f1) if f1 else None
-                _t.sleep(5.0)
-                f6 = axutil.element_frame(m.el)
-                rec["after_6s"] = tuple(f6) if f6 else None
-            except Exception as exc:  # noqa: BLE001
-                rec["error"] = str(exc)
-            out["ops"].append(rec)
-        # 1s / 6s 条带截图留视觉证据（图标到底还在不在栏上）
-        for tag, wait in (("ax4_shot_1s", 1.0), ("ax4_shot_6s", 5.0)):
-            _t.sleep(wait)
-            try:
-                s = NSScreen.mainScreen().frame()
-                img = Quartz.CGWindowListCreateImage(
-                    Quartz.CGRectMake(0, 0, int(s.size.width), 40),
-                    Quartz.kCGWindowListOptionOnScreenOnly,
-                    Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
-                if img is not None:
-                    rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
-                    if rep is not None:
-                        data = rep.representationUsingType_properties_(
-                            NSPNGFileType, None)
-                        out[tag] = bool(data.writeToFile_atomically_(
-                            os.path.expanduser(
-                                f"~/Project/PeaseBar/tmp/{tag}.png"),
-                            True))
-            except Exception as exc:  # noqa: BLE001
-                out[f"{tag}_error"] = str(exc)
-        return out
-
-    @objc.python_method
-    def _apply_hidden_all(self):
-        """取证（__APPLYALL__ 触发）：把配置为弹窗显示且仍可见的第三方图标逐枚
-        收进真实收纳区，每步落日志——验证「容量随可见区变空自增强」假设。
-
-        与启动同步的悲观护栏不同：一次收不进不算满（hide 内部已带 3 次重试与
-        落点重算），连续 2 枚收不进才停。系统项（com.apple.*）对 ⌘-拖抵抗、
-        拖不动，单独记 skip，不占失败计数。
-        """
-        import time
-        inventory.set_stash_revealed(False)
-        time.sleep(0.5)
-        cfg = sections.load_config()
-        log, tried = [], set()
-        hidden_n = skip_n = fail_n = 0
-        consec = 0
-        for _round in range(24):
-            items = inventory.list_items()[0]
-            target = None
-            for m in items:
-                if m.is_stash_button or getattr(m, "stashed", False):
-                    continue
-                k = sections.item_key(m)
-                if k in tried:
-                    continue
-                if sections.section_of(cfg, k) in (
-                        sections.SECTION_HIDDEN, sections.SECTION_ALWAYS_HIDDEN):
-                    target = m
-                    break
-            if target is None:
-                log.append({"step": _round, "result": "done",
-                            "note": f"隐藏 {hidden_n}，跳过 {skip_n}，失败 {fail_n}"})
-                break
-            tried.add(sections.item_key(target))
-            if not menubar_drag.movable(target):
-                skip_n += 1
-                log.append({"step": _round,
-                            "skip": f"{target.owner_app}/{target.label}",
-                            "why": "系统项对 ⌘-拖抵抗，拖不动"})
-                continue
-            ok = menubar_drag.hide(target)
-            time.sleep(0.5)
-            fresh = menubar_drag._find(target)
-            now_stashed = bool(getattr(fresh, "stashed", False)) if fresh else False
-            log.append({"step": _round,
-                        "hide": f"{target.owner_app}/{target.label}",
-                        "drag_ok": bool(ok), "verified_stashed": now_stashed})
-            if now_stashed:
-                hidden_n += 1
-                consec = 0
-            else:
-                fail_n += 1
-                consec += 1
-                if consec >= 2:
-                    log.append({"step": _round, "result": "stopped",
-                                "note": "连续 2 枚收不进：溢出区可能真满"})
-                    break
-        items = inventory.list_items()[0]
-        return {"hidden_applied": hidden_n, "skipped": skip_n, "failed": fail_n,
-                "log": log,
-                "final_stashed": [f"{m.owner_app}/{m.label}" for m in items
-                                  if getattr(m, "stashed", False)
-                                  and not m.is_stash_button],
-                "final_visible_3rd": [f"{m.owner_app}/{m.label}" for m in items
-                                      if not getattr(m, "stashed", False)
-                                      and not m.is_stash_button
-                                      and (m.owner_bundle_id or "")
-                                      != "com.apple.MenuBarAgent"]}
-
-    @objc.python_method
-    def _park_test(self, bid, spec_weight):
-        """停车实验（__PARKTEST__ 触发）：把 bid 的真表权重写成停车值（默认
-        50000=HIDDEN_BASE）→ 重启 MenuBarAgent → 观察这枚落点。
-
-        要回答的问题：停车项是「彻底移除」（不占 7 位口袋 → 无限隐藏）
-        还是「照样进口袋」（那路就封死了）。spec_weight="restore" 则从
-        tmp/park_originals.json 恢复原权重（解除停车）。
-        """
-        import json as _json
-        import subprocess
-        import time
-        if not bid:
-            return {"ok": False, "why": "缺 bid 参数"}
-        weights = layout_table.container_read_weights()
-        key = None
-        for k in weights:
-            if k.startswith(f"status:{bid}::"):
-                key = k
-                break
-        if key is None:
-            return {"ok": False, "why": f"真表里找不到 {bid} 的键",
-                    "known_keys": [k for k in weights if bid.split(".")[-1] in k]}
-        orig_file = os.path.expanduser("~/Project/PeaseBar/tmp/park_originals.json")
-        origs = {}
-        if os.path.exists(orig_file):
-            try:
-                with open(orig_file, encoding="utf-8") as f:
-                    origs = _json.load(f)
-            except Exception:  # noqa: BLE001
-                origs = {}
-        origs.setdefault(key, weights[key])
-        if spec_weight == "restore":
-            w = origs.get(key)
-            action = f"restore->{w}"
-        else:
-            try:
-                w = float(spec_weight) if spec_weight else float(
-                    layout_table.HIDDEN_BASE)
-            except ValueError:
-                w = float(layout_table.HIDDEN_BASE)
-            action = f"park->{w}"
-        try:
-            with open(orig_file, "w", encoding="utf-8") as f:
-                _json.dump(origs, f, ensure_ascii=False, indent=2)
-        except Exception:  # noqa: BLE001
-            pass
-        wr = layout_table.container_write_weights({key: w})
-        # 重启 MenuBarAgent 让它重读表（launchd 秒级拉起，不碰任何 App）
-        subprocess.run(["killall", "MenuBarAgent"], capture_output=True)
-        time.sleep(4.0)
-        items = inventory.list_items()[0]
-        hit = None
-        for m in items:
-            if (m.owner_bundle_id or "").lower() == bid.lower():
-                hit = m
-                break
-        obs = None
-        if hit is not None:
-            obs = {"app": hit.owner_app, "label": hit.label,
-                   "stashed": bool(getattr(hit, "stashed", False)),
-                   "frame": tuple(hit.frame) if hit.frame else None,
-                   "ax_alive": hit.el is not None,
-                   "notched": bool(getattr(hit, "notched", False))}
-        stashed_n = sum(1 for m in items if getattr(m, "stashed", False)
-                        and not m.is_stash_button)
-        stash_list = [f"{m.owner_app}/{m.label}" for m in items
-                      if getattr(m, "stashed", False) and not m.is_stash_button]
-        return {"key": key, "action": action, "write": wr,
-                "observed": obs, "stash_count": stashed_n,
-                "stash_list": stash_list,
-                "table_now": layout_table.container_read_weights().get(key)}
-
-    @objc.python_method
-    def _park_restore_all(self):
-        """恢复停车实验改过的所有真表权重（tmp/park_originals.json 记录原值），
-        并清掉误跑实验写进 controlcenter 的垃圾键，最后重启 Agent 让它重读。
-        """
-        import json as _json
-        import subprocess
-        import time
-        orig_file = os.path.expanduser("~/Project/PeaseBar/tmp/park_originals.json")
-        origs = {}
-        if os.path.exists(orig_file):
-            try:
-                with open(orig_file, encoding="utf-8") as f:
-                    origs = _json.load(f)
-            except Exception:  # noqa: BLE001
-                origs = {}
-        upd = {k: v for k, v in origs.items() if v is not None}
-        wr = (layout_table.container_write_weights(upd) if upd
-              else {"ok": None, "why": "无原值记录"})
-        clean = layout_table.clear_table()
-        subprocess.run(["killall", "MenuBarAgent"], capture_output=True)
-        time.sleep(3.0)
-        return {"restored": upd, "write": wr, "cleanup": clean}
-
-    def panelOpen_(self, timer):
-        """主线程回调 1（__PANEL__ 取证）：打开救援面板，安排 4s 后截屏落盘。"""
-        try:
-            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
-            from AppKit import NSApp
-            panel = getattr(NSApp.delegate(), "rescue", None)
-            if panel is None:
-                print("[PeaseBar] 面板取证：找不到 rescue 控制器")
-                return
-            panel.show()
-            # 第二段：秒开渲染用的是旧快照，后台采集刷新完（就地更新）再截屏，
-            # 4s 足够采集+网格重排；期间 runloop 正常空转，不阻塞渲染。
-            t2 = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-                4.0, self, "panelShot:", None, False)
-            NSRunLoop.mainRunLoop().addTimer_forMode_(t2, NSRunLoopCommonModes)
-            print("[PeaseBar] 面板取证：已 show，4s 后截屏落盘")
-        except Exception as exc:  # noqa: BLE001
-            import traceback
-            traceback.print_exc()
-
-    def panelShot_(self, timer):
-        """主线程回调 2（__PANEL__ 取证）：全屏截图+面板格子清单落盘+关面板。
-
-        结果覆盖写 tmp/peasebar_exp_result.json（启动同步先写的是「已调度」占位）。
-        面板实际渲染的格子 = rescue._snapshot["group"]，直接抓它核对有没有漏列。
-        """
-        import json as _json
-        import time as _t
-        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType, NSApp
-        r = {"time": _t.strftime("%H:%M:%S"), "panel_opened": True}
-        panel = None
-        try:
-            panel = getattr(NSApp.delegate(), "rescue", None)
-            snap = getattr(panel, "_snapshot", None)
-            pf = getattr(panel, "panel", None)
-            if pf is not None:
-                # 面板可见性与位置：定位「截图里没面板」是渲染问题还是时机问题
-                r["panel_visible"] = bool(pf.isVisible())
-                r["panel_frame"] = str(pf.frame())
-            if snap is None:
-                r["panel_grid"] = None
-                r["panel_grid_why"] = "快照为 None：面板从未采集成功，格子应为空态"
-            else:
-                r["panel_grid"] = [
-                    {"app": m.owner_app, "label": m.label,
-                     "stashed": bool(m.stashed), "notched": bool(m.notched)}
-                    for m in snap.get("group", [])]
-                r["panel_grid_count"] = len(r["panel_grid"])
-        except Exception as exc:  # noqa: BLE001
-            r["panel_grid_error"] = str(exc)
-        # 全屏截图（含菜单栏 + 展开的面板本体；App 有屏幕录制权限）
-        try:
-            s = NSScreen.mainScreen().frame()
-            img = Quartz.CGWindowListCreateImage(
-                Quartz.CGRectMake(0, 0, int(s.size.width), int(s.size.height)),
-                Quartz.kCGWindowListOptionOnScreenOnly,
-                Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
-            if img is not None:
-                rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
-                if rep is not None:
-                    data = rep.representationUsingType_properties_(NSPNGFileType, None)
-                    r["shot_ok"] = bool(data.writeToFile_atomically_(
-                        os.path.expanduser("~/Project/PeaseBar/tmp/panel_shot.png"),
-                        True))
-        except Exception as exc:  # noqa: BLE001
-            r["shot_error"] = str(exc)
-        # 截完关面板，恢复现场（面板 8s 超时也兜底，这里主动关更干净）
-        try:
-            if panel is not None:
-                panel.close()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            with open(os.path.expanduser(
-                    "~/Project/PeaseBar/tmp/peasebar_exp_result.json"),
-                    "w", encoding="utf-8") as f:
-                _json.dump(r, f, ensure_ascii=False, indent=2, default=str)
-            print(f"[PeaseBar] 面板取证：截图={r.get('shot_ok')}，"
-                  f"格子数={r.get('panel_grid_count')}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 面板取证：结果写入失败：{exc}")
-        # 第三段：2s 后模拟点击面板格子（ToDesk 优先），真机验证「点击即用」
-        try:
-            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
-            t3 = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-                2.0, self, "panelClick:", None, False)
-            NSRunLoop.mainRunLoop().addTimer_forMode_(t3, NSRunLoopCommonModes)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 面板取证：安排点击段失败：{exc}")
-
-    def panelClick_(self, timer):
-        """主线程回调 3（__PANEL__ 取证）：模拟点击面板格子，验证「点击即用」。
-
-        与真实点击完全同路：面板先收 → 后台 trigger 阶梯（AXPress → AXShowMenu
-        → 合成右键），done 回调里记录触发方式与「新窗口出现」判据，随后截屏留证。
-        """
-        from peasebar import trigger as _trigger  # 包内绝对导入：顶层 import 在打包环境必挂
-        from AppKit import NSApp
-        panel = getattr(NSApp.delegate(), "rescue", None)
-        snap = getattr(panel, "_snapshot", None) if panel is not None else None
-        group = (snap or {}).get("group", [])
-        target = None
-        # 优先「原生隐藏」项（新通道核心场景：藏起的图标走显回→触发→收回链路）
-        for m in group:
-            if getattr(m, "native_hidden", False):
-                target = m
-                break
-        # 次选「被收纳」项（旧机制场景：收纳项只能靠 AX 投递，最该验证）
-        if target is None:
-            for want in ("com.youqu.todesk.mac", None):
-                for m in group:
-                    if not m.stashed:
-                        continue
-                    if want is not None and (m.owner_bundle_id or "") != want:
-                        continue
-                    target = m
-                    break
-                if target is not None:
-                    break
-        if target is None and group:
-            target = group[0]
-        r = {"click_target": (f"{target.owner_app}/{target.label}"
-                              if target is not None else None),
-             "click_native": bool(getattr(target, "native_hidden", False))}
-        self._panel_click_result = r
-        if panel is not None:
-            panel.close()  # 忠实模拟真实点击：面板先收再触发
-        if target is None:
-            print("[PeaseBar] 面板取证：面板无格子可点击")
-            return
-
-        def done(how, seen):
-            r["trigger_how"] = str(how)
-            r["trigger_seen"] = bool(seen)
-            print(f"[PeaseBar] 面板取证：触发 {r['click_target']}：{how}，"
-                  f"反应={'有' if seen else '无'}")
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "panelShot2:", None, False)
-
-        try:
-            if getattr(target, "native_hidden", False):
-                # 与 onIconClick_ 同分流：原生隐藏格走显回→触发→收回复合链路
-                from peasebar.panel import open_native_hidden_async
-                open_native_hidden_async(target.owner_bundle_id, done)
-            else:
-                _trigger.open_item_async(target, done)
-        except Exception as exc:  # noqa: BLE001
-            r["click_error"] = str(exc)
-            print(f"[PeaseBar] 面板取证：触发异常：{exc}")
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "panelShot2:", None, False)
-        # 兜底：done 里 open_item 若崩在子线程不回调，12s 后强制落盘截屏
-        try:
-            from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
-            t4 = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-                12.0, self, "panelShot2:", None, False)
-            NSRunLoop.mainRunLoop().addTimer_forMode_(t4, NSRunLoopCommonModes)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 面板取证：安排兜底截屏失败：{exc}")
-
-    def panelShot2_(self, timer):
-        """主线程回调 4（__PANEL__ 取证）：触发后截屏（原生菜单应已在屏）+ 落最终结果。"""
-        import json as _json
-        import time as _t
-        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType
-        r = dict(getattr(self, "_panel_click_result", {}) or {})
-        r["time"] = _t.strftime("%H:%M:%S")
-        try:
-            s = NSScreen.mainScreen().frame()
-            img = Quartz.CGWindowListCreateImage(
-                Quartz.CGRectMake(0, 0, int(s.size.width), int(s.size.height)),
-                Quartz.kCGWindowListOptionOnScreenOnly,
-                Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
-            if img is not None:
-                rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
-                if rep is not None:
-                    data = rep.representationUsingType_properties_(NSPNGFileType, None)
-                    r["menu_shot_ok"] = bool(data.writeToFile_atomically_(
-                        os.path.expanduser(
-                            "~/Project/PeaseBar/tmp/panel_menu_shot.png"), True))
-        except Exception as exc:  # noqa: BLE001
-            r["menu_shot_error"] = str(exc)
-        try:
-            with open(os.path.expanduser(
-                    "~/Project/PeaseBar/tmp/panel_click_result.json"),
-                    "w", encoding="utf-8") as f:
-                _json.dump(r, f, ensure_ascii=False, indent=2, default=str)
-            print(f"[PeaseBar] 面板取证：触发后截图={r.get('menu_shot_ok')}，"
-                  f"反应={r.get('trigger_seen')}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 面板取证：结果写入失败：{exc}")
-
-    @objc.python_method
-    def _panel_open_test(self):
-        """__PANEL__ 取证入口：只置标志，启动同步全部完成后才开面板（见 reconcile 末尾）。"""
-        self._panel_test_armed = True
-        return {"panel_test_scheduled": True,
-                "note": "启动同步完成后开面板 → 4s 后截屏落盘"}
-
-    @objc.python_method
-    def _settings_open_test(self):
-        """__SETTINGSWIN__ 取证入口：置标志，启动同步全部完成后开设置窗（布局页）。"""
-        self._settings_test_armed = True
-        return {"settings_test_scheduled": True,
-                "note": "启动同步完成后开设置窗 → 4s 后截屏 + 三区清单落盘"}
-
-    def settingsOpen_(self, timer):
-        """主线程回调 1（__SETTINGSWIN__ 取证）：开设置窗（布局页），4s 后截屏。"""
-        from Foundation import NSRunLoop, NSRunLoopCommonModes, NSTimer
-        self.show()  # show() 一律从布局页起步
-        t = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-            4.0, self, "settingsShot:", None, False)
-        NSRunLoop.mainRunLoop().addTimer_forMode_(t, NSRunLoopCommonModes)
-
-    def settingsShot_(self, timer):
-        """主线程回调 2（__SETTINGSWIN__ 取证）：全屏截图 + 三区清单落盘 + 关窗。"""
-        import json as _json
-        import time as _t
-        from AppKit import NSScreen, NSBitmapImageRep, NSPNGFileType
-        r = {"time": _t.strftime("%H:%M:%S")}
-        try:
-            cfg = sections.load_config()
-            buckets = sections.plan_sections(self.items, cfg)
-            r["sections"] = {sec: [sections.item_key(m) for m in buckets[sec]]
-                              for sec in _SECTION_ORDER}
-        except Exception as exc:  # noqa: BLE001
-            r["sections_error"] = str(exc)
-        try:
-            s = NSScreen.mainScreen().frame()
-            img = Quartz.CGWindowListCreateImage(
-                Quartz.CGRectMake(0, 0, int(s.size.width), int(s.size.height)),
-                Quartz.kCGWindowListOptionOnScreenOnly,
-                Quartz.kCGNullWindowID, Quartz.kCGWindowImageDefault)
-            if img is not None:
-                rep = NSBitmapImageRep.alloc().initWithCGImage_(img)
-                if rep is not None:
-                    data = rep.representationUsingType_properties_(NSPNGFileType, None)
-                    r["shot_ok"] = bool(data.writeToFile_atomically_(
-                        os.path.expanduser("~/Project/PeaseBar/tmp/settings_shot.png"),
-                        True))
-        except Exception as exc:  # noqa: BLE001
-            r["shot_error"] = str(exc)
-        try:
-            if self.window is not None:
-                self.close()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            with open(os.path.expanduser(
-                    "~/Project/PeaseBar/tmp/settings_result.json"),
-                    "w", encoding="utf-8") as f:
-                _json.dump(r, f, ensure_ascii=False, indent=2, default=str)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 设置取证：结果写入失败：{exc}")
 
     def onLaunchToggle_(self, sender):
         """开机自启开关（SMAppService）：改完以系统回读为准，UI 不自说自话（P95 判据）。"""
@@ -3119,7 +2050,7 @@ class SettingsController(NSObject):
         """按类型画控制件；返回值无关，状态从 cfg 读。"""
         kind = ctl[0]
         cfg = sections.load_config()
-        ctl_w = {"switch": 52, "popup": 180, "slider": 200, "status": 96}.get(kind, 150)
+        ctl_w = {"switch": 52, "popup": 180, "slider": 200, "status": 220}.get(kind, 150)
         right_x = x + w - ctl_w
         band_y = cy if kind not in ("toggles", "buttons") else cy + self._TITLE_H + 30
         if kind == "buttons" and not (row.get("title") or row.get("help")):
@@ -3520,7 +2451,8 @@ class SettingsController(NSObject):
                 _row_status(tr("priv.ax.title"), ax_ok,
                             tr("vis.ok2") if ax_ok else tr("vis.bad2"),
                             help=tr("priv.ax.help")),
-                _row_status(tr("priv.table.title"), True, tr("vis.ok2"),
+                _row_status(tr("priv.table.title"), ccnative.is_writable(),
+                            tr("vis.ok2") if ccnative.is_writable() else tr("vis.bad2"),
                             help=tr("priv.table.help")),
                 _row_status(tr("priv.screen.title"), rec_ok,
                             tr("vis.ok2") if rec_ok else tr("priv.opt"),
@@ -3629,11 +2561,6 @@ class SettingsController(NSObject):
             sections.save_config(cfg)
             print(f"[PeaseBar] 配置：删除“{removed.get('name')}”")
             self._rebuild()
-
-    def onResetSpacing_(self, sender):
-        """把间距重置为默认值（真实间距重启菜单栏应用排在后续版本）。"""
-        self._persist("spacing", 0.0)
-        print("[PeaseBar] 显示器：间距重置为默认")
 
     def onCopyVersion_(self, sender):
         from peasebar import __version__

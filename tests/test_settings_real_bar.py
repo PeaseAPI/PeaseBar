@@ -246,9 +246,12 @@ class TestTriggerConflictSync(unittest.TestCase):
         self.set_calls = []   # set_apps_allowed(bids, allowed) 记录
         self.applied = []     # apply_now 触发记录
         self.online = []      # 模拟盘上栏内实况
+        self.unman = set()    # 不可控名单（桩，避免单测碰真盘）
         self._orig = (sections.load_config, ccnative.is_writable,
                       ccnative.last_hidden, ccnative.record_hidden,
                       ccnative.set_apps_allowed, ccnative.apply_now,
+                      ccnative.unmanageable_set, ccnative.mark_unmanageable,
+                      ccnative.is_unmanageable,
                       settings.inventory.list_items, settings.time)
         sections.load_config = lambda: self.cfg
         ccnative.is_writable = lambda: True
@@ -258,6 +261,10 @@ class TestTriggerConflictSync(unittest.TestCase):
             lambda bids, allowed, hard=True:
             self.set_calls.append((frozenset(bids), allowed)) or set())
         ccnative.apply_now = lambda: self.applied.append(True)
+        # 不可控名单桩：只记内存，不落真盘
+        ccnative.unmanageable_set = lambda: set(self.unman)
+        ccnative.mark_unmanageable = lambda bids: self.unman.update(bids)
+        ccnative.is_unmanageable = lambda b: b in self.unman
         settings.inventory.list_items = lambda: (list(self.online), [])
         settings.time = types.SimpleNamespace(sleep=lambda _s: None)
         panel._inflight.clear()
@@ -268,6 +275,8 @@ class TestTriggerConflictSync(unittest.TestCase):
         (sections.load_config, ccnative.is_writable,
          ccnative.last_hidden, ccnative.record_hidden,
          ccnative.set_apps_allowed, ccnative.apply_now,
+         ccnative.unmanageable_set, ccnative.mark_unmanageable,
+         ccnative.is_unmanageable,
          settings.inventory.list_items, settings.time) = self._orig
 
     def _hide_bids(self):
@@ -286,12 +295,37 @@ class TestTriggerConflictSync(unittest.TestCase):
 
     def test_protected永不进实效自检空转(self):
         """peasebar 配置标隐藏但永远在线且写不进：自检不得点名它；
-        真漂移的 todesk 照常收回（自检补漏硬 apply 是预期行为）。"""
+        真漂移的 todesk 标记不可控并停止重试（新行为：不再 apply_now，
+        杜绝每周期闪断；名单命中后第二轮起连写盘都不再碰它）。"""
         self.online = [fake(bid="com.acme.todesk", label="ToDesk"),
                        fake(bid="com.pease.peasebar", label="PeaseBar")]
         out = self.ctrl.sync_cc_now()
         self.assertEqual(out.get("still_visible"), ["com.acme.todesk"])
-        self.assertEqual(len(self.applied), 1)   # 漂移项强制重画一次收回
+        self.assertEqual(self.applied, [])          # 零重画：不再闪断
+        self.assertIn("com.acme.todesk", self.unman)  # 已入不可控名单
+        # 第二轮：名单命中后收回写直接绕开它，幂等零动作
+        self.set_calls.clear()
+        self.ctrl.sync_cc_now()
+        self.assertNotIn("com.acme.todesk", self._hide_bids())
+
+    def test_soft模式零闪断只写盘(self):
+        """周期核对（soft=True）的新契约：所有写盘都走 hard=False（不重启
+        Agent），跳过实效自检（不等 2s、不点名、永不 apply_now）——
+        即使存在漂移，tick 时刻菜单栏也必须零闪断（用户痛点根因）。"""
+        self.online = [fake(bid="com.acme.todesk", label="ToDesk")]
+        calls = []
+        ccnative.set_apps_allowed = (
+            lambda bids, allowed, hard=True:
+            calls.append((frozenset(bids), allowed, hard)) or set())
+        out = self.ctrl.sync_cc_now(soft=True)
+        self.assertTrue(calls)                              # 写盘照做
+        self.assertTrue(all(h is False for _, _, h in calls))  # 全部软写
+        self.assertEqual(self.applied, [])                 # 不重启 Agent
+        self.assertNotIn("still_visible", out)             # 跳过实效自检
+        # 对照：硬模式（用户点应用）才允许自检点名与兜底 apply
+        calls.clear()
+        self.ctrl.sync_cc_now()
+        self.assertTrue(all(h is True for _, _, h in calls))
 
     def test_无漂移时自检零动作(self):
         """栏上只剩 protected：幂等，不写不重画（钉住旧空转回归）。"""

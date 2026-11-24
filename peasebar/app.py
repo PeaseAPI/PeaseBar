@@ -22,7 +22,7 @@ from AppKit import (
 )
 from Foundation import (NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer, NSURL)
 
-from peasebar import __version__, hotkeys, sections
+from peasebar import __version__, ccnative, hotkeys, sections
 from peasebar.i18n import t as tr
 from peasebar.control_item import ControlItem
 
@@ -190,6 +190,9 @@ class AppDelegate(NSObject):
         print("[PeaseBar] 控制图标与救援面板就绪（左键图标/⌥⌘B 弹出，点击图标可弹其原生菜单）")
         # 预热快照（T98）：后台采一次，第一次点开面板也能秒出
         self.rescue.prewarm()
+        # 不可控名单每次启动清空重试一次：系统对某些图标的显隐托管行为可能随
+        # 版本/登录态变化，运行时重新探测（不预设任何 App，发布给所有用户自适应）。
+        ccnative.clear_unmanageable()
         # 启动同步（用户痛点「设为弹窗显示的图标还在菜单栏」）：把上次保存的分区
         # 一次性镜像回真实菜单栏（后台线程、稍延，等状态项摆稳且有辅助功能权限）。
         self.settings.reconcile_real_bar_async()

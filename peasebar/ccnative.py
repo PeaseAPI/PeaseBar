@@ -81,6 +81,72 @@ def is_writable():
         return False
 
 
+# ---------------------------------------------------------------------------
+# 不可控名单：写入 isAllowed=false 并 apply 后图标仍在线的 bid——系统不托管
+# 这类 App 的状态项显隐（它们不走 trackedApplications 开关）。记入名单后
+# 自检/周期核对不再对其重试，彻底消灭「每分钟闪断」循环。
+# 名单持久化到 .cc_unmanageable，App 重启后自动出名单重试一次（系统行为可能变）。
+# ---------------------------------------------------------------------------
+_unmanageable = set()  # 进程内缓存
+_unmanageable_loaded = False
+
+
+def _unmanageable_path():
+    return sections.config_path() + ".cc_unmanageable"
+
+
+def load_unmanageable():
+    """启动时调用：从磁盘读入不可控名单。"""
+    global _unmanageable, _unmanageable_loaded
+    import json
+    _unmanageable_loaded = True
+    try:
+        with open(_unmanageable_path(), "r", encoding="utf-8") as f:
+            _unmanageable = set(json.load(f))
+    except Exception:
+        _unmanageable = set()
+
+
+def is_unmanageable(bid):
+    """bid 是否已确认「系统不托管其显隐」——自检/周期据此免检免重试。"""
+    if not _unmanageable_loaded:
+        load_unmanageable()
+    return bid in _unmanageable
+
+
+def mark_unmanageable(bids):
+    """把写后仍在线的 bid 加入不可控名单并落盘。"""
+    global _unmanageable
+    if not _unmanageable_loaded:
+        load_unmanageable()
+    new = {b for b in bids if b not in _unmanageable and not is_protected(b)}
+    if not new:
+        return
+    _unmanageable |= new
+    import json
+    try:
+        with open(_unmanageable_path(), "w", encoding="utf-8") as f:
+            json.dump(sorted(_unmanageable), f, ensure_ascii=False)
+    except Exception:
+        pass
+    print(f"[PeaseBar] CC 不可控名单新增 {len(new)} 项（系统不托管其显隐，"
+          f"后续不再重试）：{', '.join(sorted(new)[:5])}")
+
+
+def unmanageable_set():
+    """当前不可控名单快照（调用方据此过滤）。"""
+    if not _unmanageable_loaded:
+        load_unmanageable()
+    return set(_unmanageable)
+
+
+def clear_unmanageable():
+    """启动时重置名单：让所有 bid 获得一次重试机会（系统行为可能已变）。"""
+    global _unmanageable, _unmanageable_loaded
+    _unmanageable = set()
+    _unmanageable_loaded = True
+
+
 def _unwrap_recs(raw):
     """层层解开 trackedApplications 的各种历史形态，返回 dict 数组；解不出返回 None。
 

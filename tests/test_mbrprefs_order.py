@@ -131,7 +131,10 @@ class TestApplyVisibleOrder(unittest.TestCase):
 
 
 class TestBarOrderTarget(unittest.TestCase):
-    """应用改动的目标序提取：只收 visible 区第三方 bid，去重保序。"""
+    """应用改动的目标序提取：收 visible 区非系统 bid，去重保序。
+
+    新语义（2026-11-24）：只排除 com.apple.*，PeaseBar 自己的图标也进权重表
+    目标序——用户在布局页/⌘拖能直接改它的位置，同步才不会把它的序写丢。"""
 
     def _target(self, cfg):
         fake = mock.Mock(real_bar=True)
@@ -143,9 +146,16 @@ class TestBarOrderTarget(unittest.TestCase):
                "sections": {"com.c.three|Item-0": sections.SECTION_HIDDEN}}
         self.assertEqual(self._target(cfg), ["com.a.one", "com.b.two"])
 
-    def test_去重保序且滤保护bid(self):
+    def test_去重保序且PeaseBar参与改序(self):
         cfg = {"order": ["com.a.one|Item-0", "com.a.one|Item-1",
                          "com.pease.peasebar|x", "com.b.two|Item-0"],
+               "sections": {}}
+        self.assertEqual(self._target(cfg),
+                         ["com.a.one", "com.pease.peasebar", "com.b.two"])
+
+    def test_com苹果系统项被排除(self):
+        cfg = {"order": ["com.a.one|Item-0", "com.apple.controlcenter|x",
+                         "com.b.two|Item-0"],
                "sections": {}}
         self.assertEqual(self._target(cfg), ["com.a.one", "com.b.two"])
 

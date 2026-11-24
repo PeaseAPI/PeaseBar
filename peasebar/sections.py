@@ -191,8 +191,17 @@ def item_key(item):
     return f"{item.owner_bundle_id}|{part}"
 
 
+# PeaseBar 的控制图标永远在菜单栏上（它是面板入口），布局页强制显示在「菜单栏显示」区，
+# 用户可以直接拖动它的栏上位置。配置里即使写了 hidden 也不生效。
+ALWAYS_VISIBLE_BIDS = frozenset({"com.pease.peasebar"})
+
+
 def section_of(cfg, key):
-    """查图标所在区；无记录 = 菜单栏显示（默认）。"""
+    """查图标所在区；无记录 = 菜单栏显示（默认）。
+    PeaseBar 自己的控制图标强制可见（它是面板入口，永远在栏上）。"""
+    bid = key.split("|", 1)[0] if "|" in key else key
+    if bid in ALWAYS_VISIBLE_BIDS:
+        return SECTION_VISIBLE
     s = cfg["sections"].get(key)
     return s if s in (SECTION_HIDDEN, SECTION_ALWAYS_HIDDEN) else SECTION_VISIBLE
 
