@@ -379,6 +379,38 @@ class TestTriggerConflictSync(unittest.TestCase):
         self.assertNotIn("still_visible", out)
         self.assertEqual(self.applied, [])  # 零硬 apply：等 15s 兜底自然抹平
 
+    def test_自检反证出名单_托管得住的移出(self):
+        """报障四（OneDrive/ToDesk/Synology）：名单里若某 bid 配置要藏、
+        此刻已不在栏上（其实已被系统藏掉），说明之前 2s 窗口太短误判成
+        不可控——自检应反证把它移出名单，重新纳入周期核对。"""
+        self.unman = {"com.acme.todesk"}          # 已在名单
+        self.online = [fake(bid="com.pease.peasebar", label="PeaseBar")]  # todesk 不在栏上
+        unmarked = []
+        orig = ccnative.unmark_unmanageable
+        ccnative.unmark_unmanageable = lambda bids: unmarked.append(set(bids))
+        try:
+            self.ctrl.sync_cc_now()
+        finally:
+            ccnative.unmark_unmanageable = orig
+        self.assertTrue(unmarked)
+        self.assertIn("com.acme.todesk", unmarked[0])
+
+    def test_自检不在栏上但面板显回中的不反证(self):
+        """反证须避开故意暂留的 bid：面板 inflight 显回中不算「托管得住」，
+        不能误移出名单。"""
+        self.unman = {"com.acme.todesk"}
+        self.online = [fake(bid="com.pease.peasebar", label="PeaseBar")]
+        panel._inflight.add("com.acme.todesk")
+        unmarked = []
+        orig = ccnative.unmark_unmanageable
+        ccnative.unmark_unmanageable = lambda bids: unmarked.append(set(bids))
+        try:
+            self.ctrl.sync_cc_now()
+        finally:
+            ccnative.unmark_unmanageable = orig
+        self.assertNotIn("com.acme.todesk",
+                         set().union(*unmarked) if unmarked else set())
+
 
 if __name__ == "__main__":
     unittest.main()

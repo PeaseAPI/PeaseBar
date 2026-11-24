@@ -172,6 +172,37 @@ def unmanageable_set():
     return set(_unmanageable)
 
 
+def unmanageable_visible(online_bids):
+    """「不可控名单 ∩ 此刻真的画在栏上的 bid」——这才是该按栏上实况
+    强制归可见区（force_visible）的那批。不可控的本义就是「写了 isAllowed=
+    false 系统也不肯藏、它仍在栏上」；一旦某个 bid 其实已被藏起来（不在栏上），
+    它就不再是「不可控」，不该再被 force_visible 拉到可见区，否则
+    「弹窗伪项 + 可见区」都拿不到它，图标两头消失（2026-11-24 报障：
+    OneDrive/ToDesk/Synology 既不在栏上又进不了弹窗）。"""
+    return unmanageable_set() & set(online_bids)
+
+
+def unmark_unmanageable(bids):
+    """把其实已被成功隐藏的 bid 移出不可控名单并落盘（名单反证修正）。"""
+    global _unmanageable, _unmanageable_ts
+    if not _unmanageable_loaded:
+        load_unmanageable()
+    gone = {b for b in bids if b in _unmanageable}
+    if not gone:
+        return
+    _unmanageable -= gone
+    for b in gone:
+        _unmanageable_ts.pop(b, None)
+    import json
+    try:
+        with open(_unmanageable_path(), "w", encoding="utf-8") as f:
+            json.dump(_unmanageable_ts, f, ensure_ascii=False)
+    except Exception:
+        pass
+    print(f"[PeaseBar] CC 不可控名单移除 {len(gone)} 项（系统其实托管得住、"
+          f"已被成功隐藏，重新纳入周期核对）：{', '.join(sorted(gone)[:5])}")
+
+
 def clear_unmanageable():
     """清空名单（仅测试/排障用——启动链路不再调用，出名单靠 TTL）。"""
     global _unmanageable, _unmanageable_ts, _unmanageable_loaded

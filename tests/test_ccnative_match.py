@@ -404,6 +404,30 @@ class TestUnmanageable(unittest.TestCase):
         snap.add("com.evil")
         self.assertNotIn("com.evil", ccnative.unmanageable_set())
 
+    def test_unmark反证出名单并落盘(self):
+        """系统其实托管得住的 bid（已被藏）：移出名单、落盘、重启进程也不再读回。"""
+        ccnative.mark_unmanageable({"com.x.y", "com.z.w"})
+        ccnative.unmark_unmanageable({"com.x.y"})
+        self.assertFalse(ccnative.is_unmanageable("com.x.y"))
+        self.assertTrue(ccnative.is_unmanageable("com.z.w"))
+        # 新进程从盘读回：x.y 确已不在名单
+        ccnative._unmanageable_loaded = False
+        ccnative._unmanageable = set()
+        self.assertFalse(ccnative.is_unmanageable("com.x.y"))
+        self.assertTrue(ccnative.is_unmanageable("com.z.w"))
+
+    def test_unmark不在名单的无操作(self):
+        ccnative.mark_unmanageable({"com.x.y"})
+        ccnative.unmark_unmanageable({"com.never.marked"})  # 不报错
+        self.assertTrue(ccnative.is_unmanageable("com.x.y"))
+
+    def test_unmanageable_visible按实况交集(self):
+        """force_visible 只取「名单 ∩ 此刻真在栏上」：已被藏掉的不在交集里。"""
+        ccnative.mark_unmanageable({"com.x.y", "com.z.w"})
+        # x.y 还在栏上、z.w 已被系统藏掉（不在 online）
+        vis = ccnative.unmanageable_visible(["com.x.y", "com.other.live"])
+        self.assertEqual(vis, {"com.x.y"})
+
 
 if __name__ == "__main__":
     unittest.main()

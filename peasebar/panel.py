@@ -128,11 +128,13 @@ def native_hidden_items(items, cfg):
     import types
 
     seen = {m.owner_bundle_id for m in items}
-    # 不可控名单免补：系统藏不掉它们（isAllowed=false 写了也在线），
-    # 真实项就在盘点里——再补伪项就是「栏上有、格子却标成原生隐藏」的鬼影
-    # （2026-11-24 QQ 案例），布局页/面板的分桶也据此 force_visible
-    unman = ccnative.unmanageable_set()
-    now_hidden = (ccnative.hidden_bids_now() | set(ccnative.last_hidden())) - unman
+    # 去重只靠「此刻在栏上吗」(seen) 这道实况判据：真实项就在盘点里的不补
+    # 伪项（QQ 案例的「栏上有、格子却标原生隐藏」鬼影靠 seen 就挡掉了）。
+    # 不能再无条件减不可控名单：名单里若有项其实已被系统藏掉（不在栏上），
+    # 减掉它就让它「既不在栏上、又进不了弹窗」两头消失（2026-11-24 报障：
+    # OneDrive/ToDesk/Synology 全体不见）。配置要藏且确实不在栏上的，必须补
+    # 回弹窗，用户才找得到、能显回。
+    now_hidden = ccnative.hidden_bids_now() | set(ccnative.last_hidden())
     out = []
     for key, sec in cfg["sections"].items():
         if sec != sections.SECTION_HIDDEN:
@@ -373,7 +375,11 @@ class RescuePanel(NSObject):
         all_items, _ = inventory.list_items()
         items = [m for m in all_items if not m.is_stash_button]
         cfg = sections.load_config()
-        buckets = sections.plan_sections(items, cfg, ccnative.unmanageable_set())
+        # force_visible 按实况门控：只把「不可控名单 ∩ 此刻真在栏上」的归
+        # 可见区；已被藏掉（不在栏上）的那批不强行拉到可见区，否则它们既不
+        # 在栏上、又进不了弹窗（native_extra 靠 seen 去重），两头消失
+        buckets = sections.plan_sections(
+            items, cfg, ccnative.unmanageable_visible(m.owner_bundle_id for m in items))
         # 面板只列「此刻看不见」的（docstring 承诺的真实现）：配置隐藏但被挤出、
         # 仍画在菜单栏上的不列——它在栏上直接点就行，再列一份会造成
         # 「面板也有、菜单栏也有」的重复困惑（用户真机实测反馈）。

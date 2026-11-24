@@ -557,13 +557,24 @@ class SettingsController(NSObject):
 
     @objc.python_method
     def _unman_visible(self):
-        """不可控名单（系统藏不掉的 bid）：布局页/面板按栏上实况把它们
-        归可见区，不然配置写过隐藏的图标会只剩伪项——用户视角就是
-        「栏上有、布局页却没读到」（2026-11-24 QQ 案例）。"""
+        """不可控名单里「此刻真的还画在菜单栏上」的 bid：布局页/面板据此
+        force_visible 把它们归可见区（系统藏不掉、就在栏上）。
+        不再直接返回整个名单：名单里若有项其实已被藏掉（不在栏上），
+        再强拉到可见区会让它「既不在栏上、又进不了弹窗伪项」两头消失
+        （2026-11-24 报障：OneDrive/ToDesk/Synology 全体不见）。实况门控后，
+        真被藏的走 hidden 区/弹窗补回，用户能找回。"""
         try:
-            return ccnative.unmanageable_set()
+            unman = ccnative.unmanageable_set()
         except Exception:  # noqa: BLE001 - 名单读盘失败不拦分桶
             return set()
+        if not unman:
+            return set()
+        try:
+            online = {m.owner_bundle_id for m in inventory.list_items()[0]
+                      if not m.is_stash_button}
+        except Exception:  # noqa: BLE001 - 读不动实况时退回旧行为
+            return unman
+        return unman & online
 
     @objc.python_method
     def _layout_cfg(self):
@@ -1752,20 +1763,32 @@ class SettingsController(NSObject):
                 online_bids = [m.owner_bundle_id
                                for m in inventory.list_items()[0]
                                if not m.is_stash_button]
+                online_set = set(online_bids)
                 still = [b for b in sorted(set(cfg_hidden_bids)
                                            - set(panel._inflight)
                                            - ccnative.soft_pending_bids()
                                            - ccnative.unmanageable_set())
                          if not ccnative.is_protected(b)
-                         and ccnative.match_bid(b, set(online_bids))]
+                         and ccnative.match_bid(b, online_set)]
                 if still:
                     print(f"[PeaseBar] 实效自检：{len(still)} 个配置隐藏项仍在菜单栏上"
                           f"（{', '.join(still[:4])}...），标记不可控并停止重试")
                     ccnative.mark_unmanageable(set(still))
                     out["still_visible"] = still
-                    # 面板里可能还挂着它们的「原生隐藏」过期格子（启动清名单后
-                    # 重标之前的快照）：点上去会白闪一次菜单栏，这里顺手重采掉
+                    # 面板里可能还挂着它们的「原生隐藏」过期格子（自检落名单前
+                    # 采的快照）：点上去会白闪一次菜单栏，这里顺手重采掉
                     panel.refresh_live_panels()
+                # 反证出名单：名单里那些配置要藏、此刻确实已不在栏上的 bid——
+                # 说明系统其实托管得住（之前 2s 窗口太短误判成「仍在线」）。
+                # 移出名单后重新纳入周期核对，否则它们断线重连重现时无人再收。
+                # 避开面板显回中与软写待生效的（那些是故意暂留，不是托管得住）
+                stale = {b for b in ccnative.unmanageable_set()
+                         if ccnative.match_bid(b, cfg_hidden_bids)
+                         and ccnative.match_bid(b, online_set) is None
+                         and b not in panel._inflight
+                         and b not in ccnative.soft_pending_bids()}
+                if stale:
+                    ccnative.unmark_unmanageable(stale)
             # 侧车记「此刻系统藏着的、且是配置让它藏的」全集：配置日后改成
             # 「显示」时同步据此负责显回。
             # 过滤不可控名单（它们虽然 isAllowed=false 但实际不生效，不应记录）

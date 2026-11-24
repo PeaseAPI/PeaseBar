@@ -72,13 +72,23 @@ class TestNativeHiddenItems(unittest.TestCase):
             out = panel.native_hidden_items([], self.CFG)
         self.assertIn("com.example.app", {m.owner_bundle_id for m in out})
     
-    def test_不可控名单不补伪项(self):
-        """QQ 案例（2026-11-24）：系统藏不掉的 bid 真项就在盘点里，
-        再补伪项就是「栏上有、格子却标成原生隐藏」的鬼影。"""
+    def test_不可控项已被系统藏掉必须补进弹窗(self):
+        """报障（2026-11-24 OneDrive/ToDesk/Synology）：名单里若有项其实
+        已被系统藏掉（不在栏上），它就不再「不可控」，必须补回弹窗，否则
+        「既不在栏上、又进不了弹窗」两头消失。旧代码无条件减名单正犯了这条。"""
         out = self._run([], {"com.example.app", "com.example.gone"},
                         unman={"com.example.gone"})
+        # gone 虽在不可控名单，但此刻不在盘点（items=[]）→ 仍要补
         self.assertEqual({m.owner_bundle_id for m in out},
-                         {"com.example.app"})
+                         {"com.example.app", "com.example.gone"})
+
+    def test_不可控项真在栏上不补伪项(self):
+        """QQ 案例（2026-11-24）：系统藏不掉的 bid 真项就在盘点里，
+        再补伪项就是「栏上有、格子却标成原生隐藏」的鬼影——靠 seen 实况去重挡掉。"""
+        out = self._run([_seen_item("com.example.gone")],
+                        {"com.example.app", "com.example.gone"},
+                        unman={"com.example.gone"})
+        self.assertEqual({m.owner_bundle_id for m in out}, {"com.example.app"})
 
     def test_伪项按配置order排序(self):
         """布局页拖完的顺序要立刻在面板生效（2026-11-25 用户反馈「顺序没变」的
