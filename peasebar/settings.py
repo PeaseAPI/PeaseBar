@@ -80,6 +80,7 @@ from AppKit import (NSApplication, NSFontAttributeName,
                     NSStringDrawingUsesFontLeading)
 import os
 import platform
+import time
 
 import objc
 import Quartz
@@ -1522,6 +1523,20 @@ class SettingsController(NSObject):
                     to_show.add(m.owner_bundle_id)
             out["hide"] = len(ccnative.set_apps_allowed(cfg_hidden_bids, False))
             out["show"] = len(ccnative.set_apps_allowed(to_show, True))
+            # 实效自检：写成功≠生效（2026-11-24 事故教训：格式写坏后每次幂等
+            # 跳过，图标全在栏上却无人报错）。给 MenuBarAgent 重读留一拍再
+            # 盘点栏上实况，配置要藏的 bid 仍在线就重写一轮并如实上报。
+            time.sleep(2.0)
+            online_bids = [m.owner_bundle_id
+                           for m in inventory.list_items()[0]
+                           if not m.is_stash_button]
+            still = [b for b in sorted(cfg_hidden_bids)
+                     if ccnative.match_bid(b, set(online_bids))]
+            if still:
+                print(f"[PeaseBar] 实效自检：{len(still)} 个配置隐藏项仍在菜单栏上"
+                      f"（{', '.join(still[:4])}...），重写一次")
+                ccnative.set_apps_allowed(set(still), False)
+                out["still_visible"] = still
             # 侧车记「此刻系统藏着的、且是配置让它藏的」全集：配置日后改成
             # 「显示」时同步据此负责显回。
             duty = {b for b in ccnative.hidden_bids_now()

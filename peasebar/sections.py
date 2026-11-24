@@ -66,16 +66,39 @@ def config_path():
     return os.path.expanduser("~/Library/Application Support/PeaseBar/config.json")
 
 
+def _quarantine(path):
+    """把读不出来/不合法的配置文件撚到 .bad：保留证据、给用户留一条手工
+    恢复的路——数据丢失不可逆，隔离可逆（2026-11-24 布局被清空事故的教训：
+    坏档被静默回默认后又被半盲写回，全程无人报错）。"""
+    try:
+        os.replace(path, f"{path}.bad")
+        print(f"[PeaseBar] 配置：原文件读不出来，已隔离为 {path}.bad；"
+              f"修好后可手工恢复")
+    except OSError:
+        pass
+
+
 def load_config(path=None):
-    """读配置；无文件/损坏/字段非法时回默认（不抛异常，面板首启零依赖）。"""
+    """读配置；无文件/损坏/字段非法时回默认（不抛异常，面板首启零依赖）。
+
+    文件不存在是首启正常态；但**存在而读不出来**（损坏/非 dict）是异常：
+    隔离坏档并在返回值上打 _load_ok=False——save_config 见到这个标记拒绝
+    落盘，防止「load 失败 → 按默认空配置写回」把用户布局静默清空。
+    _load_ok 只在内存里传递，不落盘。"""
     cfg = dict(DEFAULT_CONFIG, sections={})
     path = path or config_path()
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
+    except FileNotFoundError:
+        return cfg
     except (OSError, ValueError):
+        _quarantine(path)
+        cfg["_load_ok"] = False
         return cfg
     if not isinstance(data, dict):
+        _quarantine(path)
+        cfg["_load_ok"] = False
         return cfg
     raw_sections = data.get("sections")
     if isinstance(raw_sections, dict):
@@ -110,14 +133,26 @@ def load_config(path=None):
     return cfg
 
 
-def save_config(cfg, path=None):
-    """原子写配置：先写 .tmp 再 os.replace，避免半截文件。"""
+def save_config(cfg, path=None, force=False):
+    """原子写配置：先写 .tmp 再 os.replace，避免半截文件。
+
+    守卫：cfg 若来自一次失败的读取（_load_ok=False），拒绝落盘——那种写
+    是按默认空配置的半盲写回，会把用户整个布局清空（2026-11-24 真机事故）。
+    失败时 load_config 已把原文件隔离成 .bad，先修好再改配置。force=True
+    只给显式重建类操作；内部下划线键（如 _load_ok）不落盘。"""
     path = path or config_path()
+    if cfg.get("_load_ok") is False and not force:
+        print("[PeaseBar] 配置守卫：本次配置来自失败的读取，拒绝写盘"
+              "（原文件已隔离为 .bad，先修好再改配置）")
+        return False
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = {k: v for k, v in cfg.items()
+               if not (isinstance(k, str) and k.startswith("_"))}
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
+    return True
 
 
 def item_key(item):

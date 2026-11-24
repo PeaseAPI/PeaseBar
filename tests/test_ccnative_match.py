@@ -107,5 +107,95 @@ class TestInputMenu(unittest.TestCase):
         self.assertEqual(self.runs[1], ["killall", ccnative.INPUT_MENU_AGENT])
 
 
+class TestCCFormat(unittest.TestCase):
+    """CC plist 写格式守卫：trackedApplications 必须落成系统原生 data（嵌套 bplist）。
+
+    2026-11-24 真机事故两连回归：①内容被写坏成 int 数组的字节拆解形态，
+    系统 ControlCenter 解不开 → 全部 isAllowed 失效；②一度实验裸数组直写，
+    系统同样不认（会把状态改写成解不开的中间态）。历史取证
+    （tmp/layout_table_full.json）铁证：系统原生格式是 data（嵌套 bplist 数组）。
+    这里锁死：写出去必须是 data 且内容解得回 dict 数组；各种坏形态要救要修。
+    全部走临时文件 + 桩 killall/sleep，不碰真机。"""
+
+    def setUp(self):
+        self.plist = os.path.join(tempfile.mkdtemp(), "cc.plist")
+        p = mock.patch.object(ccnative, "CC_PLIST", self.plist)
+        p.start()
+        self.addCleanup(p.stop)
+        sp = mock.patch.object(ccnative.subprocess, "run", lambda cmd, **kw: None)
+        sp.start()
+        self.addCleanup(sp.stop)
+        sl = mock.patch.object(ccnative.time, "sleep", lambda _s: None)
+        sl.start()
+        self.addCleanup(sl.stop)
+
+    @staticmethod
+    def _rec(bid, allowed):
+        return {"bundle": {"_0": bid}, "isAllowed": allowed}
+
+    def _write_outer(self, tracked):
+        import plistlib
+        with open(self.plist, "wb") as f:
+            plistlib.dump({"trackedApplications": tracked}, f)
+
+    def _read_tracked(self):
+        import plistlib
+        with open(self.plist, "rb") as f:
+            return plistlib.load(f).get("trackedApplications")
+
+    def test_写后落成原生data且值生效(self):
+        import plistlib
+        self._write_outer([self._rec("com.acme.app", True)])
+        got = ccnative.set_apps_allowed({"com.acme.app"}, False)
+        self.assertEqual(got, {"com.acme.app"})
+        tracked = self._read_tracked()
+        self.assertIsInstance(tracked, bytes)  # 原生 data 形态
+        recs = plistlib.loads(tracked)
+        self.assertIsInstance(recs, list)
+        self.assertFalse(recs[0]["isAllowed"])
+
+    def test_原生data且值一致时幂等不重写(self):
+        """合法 data 形态 + 目标态一致：不重写（60s tick 反复调用零打扰）。"""
+        import plistlib
+        data = plistlib.dumps([self._rec("com.acme.app", False)],
+                              fmt=plistlib.FMT_BINARY)
+        self._write_outer(data)
+        got = ccnative.set_apps_allowed({"com.acme.app"}, False)
+        self.assertEqual(got, set())
+        self.assertEqual(self._read_tracked(), data)  # 磁盘原样未动
+
+    def test_裸数组被修回原生data(self):
+        """裸 dict 数组系统不认（真机实证会被改写成解不开的中间态），
+        哪怕值一致也要把格式修回 data。"""
+        import plistlib
+        self._write_outer([self._rec("com.acme.app", False)])
+        got = ccnative.set_apps_allowed({"com.acme.app"}, False)
+        self.assertEqual(got, set())  # 值一致，无实际改动
+        tracked = self._read_tracked()
+        self.assertIsInstance(tracked, bytes)  # 但格式被修回 data
+        self.assertFalse(plistlib.loads(tracked)[0]["isAllowed"])
+
+    def test_int拆解数组救援并写回data(self):
+        """事故中间态：一份 bplist 的字节流被逐字节拆成 int 数组——
+        拼回字节流能救出真记录，写回统一落 data。"""
+        import plistlib
+        bomb = list(plistlib.dumps([self._rec("com.acme.app", False)],
+                                   fmt=plistlib.FMT_BINARY))
+        self._write_outer(bomb)
+        _, recs = ccnative._load()
+        self.assertEqual(ccnative.record_bid(recs[0]), "com.acme.app")  # 救援成功
+        got = ccnative.set_apps_allowed({"com.acme.app"}, False)
+        self.assertEqual(got, set())
+        tracked = self._read_tracked()
+        self.assertIsInstance(tracked, bytes)
+        self.assertFalse(plistlib.loads(tracked)[0]["isAllowed"])
+
+    def test_彻底坏档清空重建(self):
+        """连 int 拼回都救不回的形态：清空重建，不抛异常。"""
+        self._write_outer("垃圾")
+        _, recs = ccnative._load()
+        self.assertEqual(recs, [])
+
+
 if __name__ == "__main__":
     unittest.main()

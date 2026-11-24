@@ -119,13 +119,15 @@ class TestPersist(unittest.TestCase):
             cfg = sections.load_config(path)
             self.assertEqual(cfg, dict(sections.DEFAULT_CONFIG))
 
-    def test损坏文件回默认(self):
+    def test损坏文件回默认并隔离(self):
+        # 新语义：读不出来 → 回默认 + _load_ok=False + 原文件隔离为 .bad（防半盲写回）
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "config.json")
             with open(path, "w", encoding="utf-8") as f:
                 f.write("{不是json")
             self.assertEqual(sections.load_config(path),
-                             dict(sections.DEFAULT_CONFIG))
+                             dict(sections.DEFAULT_CONFIG, _load_ok=False))
+            self.assertTrue(os.path.exists(path + ".bad"))
 
     def test加载丢弃脏分区值(self):
         with tempfile.TemporaryDirectory() as d:
@@ -349,6 +351,49 @@ class TestSortAndReset(unittest.TestCase):
         self.assertEqual(cfg["sections"], {})
         self.assertEqual(cfg["order"], [])
         self.assertEqual(cfg["panel_timeout"], 5)  # 行为配置不归布局重置管
+
+
+class TestLoadMarkGuard(unittest.TestCase):
+    """load 失败标记 + 写守卫（2026-11-24 事故回归）：坏档被隔离、带标记的
+    cfg 禁止落盘（防半盲写回清空布局）；首启无文件是正常态；内部标记不落盘。"""
+
+    def setUp(self):
+        self.path = os.path.join(tempfile.mkdtemp(), "config.json")
+
+    def test_坏档被隔离且标记失败(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("{不是合法json")
+        cfg = sections.load_config(self.path)
+        self.assertFalse(cfg.get("_load_ok", True))
+        self.assertTrue(os.path.exists(self.path + ".bad"))
+
+    def test_非dict档同样隔离标记(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("[1, 2]")
+        cfg = sections.load_config(self.path)
+        self.assertFalse(cfg.get("_load_ok", True))
+        self.assertTrue(os.path.exists(self.path + ".bad"))
+
+    def test_带失败标记的cfg拒绝落盘(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("坏档")
+        cfg = sections.load_config(self.path)
+        self.assertFalse(sections.save_config(cfg, path=self.path))
+        # 拒写后：原路径不会冒出新文件，坏档证据完整留在 .bad 里
+        self.assertFalse(os.path.exists(self.path))
+        with open(self.path + ".bad", encoding="utf-8") as f:
+            self.assertEqual(f.read(), "坏档")
+
+    def test_首启无文件不算失败可正常写(self):
+        cfg = sections.load_config(self.path)
+        self.assertTrue(cfg.get("_load_ok", True))
+        self.assertTrue(sections.save_config(
+            {"sections": {"a|A": "hidden"}, "_load_ok": True},
+            path=self.path))
+        with open(self.path, encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["sections"], {"a|A": "hidden"})
+        self.assertNotIn("_load_ok", data)  # 内部标记不落盘
 
 
 if __name__ == "__main__":

@@ -80,13 +80,39 @@ def is_writable():
         return False
 
 
+def _unwrap_recs(raw):
+    """层层解开 trackedApplications 的各种历史形态，返回 dict 数组；解不出返回 None。
+
+    系统原生格式是 data（内嵌 bplist 数组，取证 layout_table_full.json 铁证）。
+    2026-11-24 事故中出现过三种形态：① bytes（原生 data）②裸 dict 数组
+    （一度实验直写）③ int 数组（一份 bplist 的字节流被逐字节拆开的事故中间态）。
+    ①②③只要内容能解出 dict 数组都能救；解不出返回 None 由调用方清空重建。"""
+    if isinstance(raw, bytes):
+        try:
+            raw = plistlib.loads(raw)
+        except Exception:
+            return None
+    if (isinstance(raw, list) and raw
+            and all(isinstance(x, int) and 0 <= x <= 255 for x in raw)):
+        try:  # int 数组：拼回字节流再解一层
+            raw = plistlib.loads(bytes(raw))
+        except Exception:
+            return None
+    if isinstance(raw, list) and all(isinstance(r, dict) for r in raw):
+        return raw
+    return None
+
+
 def _load():
     """读文件，返回 (外层 dict, trackedApplications 记录列表)。"""
     with open(CC_PLIST, "rb") as f:
         outer = plistlib.load(f)
-    recs = outer.get("trackedApplications")
-    if isinstance(recs, bytes):
-        recs = plistlib.loads(recs)
+    recs = _unwrap_recs(outer.get("trackedApplications"))
+    if recs is None:
+        # 内容彻底解不开（连 int 拼回都救不回）：清空重建，启动同步马上会把
+        # 配置里的目标态补写回来；系统对其余 App 会在它们建状态项时重新记录
+        print("[PeaseBar] CC 记录内容解不开，清空重建（配置目标态随后补写）")
+        recs = []
     return outer, recs
 
 
@@ -159,6 +185,13 @@ def set_apps_allowed(bids, allowed):
     if not want:
         return set()
     outer, recs = _load()
+    # 格式守卫：系统原生格式是 data（嵌套 bplist 数组）。裸数组/字节拆解数组
+    # 系统解不开（读不出 isAllowed → 全部失效 → 图标回栏），哪怕内容能救、
+    # 目标态一致也要重写一次把磁盘格式统一回原生 data 形态。
+    needs_format_fix = not isinstance(outer.get("trackedApplications"), bytes)
+    if needs_format_fix:
+        print("[PeaseBar] CC 格式守卫：trackedApplications 不是原生 data 形态，"
+              "本次写入统一修回")
     by_bid = {}
     for rec in recs:
         if "isAllowed" not in rec:
@@ -172,14 +205,24 @@ def set_apps_allowed(bids, allowed):
         if rec is not None and rec["isAllowed"] != allowed:
             rec["isAllowed"] = allowed
             changed.add(w)
-    if not changed:
+    if not changed and not needs_format_fix:
         return set()
+    # 本键以系统原生 data 格式（嵌套 bplist 数组）写回，整个 plist 由下面统一
+    # dumps——裸数组系统解不开，绝不能直接塞
     outer["trackedApplications"] = plistlib.dumps(recs, fmt=plistlib.FMT_BINARY)
     # 原子写：先临时文件再 replace，避免被系统读到半截
     tmp = CC_PLIST + ".peasebar.tmp"
     with open(tmp, "wb") as f:
         f.write(plistlib.dumps(outer, fmt=plistlib.FMT_BINARY))
     os.replace(tmp, CC_PLIST)
+    # 写后校验：重读必须能解回 dict 数组，否则如实上报不假装成功
+    try:
+        with open(CC_PLIST, "rb") as f:
+            ok = _unwrap_recs(plistlib.load(f).get("trackedApplications")) is not None
+        if not ok:
+            print("[PeaseBar] CC 写后校验失败：重读 trackedApplications 解不出 dict 数组")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[PeaseBar] CC 写后校验异常：{exc}")
     apply_now()
     return changed
 
