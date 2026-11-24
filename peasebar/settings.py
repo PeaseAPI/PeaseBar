@@ -226,6 +226,20 @@ def _block(heading, rows):
     return {"heading": heading, "rows": rows}
 
 
+def _mk_wrap_label(text, font, color, frame, lines=2):
+    """折行标签：本 PyObjC 桥没有 wrapLabelWithString_（装机包实测：直接调用
+    会让布局页 build 中断），手动配成同款；setMaximumNumberOfLines_ 在控件
+    不在 cell（真机实测），超过 lines 行的内容自然剪掉。"""
+    lab = NSTextField.labelWithString_(text)
+    lab.setFont_(font)
+    lab.setTextColor_(color)
+    lab.setFrame_(frame)
+    lab.cell().setWraps_(True)
+    lab.cell().setLineBreakMode_(4)  # NSLineBreakByWordWrapping
+    lab.setMaximumNumberOfLines_(lines)
+    return lab
+
+
 def _para(text):
     return {"para": text}
 
@@ -942,12 +956,10 @@ class SettingsController(NSObject):
         # 拖拽提示（对标 Thaw LayoutBarsSection 的 dragHint）：两行折行放下
         # 全部引导——除了窗口内拖拽，还须告知 ⌘+拖真实菜单栏：多数用户不知道
         # 系统自带这个手势，不能只靠口耳相传（2026-11-24 用户点名）
-        hint = NSTextField.wrapLabelWithString_(tr("layout.hint.drag"))
-        hint.setFont_(NSFont.systemFontOfSize_(11))
-        hint.setTextColor_(NSColor.secondaryLabelColor())
-        hint.setFrame_(NSMakeRect(EDGE, top - 2 * ROW_H, CONTENT_W - 2 * EDGE, 2 * ROW_H))
-        hint.cell().setLineBreakMode_(4)  # NSLineBreakByWordWrapping：折两行不截尾
-        hint.cell().setMaximumNumberOfLines_(2)
+        hint = _mk_wrap_label(tr("layout.hint.drag"), NSFont.systemFontOfSize_(11),
+                              NSColor.secondaryLabelColor(),
+                              NSMakeRect(EDGE, top - 2 * ROW_H,
+                                         CONTENT_W - 2 * EDGE, 2 * ROW_H))
         content.addSubview_(hint)
         top -= 2 * ROW_H + 4
 
@@ -1033,14 +1045,11 @@ class SettingsController(NSObject):
             lab.setFont_(NSFont.systemFontOfSize_(12))
             lab.setFrame_(NSMakeRect(14, row_y + 6, 240, 18))
             card.addSubview_(lab)
-            sub = NSTextField.wrapLabelWithString_(tip)
-            sub.setFont_(NSFont.systemFontOfSize_(10))
-            sub.setTextColor_(NSColor.tertiaryLabelColor())
-            # 两行折行 + 拓宽到 500px：单行 380px 会把长句截尾（体检 M-1），
-            # 行距 34px 下第二行不会压到下一行的标题（下一行标题底边 -28）
-            sub.setFrame_(NSMakeRect(14, row_y - 20, 500, 26))
-            sub.cell().setLineBreakMode_(4)  # NSLineBreakByWordWrapping
-            sub.cell().setMaximumNumberOfLines_(2)
+            sub = _mk_wrap_label(tip, NSFont.systemFontOfSize_(10),
+                                 NSColor.tertiaryLabelColor(),
+                                 # 两行折行 + 拓宽到 500px：单行 380px 会把长句截尾（体检 M-1），
+                                 # 行距 34px 下第二行不会压到下一行的标题（下一行标题底边 -28）
+                                 NSMakeRect(14, row_y - 20, 500, 26))
             card.addSubview_(sub)
             sw = NSSwitch.alloc().initWithFrame_(
                 NSMakeRect(CONTENT_W - 2 * EDGE - 74, row_y, 60, 28))
