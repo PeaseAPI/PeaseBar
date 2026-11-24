@@ -234,8 +234,11 @@ def _mk_wrap_label(text, font, color, frame, lines=2):
     lab.setFont_(font)
     lab.setTextColor_(color)
     lab.setFrame_(frame)
+    # labelWithString_ 造的 cell 是单行模式（usesSingleLineMode=YES），它会
+    # 压过 wraps 直接截尾——必须先关单行，折行才会真生效（装机截图实测）
+    lab.cell().setUsesSingleLineMode_(False)
     lab.cell().setWraps_(True)
-    lab.cell().setLineBreakMode_(4)  # NSLineBreakByWordWrapping
+    lab.cell().setLineBreakMode_(0)  # NSLineBreakByWordWrapping=0（4 是截尾椭圆，probe 实测）
     lab.setMaximumNumberOfLines_(lines)
     return lab
 
