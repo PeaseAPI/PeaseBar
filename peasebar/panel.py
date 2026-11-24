@@ -8,8 +8,10 @@
   无头部标题、无分区标题、无底部按钮，图标居中排布）：
   弹窗显示区（SECTION_HIDDEN）+ 逻辑上在菜单栏但此刻被系统收纳/刘海遮挡的项；
   永久隐藏区不展示；全空时给一行空态提示；
-- 单击面板内图标 → 触发真实图标，面板随即收起：画在可见段上的合成右键（弹其原生
-  状态菜单，T17），被系统收纳的合成点击会打偏，改走 AXPress 直接投递；
+- 单击面板内图标 → 触发真实图标（左键语义），面板随即收起；
+  右键 → 同一链路但 prefer_menu：支持 AXShowMenu 的先弹原生状态菜单
+  （格子是裸 NSButton，默认只在左键发 action，右键必须子类接住，
+  2026-11-25 报障「弹窗里右键图标没反应」）；
 - 分区编辑不在本面板进行（参照 Thaw：编辑在设置窗口），右键控制图标 →「设置…」；
 - 「展开/收起收纳区」联动原生收纳按钮（F12）已移到控制图标右键菜单——面板本体不留按钮；
 - 失焦自动收回（全局鼠标监听，T19）+ 超时自动收回（F5，默认 8s，config.json 可改，0=不超时）。
@@ -165,8 +167,10 @@ def _app_running(bid):
         return True
 
 
-def open_native_hidden_async(bid, on_done=None):
+def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
     """点「原生隐藏」格子：先守门，真被藏着的才走显回→触发→收回。
+
+    prefer_menu=True（右键）透传给两处 trigger.open_item：弹菜单语义优先。
 
     为什么需要守门（2026-11-24 用户报障「点格子闪两下、图标还不回去」）：
     显回/收回各重启一次 MenuBarAgent = 两次闪断，而下面两种情形根不用闪：
@@ -183,7 +187,7 @@ def open_native_hidden_async(bid, on_done=None):
         if online is not None:
             # ① 就在栏上：不碰 plist、不重启 Agent，直接 AX 触发（零闪断）
             try:
-                how, seen = trigger.open_item(online)
+                how, seen = trigger.open_item(online, prefer_menu=prefer_menu)
                 how = f"图标本来就在菜单栏上，直接触发：{how}"
             except Exception as exc:  # noqa: BLE001
                 how, seen = f"直接触发异常（{exc}）", False
@@ -220,7 +224,7 @@ def open_native_hidden_async(bid, on_done=None):
                 if on_done is not None:
                     on_done("显回菜单栏后没等到它的图标（App 可能没在跑）", False)
                 return
-            result = trigger.open_item(item)
+            result = trigger.open_item(item, prefer_menu=prefer_menu)
             time.sleep(HIDE_DELAY)  # 菜单还开着就继续点，到点收回
             # 收回走硬 apply，但距显回只隔 HIDE_DELAY，必撞去抖窗口→自动顺延
             # 到窗口尾一次生效：图标多赖几秒但整栏零死屏；旧版此处直杀吃
@@ -248,6 +252,18 @@ class KeyPanel(NSPanel):
 
     def canBecomeKey(self):
         return True
+
+
+class _CellButton(NSButton):
+    """面板格子：裸 NSButton 只在左键 mouseUp 发 action，右键点了无声
+    （2026-11-25 报障「弹窗里右键图标没反应」的根因）。这里把右键接住
+    转成 onIconRightClick:（弹菜单语义）；不调 super——否则 NSView 会沿
+    响应链找上下文菜单，把事件吞在系统菜单路径上。"""
+
+    def rightMouseDown_(self, event):
+        target = self.target()
+        if target is not None:
+            target.onIconRightClick_(self)
 
 
 class RescuePanel(NSObject):
@@ -496,7 +512,7 @@ class RescuePanel(NSObject):
 
     def _make_cell(self, item, index, image, x, y, w=CELL_W):
         """网格格子：**只有图标**（无位图时兜底图标顶上），名字只进悬停提示。"""
-        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, w, CELL_H))
+        btn = _CellButton.alloc().initWithFrame_(NSMakeRect(x, y, w, CELL_H))
         img = image if image is not None else capture.fallback_image_for_item(item)
         # 同比例缩一份副本收进格子：宽条（网速/温度）不溢出压邻居，也不半截
         img = capture.scaled_copy(img, w - 2 * CELL_PAD, CELL_H - 2 * CELL_PAD)
@@ -550,10 +566,25 @@ class RescuePanel(NSObject):
     # ---------- 动作 ----------
 
     def onIconClick_(self, sender):
-        """点击面板内图标：触发真实图标，面板随即收起。
+        """单击面板内图标：触发真实图标（左键语义），面板随即收起。"""
+        self._trigger_cell(sender, prefer_menu=False)
 
-        触发走 trigger 的阶梯（T61/T66：AXPress → AXShowMenu → 坐标可信时补一次合成右键），
-        并且丢后台跑：阶梯里全是跨进程等待（最坏 ~3s），卡在主线程会把面板和热键一起冻住。
+    def onIconRightClick_(self, sender):
+        """右键面板内图标：同一链路，但弹菜单语义优先（2026-11-25 报障）。
+
+        零鼠标红线下的边界：极少数 App（QQ/钉钉那一家部分）的原生菜单只答
+        合成右键，光标不能动，它们右键落回 AXPress、与左键同效——
+        至少面板会收、图标会响应，不再无声无息。
+        """
+        self._trigger_cell(sender, prefer_menu=True)
+
+    @objc.python_method
+    def _trigger_cell(self, sender, prefer_menu):
+        """左/右键格子的共同链路：先收面板，再丢后台触发真实图标。
+
+        触发走 trigger 的阶梯（T61/T66：AXPress → AXShowMenu，右键时 AXShowMenu
+        提到最前），并且丢后台跑：阶梯里全是跨进程等待（最坏 ~3s），卡在主线程
+        会把面板和热键一起冻住。
         面板先收再触发：对方的菜单跟踪循环会占住主线程，面板不先收掉会一直悬在那儿。
 
         为什么不能只靠坐标：合成点击按 App 家族分裂（部分根本不吃），而被收纳的图标
@@ -571,7 +602,8 @@ class RescuePanel(NSObject):
                 print(f"[PeaseBar] 触发 {item.owner_app}/{item.label}"
                       f"（原生隐藏）：{how}，反应={'有' if seen else '无'}")
 
-            open_native_hidden_async(item.owner_bundle_id, done_native)
+            open_native_hidden_async(item.owner_bundle_id, done_native,
+                                     prefer_menu=prefer_menu)
             return
 
         def done(how, seen):
@@ -579,7 +611,7 @@ class RescuePanel(NSObject):
             print(f"[PeaseBar] 触发 {item.owner_app}/{item.label}"
                   f"{'（被收纳）' if item.stashed else ''}：{how}，反应={'有' if seen else '无'}")
 
-        trigger.open_item_async(item, done)
+        trigger.open_item_async(item, done, prefer_menu=prefer_menu)
 
     def toggle_stash(self):
         """展开/收起系统收纳区（F12，已移到控制图标右键菜单，面板本体不留按钮）：

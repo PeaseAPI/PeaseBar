@@ -107,8 +107,14 @@ def _synth_right_click(item, settle=SETTLE):
     return f"合成右键@({cx:.0f},{cy:.0f})，{len(got)} 个新窗口", bool(got)
 
 
-def open_item(item):
-    """触发一个盘点项。返回 (说明, 是否看到了窗口反应)。"""
+def open_item(item, prefer_menu=False):
+    """触发一个盘点项。返回 (说明, 是否看到了窗口反应)。
+
+    prefer_menu=True（面板右键，2026-11-25 报障「右键没反应」）：支持
+    AXShowMenu 的元素先走 AXShowMenu——右键语义是弹原生状态菜单；
+    托管的第三方按钮只有 AXPress（T52/T54），照样落回 AXPress
+    （T61：钉钉/ToDesk/One Switch 等多家本来 AXPress 就弹菜单）。
+    """
     el = getattr(item, "el", None)
     if el is None:
         if item.frame is None:
@@ -116,21 +122,18 @@ def open_item(item):
         return _synth_right_click(item)
 
     axutil.set_messaging_timeout(el, 0.5)  # 触发要跨进程，比盘点放宽一点
-    base = _snapshot()
-    err = axutil.perform_action(el, "AXPress")
-    got = _wait_open(base, item.owner_pid)
-    if got:
-        return f"AXPress 生效（err={err}，{len(got)} 个新窗口）", True
-
+    # 档序：左键 AXPress 先行；右键把 AXShowMenu（若支持）提到最前
+    ladder = ["AXPress"]
     if "AXShowMenu" in axutil.element_actions(el):
+        ladder.insert(0 if prefer_menu else len(ladder), "AXShowMenu")
+    err, how = None, ""
+    for act in ladder:
         base = _snapshot()
-        err2 = axutil.perform_action(el, "AXShowMenu")
+        err = axutil.perform_action(el, act)
         got = _wait_open(base, item.owner_pid)
+        how = f"{how}+{act}" if how else act
         if got:
-            return f"AXPress 无反应 → AXShowMenu 生效（err={err2}）", True
-        err, how = err2, "AXPress+AXShowMenu"
-    else:
-        how = "AXPress"
+            return f"{act} 生效（err={err}，{len(got)} 个新窗口）", True
 
     # 阶梯最后一档：坐标可信（没被收纳）时补一次合成右键——LaunchOS 这类只答点击（T66）
     if item.frame and not getattr(item, "stashed", False):
@@ -145,8 +148,8 @@ def open_item(item):
     return f"{how} 已投递（err={err}），未看到新窗口{tail}", False
 
 
-def open_item_async(item, on_done=None):
-    """后台线程跑 open_item。
+def open_item_async(item, on_done=None, prefer_menu=False):
+    """后台线程跑 open_item（prefer_menu 原样透传，右键弹菜单语义）。
 
     阶梯最坏是 AXPress(1s) + AXShowMenu(1s) + 合成右键(1s) 的纯等待，全在 App 主线程里跑
     会冻住面板与热键，所以一律丢后台。on_done(说明, 是否看到窗口) 在子线程回调，
@@ -154,7 +157,7 @@ def open_item_async(item, on_done=None):
     """
     def run():
         with _ladder:
-            result = open_item(item)
+            result = open_item(item, prefer_menu=prefer_menu)
         if on_done is not None:
             on_done(*result)
 

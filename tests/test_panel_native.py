@@ -120,8 +120,8 @@ class TestNativeTileClickGuards(unittest.TestCase):
 
     BID = "com.example.app"
 
-    def _click(self, online, running, found=None):
-        """同步跑 open_native_hidden_async，返回 (写盘调用, 触发项)。"""
+    def _click(self, online, running, found=None, prefer_menu=False):
+        """同步跑 open_native_hidden_async，返回 (写盘调用, 触发记录)。"""
         calls, trig = [], []
         # 假时钟：每次 time() 走 1s，保证空等循环能自然结束
         clock = {"t": 0.0}
@@ -150,14 +150,15 @@ class TestNativeTileClickGuards(unittest.TestCase):
              mock.patch.object(panel.ccnative, "schedule_hard_apply",
                                lambda *a: calls.append(("兜底",))), \
              mock.patch.object(panel.trigger, "open_item",
-                               side_effect=lambda m: (trig.append(m),
-                                                      ("AXPress", True))[1]), \
+                               side_effect=lambda m, prefer_menu=False:
+                               (trig.append((m, prefer_menu)),
+                                ("AXPress", True))[1]), \
              mock.patch.object(panel.threading, "Thread", _SyncThread), \
              mock.patch.object(panel, "time", types.SimpleNamespace(
                  sleep=lambda _s: None,
                  time=lambda: clock.__setitem__("t", clock["t"] + 1.0)
                  or clock["t"])):
-            panel.open_native_hidden_async(self.BID)
+            panel.open_native_hidden_async(self.BID, prefer_menu=prefer_menu)
         return calls, trig
 
     def test_图标就在栏上时直接触发零闪断(self):
@@ -181,6 +182,20 @@ class TestNativeTileClickGuards(unittest.TestCase):
                          [(True, True), (False, True)])
         self.assertNotIn(("兜底",), calls)
         self.assertEqual(len(trig), 1)
+    
+    def test_右键守门直通也透传弹菜单语义(self):
+        """图标就在栏上 + 右键：直接触发那份要把 prefer_menu 递到 trigger。"""
+        calls, trig = self._click([_seen_item(self.BID)], running=True,
+                                  prefer_menu=True)
+        self.assertEqual(calls, [])
+        self.assertEqual([prefer for _m, prefer in trig], [True])
+    
+    def test_右键显回后的触发同样prefer_menu(self):
+        """真藏着的：显回→触发那一步右键语义不能丢（两段链路同一个开关）。"""
+        calls, trig = self._click([], running=True,
+                                  found=[_seen_item(self.BID)],
+                                  prefer_menu=True)
+        self.assertEqual([prefer for _m, prefer in trig], [True])
 
 
 if __name__ == "__main__":
