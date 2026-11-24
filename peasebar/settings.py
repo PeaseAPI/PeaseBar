@@ -556,6 +556,16 @@ class SettingsController(NSObject):
     # ---------- 布局草稿（暂存+应用模式，2026-11-24 用户定调） ----------
 
     @objc.python_method
+    def _unman_visible(self):
+        """不可控名单（系统藏不掉的 bid）：布局页/面板按栏上实况把它们
+        归可见区，不然配置写过隐藏的图标会只剩伪项——用户视角就是
+        「栏上有、布局页却没读到」（2026-11-24 QQ 案例）。"""
+        try:
+            return ccnative.unmanageable_set()
+        except Exception:  # noqa: BLE001 - 名单读盘失败不拦分桶
+            return set()
+
+    @objc.python_method
     def _layout_cfg(self):
         """布局编辑的工作配置：有草稿用草稿副本，否则读盘（_rebuild/盘点同源）。"""
         if getattr(self, "_pending_cfg", None) is not None:
@@ -770,7 +780,7 @@ class SettingsController(NSObject):
         不留旧控件残影，也就不需要页间显隐管理。
         """
         cfg = self._layout_cfg()  # 有布局草稿时按草稿分桶（所见即所得），否则读盘
-        buckets = sections.plan_sections(self.items, cfg)
+        buckets = sections.plan_sections(self.items, cfg, self._unman_visible())
         self.buckets = buckets  # 键盘编辑（⌥方向键/前移后移）就在这份分桶上动手
         # 三个布局选项同步成标记：格子宽/高、取图、真实菜单栏镜像都看它，一处读盘多处用
         self.use_captured = bool(cfg.get("use_captured", False))
@@ -1343,7 +1353,7 @@ class SettingsController(NSObject):
             return False
         self._begin_pending()
         cfg = self._pending_cfg
-        buckets = sections.plan_sections(self.items, cfg)
+        buckets = sections.plan_sections(self.items, cfg, self._unman_visible())
         pos = sections.find_pos(buckets, key)
         item = self._item_by_key(key)
         if pos is None or item is None:
@@ -1395,7 +1405,7 @@ class SettingsController(NSObject):
             return
         self._begin_pending()
         cfg = self._pending_cfg
-        buckets = sections.plan_sections(self.items, cfg)
+        buckets = sections.plan_sections(self.items, cfg, self._unman_visible())
         group = buckets[sec]
         if len(group) < 2:
             return
@@ -1405,7 +1415,7 @@ class SettingsController(NSObject):
         else:              # 恢复默认：清掉本区记录的顺序，回到盘点时的菜单栏序
             keys = {sections.item_key(it) for it in group}
             cfg["order"] = [k for k in cfg.get("order") or [] if k not in keys]
-            buckets = sections.plan_sections(self.items, cfg)
+            buckets = sections.plan_sections(self.items, cfg, self._unman_visible())
         sections.store_order(cfg, sections.flatten(buckets))
         self.buckets = buckets
         self._rebuild()
@@ -1813,6 +1823,30 @@ class SettingsController(NSObject):
         if r.get("input_menu_error"):
             print(f"[PeaseBar] 启动同步：输入法菜单显隐失败："
                   f"{r['input_menu_error']}")
+
+        # 自检可能刚把新漂移标进不可控名单（分桶据此 force_visible）：设置窗
+        # 开着的话回主线程重盘点一次，不然窗口停在名单空窗期的旧桶——
+        # 真机实测：启动自检后名单行永远显 0 项、布局页缺真实格
+        self._refresh_ui_async()
+
+    @objc.python_method
+    def _refresh_ui_async(self):
+        """后台核对结束后把设置窗拉回主线程重盘点（窗没开就零动作）。"""
+        win = self.window
+        if win is None:
+            return
+        try:
+            from Foundation import NSOperationQueue
+
+            def _refresh():
+                if win.isVisible():
+                    # 重盘点 + 整窗重建（草稿在 _pending_cfg 里不受影响，
+                    # 所见即所得的 force_visible 分桶要重走一遍才换桶）
+                    self._reload_items()
+                    self._rebuild()
+            NSOperationQueue.mainQueue().addOperationWithBlock_(_refresh)
+        except Exception:  # noqa: BLE001 - 刷新失败不影响核对本身
+            pass
 
 
     @objc.python_method
@@ -2389,6 +2423,7 @@ class SettingsController(NSObject):
         ax_ok = bool(AXIsProcessTrusted())
         writable = ccnative.is_writable()
         n_side = len(ccnative.last_hidden())
+        n_unman = len(ccnative.unmanageable_set())
         return [
             _para(tr("vis.intro")),
             _block(tr("vis.channel"), [
@@ -2401,6 +2436,9 @@ class SettingsController(NSObject):
                 _row_status(tr("vis.sidecar.title"), True,
                             tr("vis.sidecar.status", n=n_side),
                             help=tr("vis.sidecar.help")),
+                _row_status(tr("vis.unman.title"), True,
+                            tr("vis.unman.status", n=n_unman),
+                            help=tr("vis.unman.help")),
             ]),
             _block(tr("vis.tick"), [
                 _row_switch("cc_tick_enabled", tr("vis.tick.row"),
@@ -2760,7 +2798,7 @@ class SettingsController(NSObject):
         self._push_undo(cfg)
         sections.set_section(cfg, key, target)
         # 换区后抻到目标区末尾：不重排的话新位置由旧 order 位次决定，跳来跳去没规律
-        buckets = sections.plan_sections(self.items, cfg)
+        buckets = sections.plan_sections(self.items, cfg, self._unman_visible())
         item = self._item_by_key(key)
         if item is not None:
             rest = [it for it in buckets[target] if sections.item_key(it) != key]

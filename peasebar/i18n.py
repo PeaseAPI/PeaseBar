@@ -191,6 +191,9 @@ _STRINGS = {
         "vis.sidecar.title": "侧车记录",
         "vis.sidecar.status": "{n} 枚由 PeaseBar 隐藏中",
         "vis.sidecar.help": "PeaseBar 藏过的 App 记在这本账上；配置改回「菜单栏显示」时按它显回。",
+        "vis.unman.title": "不可控名单",
+        "vis.unman.status": "{n} 项系统不托管显隐",
+        "vis.unman.help": "这些 App 的图标系统不肯按开关隐藏，PeaseBar 不再白耗重启去重试；它们会按栏上实况显示在布局页，每次启动自动重试一次。",
         "vis.tick": "自动核对",
         "vis.tick.row": "每分钟自动核对显隐",
         "vis.tick.help": "App 断线重连或系统漂移会让隐藏悄悄失效；开着就每分钟自动对齐你的分区"
@@ -374,6 +377,9 @@ _STRINGS = {
         "vis.sidecar.title": "側車記錄",
         "vis.sidecar.status": "{n} 枚由 PeaseBar 隱藏中",
         "vis.sidecar.help": "PeaseBar 藏過的 App 記在這本帳上；設定改回「選單列顯示」時按它顯回。",
+        "vis.unman.title": "不可控名單",
+        "vis.unman.status": "{n} 項系統不托管顯隱",
+        "vis.unman.help": "這些 App 的圖示系統不肯按開關隱藏，PeaseBar 不再白耗重試；它們會按欄上實況顯示在佈局頁，每次啟動自動重試一次。",
         "vis.tick": "自動核對",
         "vis.tick.row": "每分鐘自動核對顯隱",
         "vis.tick.help": "App 斷線重連或系統漂移會讓隱藏悄悄失效；開著就每分鐘自動對齊你的分區"
@@ -554,6 +560,9 @@ _STRINGS = {
         "vis.sidecar.title": "Sidecar Ledger",
         "vis.sidecar.status": "{n} hidden by PeaseBar",
         "vis.sidecar.help": "Apps PeaseBar has hidden are logged here; when a config returns to Menu Bar, they're restored by this ledger.",
+        "vis.unman.title": "Unmanageable List",
+        "vis.unman.status": "{n} not hideable by the system",
+        "vis.unman.help": "macOS refuses to hide these apps' icons via the toggle, so PeaseBar stops retrying; they appear in Layout as they really are, retried once per launch.",
         "vis.tick": "Auto Re-check",
         "vis.tick.row": "Re-check Visibility Every Minute",
         "vis.tick.help": "App reconnects and system drift silently undo hiding; when on, your sections are "
@@ -733,6 +742,9 @@ _STRINGS = {
         "vis.sidecar.title": "Бортовой журнал",
         "vis.sidecar.status": "{n} скрыто PeaseBar",
         "vis.sidecar.help": "Скрытые PeaseBar App записаны сюда; при возврате в строку меню восстанавливаются по нему.",
+        "vis.unman.title": "Неуправляемые",
+        "vis.unman.status": "{n}: система не скрывает",
+        "vis.unman.help": "macOS не скрывает эти значки через переключатель — PeaseBar больше не тратит перезапуски; они показаны в Разметке как есть, повтор при каждом запуске.",
         "vis.tick": "Автопроверка",
         "vis.tick.row": "Сверять видимость каждую минуту",
         "vis.tick.help": "Переподключения и дрейф системы тихо ломают скрытие; включите — каждую минуту "
@@ -910,6 +922,9 @@ _STRINGS = {
         "vis.sidecar.title": "Registre annexe",
         "vis.sidecar.status": "{n} masquées par PeaseBar",
         "vis.sidecar.help": "Les apps masquées sont journalisées ici ; au retour « barre », elles reviennent selon ce registre.",
+        "vis.unman.title": "Liste ingouvernable",
+        "vis.unman.status": "{n} que le système ne cache pas",
+        "vis.unman.help": "macOS refuse de masquer ces icônes via l'interrupteur ; PeaseBar cesse de réessayer. Elles s'affichent telles quelles dans la Disposition, un réessai par lancement.",
         "vis.tick": "Vérification auto",
         "vis.tick.row": "Vérifier chaque minute",
         "vis.tick.help": "Reconnexions et dérive défont le masquage en silence ; activé, vos sections sont "
@@ -1087,6 +1102,9 @@ _STRINGS = {
         "vis.sidecar.title": "Seiten-Register",
         "vis.sidecar.status": "{n} von PeaseBar verborgen",
         "vis.sidecar.help": "Verborgene Apps werden hier vermerkt; bei Rückkehr zur Menüleiste danach wiederhergestellt.",
+        "vis.unman.title": "Unverwaltbare Liste",
+        "vis.unman.status": "{n} vom System nicht ausblendbar",
+        "vis.unman.help": "macOS verweigert das Ausblenden dieser Icons per Schalter – PeaseBar versucht es nicht mehr; sie erscheinen in der Layout-Seite wie real, bei jedem Start einmal erneut versucht.",
         "vis.tick": "Auto-Prüfung",
         "vis.tick.row": "Sichtbarkeit jede Minute prüfen",
         "vis.tick.help": "Reconnects und Systemdrift heben Ausblenden still auf; aktiv wird jede Minute "

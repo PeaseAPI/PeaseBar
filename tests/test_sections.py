@@ -94,6 +94,25 @@ class TestPlanSections(unittest.TestCase):
         self.assertEqual([i.label for i in buckets[sections.SECTION_HIDDEN]], ["hb"])
         self.assertEqual([i.label for i in buckets[sections.SECTION_ALWAYS_HIDDEN]], ["ah"])
 
+    def test_不可控项按实况强制归可见区(self):
+        """QQ 案例（2026-11-24）：配置写了 hidden 但系统藏不掉的 bid 进
+        force_visible 后必须分在可见区，否则布局页「栏上有却没读到」；
+        不在名单里的隐藏项不受影响。"""
+        cfg = {"sections": {
+            "com.tencent.qq|QQ": sections.SECTION_HIDDEN,
+            "b|hb": sections.SECTION_HIDDEN,
+        }}
+        items = [item("com.tencent.qq", "QQ"), item("b", "hb"), item("b", "v1")]
+        buckets = sections.plan_sections(items, cfg,
+                                         force_visible={"com.tencent.qq"})
+        self.assertEqual([i.label for i in buckets[sections.SECTION_VISIBLE]],
+                         ["QQ", "v1"])
+        self.assertEqual([i.label for i in buckets[sections.SECTION_HIDDEN]],
+                         ["hb"])
+        # 配置键原样保留：出名单后恢复用户意图，不被 UI 修桶顺手改盘
+        self.assertEqual(cfg["sections"]["com.tencent.qq|QQ"],
+                         sections.SECTION_HIDDEN)
+
     def test空清单返回三个空桶(self):
         buckets = sections.plan_sections([], {"sections": {}})
         for s in (sections.SECTION_VISIBLE, sections.SECTION_HIDDEN,

@@ -196,11 +196,14 @@ def item_key(item):
 ALWAYS_VISIBLE_BIDS = frozenset({"com.pease.peasebar"})
 
 
-def section_of(cfg, key):
+def section_of(cfg, key, force_visible=None):
     """查图标所在区；无记录 = 菜单栏显示（默认）。
-    PeaseBar 自己的控制图标强制可见（它是面板入口，永远在栏上）。"""
+    PeaseBar 自己的控制图标强制可见（它是面板入口，永远在栏上）。
+    force_visible：不可控名单等「配置写了藏但系统藏不掉」的 bid——按栏上实况
+    归可见区，否则布局页看不到它们，用户误以为「图标没被读取到」（2026-11-24
+    QQ 案例）；配置键原样保留，出名单后恢复用户意图。"""
     bid = key.split("|", 1)[0] if "|" in key else key
-    if bid in ALWAYS_VISIBLE_BIDS:
+    if bid in ALWAYS_VISIBLE_BIDS or (force_visible and bid in force_visible):
         return SECTION_VISIBLE
     s = cfg["sections"].get(key)
     return s if s in (SECTION_HIDDEN, SECTION_ALWAYS_HIDDEN) else SECTION_VISIBLE
@@ -239,11 +242,12 @@ def move_in_list(keys, key, delta):
     return out, True
 
 
-def plan_sections(items, cfg):
-    """按三区分桶（纯函数）。返回 dict[区名] → [item]，桶内按显式顺序排列。"""
+def plan_sections(items, cfg, force_visible=None):
+    """按三区分桶（纯函数）。返回 dict[区名] → [item]，桶内按显式顺序排列。
+    force_visible 透传 section_of：不可控名单等按实况强制归可见区的 bid 集。"""
     buckets = {s: [] for s in SECTION_ORDER}
     for it in items:
-        buckets[section_of(cfg, item_key(it))].append(it)
+        buckets[section_of(cfg, item_key(it), force_visible)].append(it)
     for s in buckets:
         buckets[s] = apply_order(buckets[s], cfg)
     return buckets

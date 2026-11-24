@@ -31,10 +31,12 @@ class TestNativeHiddenItems(unittest.TestCase):
         "com.example.visible|main": sections.SECTION_HIDDEN,
     }}
 
-    def _run(self, items, now_hidden):
-        """打桩 hidden_bids_now / last_hidden 后跑 native_hidden_items。"""
+    def _run(self, items, now_hidden, unman=()):
+        """打桩 hidden_bids_now / last_hidden / unmanageable_set 后跑补格。"""
         with mock.patch.object(ccnative, "hidden_bids_now", return_value=set(now_hidden)), \
-             mock.patch.object(ccnative, "last_hidden", return_value=[]):
+             mock.patch.object(ccnative, "last_hidden", return_value=[]), \
+             mock.patch.object(ccnative, "unmanageable_set",
+                               return_value=set(unman)):
             return panel.native_hidden_items(items, self.CFG)
 
     def test_盘点里没有的配置隐藏项被补进面板(self):
@@ -64,9 +66,18 @@ class TestNativeHiddenItems(unittest.TestCase):
         """reconcile 中途崩溃没来得及写 isAllowed 时，侧车记录兜底识别。"""
         with mock.patch.object(ccnative, "hidden_bids_now", return_value=set()), \
              mock.patch.object(ccnative, "last_hidden",
-                               return_value=["com.example.app"]):
+                               return_value=["com.example.app"]), \
+             mock.patch.object(ccnative, "unmanageable_set", return_value=set()):
             out = panel.native_hidden_items([], self.CFG)
         self.assertIn("com.example.app", {m.owner_bundle_id for m in out})
+    
+    def test_不可控名单不补伪项(self):
+        """QQ 案例（2026-11-24）：系统藏不掉的 bid 真项就在盘点里，
+        再补伪项就是「栏上有、格子却标成原生隐藏」的鬼影。"""
+        out = self._run([], {"com.example.app", "com.example.gone"},
+                        unman={"com.example.gone"})
+        self.assertEqual({m.owner_bundle_id for m in out},
+                         {"com.example.app"})
 
     def test_伪项按配置order排序(self):
         """布局页拖完的顺序要立刻在面板生效（2026-11-25 用户反馈「顺序没变」的
@@ -76,7 +87,8 @@ class TestNativeHiddenItems(unittest.TestCase):
                "order": ["com.example.gone|main", "com.example.app|main"]}
         with mock.patch.object(ccnative, "hidden_bids_now",
                                return_value={"com.example.app", "com.example.gone"}), \
-             mock.patch.object(ccnative, "last_hidden", return_value=[]):
+             mock.patch.object(ccnative, "last_hidden", return_value=[]), \
+             mock.patch.object(ccnative, "unmanageable_set", return_value=set()):
             out = panel.native_hidden_items([], cfg)
         self.assertEqual([sections.item_key(m) for m in out],
                          ["com.example.gone|main", "com.example.app|main"])

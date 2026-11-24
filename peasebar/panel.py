@@ -117,7 +117,11 @@ def native_hidden_items(items, cfg):
     import types
 
     seen = {m.owner_bundle_id for m in items}
-    now_hidden = ccnative.hidden_bids_now() | set(ccnative.last_hidden())
+    # 不可控名单免补：系统藏不掉它们（isAllowed=false 写了也在线），
+    # 真实项就在盘点里——再补伪项就是「栏上有、格子却标成原生隐藏」的鬼影
+    # （2026-11-24 QQ 案例），布局页/面板的分桶也据此 force_visible
+    unman = ccnative.unmanageable_set()
+    now_hidden = (ccnative.hidden_bids_now() | set(ccnative.last_hidden())) - unman
     out = []
     for key, sec in cfg["sections"].items():
         if sec != sections.SECTION_HIDDEN:
@@ -327,7 +331,7 @@ class RescuePanel(NSObject):
         all_items, _ = inventory.list_items()
         items = [m for m in all_items if not m.is_stash_button]
         cfg = sections.load_config()
-        buckets = sections.plan_sections(items, cfg)
+        buckets = sections.plan_sections(items, cfg, ccnative.unmanageable_set())
         # 面板只列「此刻看不见」的（docstring 承诺的真实现）：配置隐藏但被挤出、
         # 仍画在菜单栏上的不列——它在栏上直接点就行，再列一份会造成
         # 「面板也有、菜单栏也有」的重复困惑（用户真机实测反馈）。
