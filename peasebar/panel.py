@@ -167,10 +167,38 @@ def _app_running(bid):
         return True
 
 
+def try_reopen(bid, settle=1.6):
+    """免显回捷径：reopen 事件（等价于再点一次 Dock 图标）唤起 App 主窗口。
+
+    报障九（2026-11-24）预研实测（tmp/reopen_probe.py）：部分 App 直接开窗
+（Alcove/Snapzy），部分根本不理 reopen（OneDrive/Synology）——所以配合
+    _reopen_learned 逐 App 学习：命中记 True（以后左键零闪秒开），落空记
+    False（不再白等，直接走显回链）。零鼠标、零写盘、零杀进程。
+    """
+    import subprocess
+
+    from AppKit import NSWorkspace
+    app = next((a for a in NSWorkspace.sharedWorkspace().runningApplications()
+                if (a.bundleIdentifier() or "") == bid), None)
+    if app is None:
+        return False
+    base = trigger._snapshot()
+    try:
+        subprocess.run(["open", "-b", bid], capture_output=True)
+    except Exception:  # noqa: BLE001 - open 调不动就当没反
+        return False
+    return bool(trigger._wait_open(base, app.processIdentifier(), settle))
+
+
+# bid → 左键能否用 reopen 直达（未试过的不在表里，首试后必有 True/False）
+_reopen_learned = {}
+
+
 def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
     """点「原生隐藏」格子：先守门，真被藏着的才走显回→触发→收回。
 
-    prefer_menu=True（右键）透传给两处 trigger.open_item：弹菜单语义优先。
+    prefer_menu=True（右键）透传给两处 trigger.open_item：弹菜单语义优先；
+    右键不走 reopen 捷径——reopen 开的是主窗口（左键语义），弹不了状态菜单。
 
     为什么需要守门（2026-11-24 用户报障「点格子闪两下、图标还不回去」）：
     显回/收回各重启一次 MenuBarAgent = 两次闪断，而下面两种情形根不用闪：
@@ -178,8 +206,17 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
       给这类 App 写 isAllowed=false 根无效（系统不托管），收回永远收不成，
       用户看到的就是「图标始终在栏上没回去」；
     ② App 没在跑——显回也变不出图标（实测空等 8s），如实告知即可。
-    只有真被藏着的（③）才值得付一次显回闪断。
+    只有真被藏着的（③）才值得付一次显回闪断——而闪断还能免：左键先试
+    reopen 直达（③前，命中则零闪零等待窗口即开窗）。
     """
+    if bid in _inflight:
+        # 连点防重入（报障九「点了半天」诱因之一）：上一发还在显回/触发中，
+        # 叠第二条链只会互相翻转 isAllowed、多付闪断——开线程前就拦下
+        print(f"[PeaseBar] {bid} 上一发唤起还在进行中，本次不叠加")
+        if on_done is not None:
+            on_done("上一发唤起还在进行中（已在等图标回栏），本次点击不叠加", False)
+        return
+
     def run():
         online = next((m for m in inventory.list_items()[0]
                        if m.owner_bundle_id == bid and not m.is_stash_button),
@@ -199,15 +236,29 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
             if on_done is not None:
                 on_done("App 没在跑（没图标可显回，已免去一次菜单栏重启）", False)
             return
-        # ③ 真被原生通道藏着的：显回→等图标→触发→收回
+        # ③ 真被原生通道藏着的：左键先试 reopen 直达（逐 App 学习，命中即
+        # 零闪秒开），落空或未学过的右键才走显回→触发→收回
+        if not prefer_menu and _reopen_learned.get(bid, False):
+            if try_reopen(bid):
+                if on_done is not None:
+                    on_done("reopen 直达：没动菜单栏，窗口直接开了", True)
+                return
+            _reopen_learned[bid] = False  # 不认 reopen 的 App 不再白试（一次为限）
+        elif not prefer_menu and bid not in _reopen_learned:
+            if try_reopen(bid):
+                _reopen_learned[bid] = True
+                if on_done is not None:
+                    on_done("reopen 直达（首试命中，已记住这条路）：零闪断", True)
+                return
+            _reopen_learned[bid] = False
         _inflight.add(bid)
         try:
             ccnative.set_apps_allowed([bid], True)
-            time.sleep(1.2)  # MenuBarAgent 重启后 AX 树重建需要时间，先歇再问
             item = None
             # 等待窗口要盖住「显回被去抖顺延」的情形（报障七：连杀撞 launchd
-            # 节流，apply_now 改为窗口内顺延）：图标会到顺延重画后才出现，
-            # 多等一会儿比白点一次强；常态（直通重画）仍 2s 内命中
+            # 节流，apply_now 改为窗口内顺延）：图标会到顺延重画后才出现。
+            # 报障九提速：不再先 sleep 1.2 再慢轮——Agent 重启典型只 ~0.3s，
+            # 直接 0.15s 步进轮询，图标一出现在盘点就走，常态命中从 ~1.5s 压到 <1s
             end = time.time() + 8.0 + ccnative.HARD_APPLY_MIN_GAP
             while time.time() < end:
                 for m in inventory.list_items()[0]:
@@ -216,7 +267,7 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
                         break
                 if item is not None:
                     break
-                time.sleep(0.3)
+                time.sleep(0.15)
             if item is not None:
                 # 刚重连的图标先稳一下再投（报障八取证一轮：刚出现在盘点里就
                 # AXPress，回执正常但 App 没开窗，白点一次）
@@ -229,6 +280,11 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
                     on_done("显回菜单栏后没等到它的图标（App 可能没在跑）", False)
                 return
             result = trigger.open_item(item, prefer_menu=prefer_menu)
+            if not result[1]:
+                # 首投落空自动补投一次：刚重连的 App 处理程序可能还没就绪
+                # （报障八 Qoder 案例：回执正常但没开窗），隔 0.8s 再试
+                time.sleep(0.8)
+                result = trigger.open_item(item, prefer_menu=prefer_menu)
             time.sleep(HIDE_DELAY)  # 菜单还开着就继续点，到点收回
             # 收回走硬 apply，但距显回只隔 HIDE_DELAY，必撞去抖窗口→自动顺延
             # 到窗口尾一次生效：图标多赖几秒但整栏零死屏；旧版此处直杀吃

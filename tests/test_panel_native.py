@@ -120,8 +120,12 @@ class TestNativeTileClickGuards(unittest.TestCase):
 
     BID = "com.example.app"
 
-    def _click(self, online, running, found=None, prefer_menu=False):
-        """同步跑 open_native_hidden_async，返回 (写盘调用, 触发记录)。"""
+    def _click(self, online, running, found=None, prefer_menu=False,
+               learned=None, reopen_hit=False):
+        """同步跑 open_native_hidden_async，返回 (写盘调用, 触发记录)。
+
+        learned=None → 默认该 bid 已学过「reopen 不行」（聚焦显回链本身）；
+        learned=dict 可预置学习表；reopen_hit 控 try_reopen 桩的成败。"""
         calls, trig = [], []
         # 假时钟：每次 time() 走 1s，保证空等循环能自然结束
         clock = {"t": 0.0}
@@ -144,8 +148,13 @@ class TestNativeTileClickGuards(unittest.TestCase):
             calls.append((tuple(bids), allowed, hard))
             return set(bids)
 
+        learned = {self.BID: False} if learned is None else learned
+
         with mock.patch.object(panel.inventory, "list_items", _list_items), \
              mock.patch.object(panel, "_app_running", return_value=running), \
+             mock.patch.object(panel, "_reopen_learned", learned), \
+             mock.patch.object(panel, "try_reopen",
+                               lambda bid, settle=1.6: reopen_hit), \
              mock.patch.object(panel.ccnative, "set_apps_allowed", _allowed), \
              mock.patch.object(panel.ccnative, "schedule_hard_apply",
                                lambda *a: calls.append(("兜底",))), \
@@ -196,6 +205,98 @@ class TestNativeTileClickGuards(unittest.TestCase):
                                   found=[_seen_item(self.BID)],
                                   prefer_menu=True)
         self.assertEqual([prefer for _m, prefer in trig], [True])
+
+
+class TestReopenFastPath(unittest.TestCase):
+    """左键 reopen 直达捷径（报障九，2026-11-24）：命中即零写盘零闪断；
+    落空只学一次，以后直接走显回链不白等；右键不走（语义不对）。"""
+
+    BID = "com.example.app"
+
+    def _click(self, learned, reopen_hit, prefer_menu=False):
+        calls, done = [], []
+        n = {"i": 0}
+
+        def _list_items():
+            # 守门①时不在栏上（逼出 ③）；显回后的轮询才拿到重连的图标
+            n["i"] += 1
+            return (([_seen_item(self.BID)], []) if n["i"] > 1 else ([], []))
+
+        clock = {"t": 0.0}
+
+        class _SyncThread:
+            def __init__(self, target=None, daemon=None):
+                self._target = target
+
+            def start(self):
+                self._target()
+
+        with mock.patch.object(panel.inventory, "list_items", _list_items), \
+             mock.patch.object(panel, "_app_running", return_value=True), \
+             mock.patch.object(panel, "_reopen_learned", learned), \
+             mock.patch.object(panel, "try_reopen",
+                               lambda bid, settle=1.6: reopen_hit), \
+             mock.patch.object(panel.ccnative, "set_apps_allowed",
+                               lambda bids, allowed, hard=True:
+                               calls.append((allowed, hard)) or set(bids)), \
+             mock.patch.object(panel.trigger, "open_item",
+                               side_effect=lambda m, prefer_menu=False:
+                               ("chain", False)), \
+             mock.patch.object(panel.threading, "Thread", _SyncThread), \
+             mock.patch.object(panel, "time", types.SimpleNamespace(
+                 sleep=lambda _s: None,
+                 time=lambda: clock.__setitem__("t", clock["t"] + 1.0)
+                 or clock["t"])):
+            panel.open_native_hidden_async(
+                self.BID, lambda how, seen: done.append((how, seen)),
+                prefer_menu=prefer_menu)
+        return calls, done
+
+    def test_首试命中即零写盘并记住(self):
+        learned = {}
+        calls, done = self._click(learned, reopen_hit=True)
+        self.assertEqual(calls, [])           # 没碰 plist = 没闪断
+        self.assertTrue(done and done[0][1])   # 且如实报告「开窗了」
+        self.assertTrue(learned[self.BID])     # 学会了：这家用 reopen
+
+    def test_学过的再命中仍零写盘(self):
+        calls, done = self._click({self.BID: True}, reopen_hit=True)
+        self.assertEqual(calls, [])
+        self.assertTrue(done[0][1])
+
+    def test_落空只学一次并回退显回链(self):
+        learned = {self.BID: True}             # 曾经过，今天 reopen 失灵
+        calls, _done = self._click(learned, reopen_hit=False)
+        self.assertEqual(learned[self.BID], False)  # 改正学习表，下次不白试
+        self.assertEqual(calls, [(True, True), (False, True)])  # 照常走链
+
+    def test_右键不走reopen捷径(self):
+        """reopen 开的是主窗口（左键语义），弹不了状态菜单——右键必须继续
+        走显回链把图标请回栏上再投。"""
+        calls, _done = self._click({self.BID: True}, reopen_hit=True,
+                                   prefer_menu=True)
+        self.assertEqual(calls, [(True, True), (False, True)])  # 显回+收回
+
+
+class TestReentry(unittest.TestCase):
+    """连点防重入（报障九「点了半天」诱因）：同一 bid 链未走完时不叠第二条。"""
+
+    BID = "com.example.app"
+
+    def test_上一发进行中就早退(self):
+        calls = []
+        panel._inflight.add(self.BID)
+        self.addCleanup(panel._inflight.discard, self.BID)
+
+        class _NoThread:
+            def __init__(self, target=None, daemon=None):
+                raise AssertionError("早退应发生在开线程之前")
+
+        with mock.patch.object(panel, "threading", types.SimpleNamespace(
+                Thread=_NoThread)):
+            panel.open_native_hidden_async(self.BID,
+                                           lambda h, s: calls.append(s))
+        self.assertEqual(calls, [False])  # 只回调了「不叠加」，没进任何链路
 
 
 if __name__ == "__main__":
