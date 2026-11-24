@@ -127,6 +127,7 @@ class TestNativeTileClickGuards(unittest.TestCase):
         learned=None → 默认该 bid 已学过「reopen 不行」（聚焦显回链本身）；
         learned=dict 可预置学习表；reopen_hit 控 try_reopen 桩的成败。"""
         calls, trig = [], []
+        launches = []   # 报障②：未启动 App 的 open -b 启动记录
         # 假时钟：每次 time() 走 1s，保证空等循环能自然结束
         clock = {"t": 0.0}
 
@@ -163,30 +164,42 @@ class TestNativeTileClickGuards(unittest.TestCase):
                                (trig.append((m, prefer_menu)),
                                 ("AXPress", True))[1]), \
              mock.patch.object(panel.threading, "Thread", _SyncThread), \
+             mock.patch("subprocess.run",
+                        side_effect=lambda cmd, **k:
+                        launches.append(tuple(cmd))), \
              mock.patch.object(panel, "time", types.SimpleNamespace(
                  sleep=lambda _s: None,
                  time=lambda: clock.__setitem__("t", clock["t"] + 1.0)
                  or clock["t"])):
             panel.open_native_hidden_async(self.BID, prefer_menu=prefer_menu)
-        return calls, trig
+        return calls, trig, launches
 
     def test_图标就在栏上时直接触发零闪断(self):
         """不可控名单/快照过期：真项就在盘点里 → 不碰 plist、不重启 Agent。"""
-        calls, trig = self._click([_seen_item(self.BID)], running=True)
+        calls, trig, _ = self._click([_seen_item(self.BID)], running=True)
         self.assertEqual(calls, [])            # 零写盘 = 零闪断
         self.assertEqual(len(trig), 1)          # 但图标照样能触发
 
     def test_App没在跑时不白闪(self):
-        """显回变不出不存在的图标（实测空等 8s）：直接告知，零写盘。"""
-        calls, trig = self._click([], running=False)
+        """显回变不出不存在的图标（实测空等 8s）：不白闪、不写盘。报障
+        十一：左键会改为 open -b 启动 App（launches 非空），但不进显回链。"""
+        calls, trig, launches = self._click([], running=False)
+        self.assertEqual(calls, [])            # 零写盘 = 零闪断
+        self.assertEqual(trig, [])             # 不走显回触发链
+        self.assertEqual(launches, [("open", "-b", self.BID)])  # 左键启动了 App
+
+    def test_右键遇未启动App不启动只告知(self):
+        """右键要弹菜单：App 没跑无从弹，不擅自启动（区别于左键），零写盘。"""
+        calls, trig, launches = self._click([], running=False, prefer_menu=True)
         self.assertEqual(calls, [])
         self.assertEqual(trig, [])
+        self.assertEqual(launches, [])         # 右键不启动
 
     def test_真藏着的显回与收回都是硬生效(self):
         """只有这种才付闪断：显回 hard，收回也 hard（图标当场回去，
         不再软写赖到 15s 兜底），也不另排兜底定时器。"""
-        calls, trig = self._click([], running=True,
-                                  found=[_seen_item(self.BID)])
+        calls, trig, _ = self._click([], running=True,
+                                    found=[_seen_item(self.BID)])
         self.assertEqual([(c[1], c[2]) for c in calls],
                          [(True, True), (False, True)])
         self.assertNotIn(("兜底",), calls)
@@ -194,16 +207,16 @@ class TestNativeTileClickGuards(unittest.TestCase):
     
     def test_右键守门直通也透传弹菜单语义(self):
         """图标就在栏上 + 右键：直接触发那份要把 prefer_menu 递到 trigger。"""
-        calls, trig = self._click([_seen_item(self.BID)], running=True,
-                                  prefer_menu=True)
+        calls, trig, _ = self._click([_seen_item(self.BID)], running=True,
+                                    prefer_menu=True)
         self.assertEqual(calls, [])
         self.assertEqual([prefer for _m, prefer in trig], [True])
     
     def test_右键显回后的触发同样prefer_menu(self):
         """真藏着的：显回→触发那一步右键语义不能丢（两段链路同一个开关）。"""
-        calls, trig = self._click([], running=True,
-                                  found=[_seen_item(self.BID)],
-                                  prefer_menu=True)
+        calls, trig, _ = self._click([], running=True,
+                                    found=[_seen_item(self.BID)],
+                                    prefer_menu=True)
         self.assertEqual([prefer for _m, prefer in trig], [True])
 
 

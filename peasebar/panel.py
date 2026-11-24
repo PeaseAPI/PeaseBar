@@ -258,9 +258,23 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
                 on_done(how, seen)
             return
         if not _app_running(bid):
-            # ② App 没在跑：免掉一整轮白闪
+            # ② App 没在跑：报障十一——左键就该把 App 拉起来（用户「点未
+            # 启用的图标没反应」的预期就是点开它）。open -b 启动零写盘零
+            # 杀 Agent；启动后若它新注册的状态项泄回栏上，由周期核对
+            # （sync_cc_now soft 漏网分支）去抖收回。右键（弹菜单）没跑就
+            # 无从弹，如实告知。
+            if prefer_menu:
+                if on_done is not None:
+                    on_done("App 没在跑（没图标可显回，已免去一次菜单栏重启）", False)
+                return
+            import subprocess
+            try:
+                subprocess.run(["open", "-b", bid], capture_output=True)
+                how, seen = "App 本没在跑，已为你启动", True
+            except Exception as exc:  # noqa: BLE001
+                how, seen = f"App 本没在跑，启动失败（{exc}）", False
             if on_done is not None:
-                on_done("App 没在跑（没图标可显回，已免去一次菜单栏重启）", False)
+                on_done(how, seen)
             return
         # ③ 真被原生通道藏着的：左键先试 reopen 直达（逐 App 学习，命中即
         # 零闪秒开），落空或未学过的右键才走显回→触发→收回
@@ -286,17 +300,26 @@ def open_native_hidden_async(bid, on_done=None, prefer_menu=False):
             # 报障九提速：不再先 sleep 1.2 再慢轮——Agent 重启典型只 ~0.3s，
             # 直接 0.15s 步进轮询，图标一出现在盘点就走，常态命中从 ~1.5s 压到 <1s
             end = time.time() + 8.0 + ccnative.HARD_APPLY_MIN_GAP
+            # 报障十一回归修复：报障九只等「图标出现在盘点里」就取项，但 Agent
+            # 刚重启那一瞬 App 的状态项虽已注册、可操作的 AX 元素（el）还没建好
+            # ——拿 el=None 的项去 open_item 会直落「合成右键已停用」（QQ 那一家
+            # 之外的 ToDesk/Qoder 本来 AXPress/AXShowMenu 能弹菜单，也被误判成
+            # 弹不出，还错进 _menu_unsupported，之后右键全走无声直通=用户「右键
+            # 完全没反应」）。改为等 el 就绪再走；封顶 4s（QQ/钉钉那一家永远不给
+            # el，到点就按硬边界处理，不死等）。
+            el_ready_by = time.time() + 4.0
             while time.time() < end:
                 for m in inventory.list_items()[0]:
                     if m.owner_bundle_id == bid and not m.is_stash_button:
                         item = m
                         break
-                if item is not None:
+                if item is not None and (item.el is not None
+                                         or time.time() >= el_ready_by):
                     break
                 time.sleep(0.15)
-            if item is not None:
-                # 刚重连的图标先稳一下再投（报障八取证一轮：刚出现在盘点里就
-                # AXPress，回执正常但 App 没开窗，白点一次）
+            if item is not None and item.el is None:
+                # 到封顶仍没等到可操作元素（QQ 家族硬边界）：再稳一下坐标类触发
+                # 也无从下手，交给下面 open_item 如实落回「无 AX 元素」分支
                 time.sleep(0.6)
             if item is None:
                 # 显回没出来：盘上改回 false 即可（栏上本来就没它），

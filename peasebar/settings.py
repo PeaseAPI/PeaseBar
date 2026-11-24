@@ -3,7 +3,7 @@
 """设置窗口（F11/F14 提前落地；Phase 4e 起为侧栏多页：布局/通用/快捷键/疑难解答/关于）。
 
 参照 thaw@beta 3.0.0-beta.7 的分工：编辑放在**设置 → 布局页**（⌥方向键移动选中项、
-⌘Z 撤销、每区按名称排序、重置布局，格子只有图标），救援面板只负责临时找回图标。
+⌘Z 撤销、每区排序（反转/恢复默认）、重置布局，格子只有图标），救援面板只负责临时找回图标。
 窗口是 NavigationSplitView 式侧栏 + 右侧页内容；通用页管开机自启（SMAppService，
 写后回读系统状态为准）与面板超时；疑难解答页管权限/重抓/日志；关于页给版本与源码。
 
@@ -1244,17 +1244,9 @@ class SettingsController(NSObject):
                 hlab.setFrame_(NSMakeRect(bar_w - _hdx - 14, y + 5, 52, 14))
                 doc.addSubview_(hlab)
             if len(group) > 1:
-                # 每区的「Sort by Name」：点一下把该区按名字典序写进 order（⌘Z 可撤）
-                sb = NSButton.alloc().initWithFrame_(
-                    NSMakeRect(bar_w - 104, y + 1, 92, 18))
-                sb.setTitle_(tr("layout.sort.byname"))
-                sb.setBezelStyle_(0)
-                sb.setFont_(NSFont.systemFontOfSize_(10))
-                sb.setTarget_(self)
-                sb.setAction_("onSortSection:")
-                sb.setRepresentedObject_(sec)
-                doc.addSubview_(sb)
-                # Sort ⌄：多几个排序玩法（反转/恢复默认），同样写 order 可撤销
+                # Sort ⌄：区内排序玩法（反转/恢复默认顺序），同样写 order 可撤销。
+                # （报障十一：用户定调「按名称排序完全没用」，已把那颗
+                # sb 按钮移除，只留反转/恢复默认这两个真实有用的项）
                 mb = NSButton.alloc().initWithFrame_(
                     NSMakeRect(bar_w - 30, y + 1, 26, 18))
                 mb.setTitle_("")
@@ -1634,16 +1626,6 @@ class SettingsController(NSObject):
         print(f"[PeaseBar] 设置：切到 {self.page} 页")
         self._rebuild()
 
-    def onSortSection_(self, sender):
-        """每区「按名称排序」：把区内顺序按名字典序物化（压撤销点，⌘Z 可回；
-        已经有序时不写盘不留撤销痕迹）。"""
-        sec = str(sender.representedObject())
-        buckets, changed = sections.sort_bucket_by_name(self.buckets, sec)
-        if not changed:
-            print(f"[PeaseBar] 设置：{sections.SECTION_LABELS[sec]} 已按名称有序，不改动")
-            return
-        self._commit_order_note(buckets, f"按名称排序：{sections.SECTION_LABELS[sec]}")
-
     def onResetLayout_(self, sender):
         """重置布局：先弹确认再动草稿；应用前不落盘不拖拽（暂存+应用模式）。"""
         alert = NSAlert.alloc().init()
@@ -1900,6 +1882,44 @@ class SettingsController(NSObject):
             out["show"] = len(_s)
             if not soft and (_h or _s):
                 ccnative.apply_now()  # 合并后的唯一一次重画
+            if soft:
+                # 报障十一（图标泄回栏上永久赖着不走的真因）：App 自己启动会把
+                # 配置里已隐藏的图标重新注册回菜单栏；盘上 isAllowed 早就是
+                # false，set_apps_allowed 判「无变化」不写盘也不置待重画，而周期
+                # 核对又从不重启 Agent——于是这些「本该藏」的图标永久泄在栏上（
+                # 用户「打开千问/eudic 后图标还在菜单栏、没回弹窗」，但布局页仍
+                # 显示它们在隐藏序列）。拿栏上实况兼底：配置要藏、此刻真在栏上、
+                # 非 inflight/soft_pending/unmanageable/protected 的就是漏网，发一次
+                # apply_now（自带 11s 去抖）重画收回。
+                online_now = {m.owner_bundle_id
+                              for m in inventory.list_items()[0]
+                              if not m.is_stash_button}
+                leaked = {b for b in cfg_hidden_bids
+                          if not ccnative.is_protected(b)
+                          and b not in panel._inflight
+                          and b not in soft_pending
+                          and not ccnative.is_unmanageable(b)
+                          and ccnative.match_bid(b, online_now)}
+                if leaked and ccnative.apply_now():
+                    # 真重画了才双读止血（被去抖顺延返回 False 时不能读，否则又
+                    # 把「顺延未生效」误读成「系统不托管」，重蹈报障十单读误标覆辙）：
+                    # 连续两读仍在栏上→说明系统不托管它（会每分钟白闪），记入
+                    # 不可控名单止血，与报障十非 soft 自检同一套双读判据。
+                    time.sleep(2.0)
+                    r1 = {m.owner_bundle_id
+                          for m in inventory.list_items()[0]
+                          if not m.is_stash_button}
+                    time.sleep(1.5)
+                    r2 = {m.owner_bundle_id
+                          for m in inventory.list_items()[0]
+                          if not m.is_stash_button}
+                    stuck = {b for b in leaked
+                             if ccnative.match_bid(b, r1)
+                             and ccnative.match_bid(b, r2)}
+                    if stuck:
+                        print(f"[PeaseBar] 周期核对：重画后 {len(stuck)} 枚仍连续两读在栏上"
+                              f"（{', '.join(sorted(stuck)[:4])}），系统不托管，记入不可控名单")
+                        ccnative.mark_unmanageable(stuck)
             # 实效自检：写成功≠生效（2026-11-24 事故教训：格式写坏后每次幂等
             # 跳过，图标全在栏上却无人报错）。给 MenuBarAgent 重读留一拍再
             # 盘点栏上实况，配置要藏的 bid 仍在线就重写一轮并如实上报。

@@ -309,9 +309,10 @@ class TestTriggerConflictSync(unittest.TestCase):
         self.assertNotIn("com.acme.todesk", self._hide_bids())
 
     def test_soft模式零闪断只写盘(self):
-        """周期核对（soft=True）的新契约：所有写盘都走 hard=False（不重启
-        Agent），跳过实效自检（不等 2s、不点名、永不 apply_now）——
-        即使存在漂移，tick 时刻菜单栏也必须零闪断（用户痛点根因）。"""
+        """周期核对（soft=True）契约：写盘全走 hard=False、跳过实效自检。
+        报障十一新契约：正常无漏网时 tick 零重画（不闪）；一旦发现「配置要藏
+        却真在栏上」的漏网图标（App 自启动泄回），发一次去抖重画收回——否则
+        图标会永久赖在菜单栏不回弹窗（用户痛点）。"""
         self.online = [fake(bid="com.acme.todesk", label="ToDesk")]
         calls = []
 
@@ -322,13 +323,21 @@ class TestTriggerConflictSync(unittest.TestCase):
         out = self.ctrl.sync_cc_now(soft=True)
         self.assertTrue(calls)                              # 写盘照做
         self.assertTrue(all(h is False for _, _, h in calls))  # 全部软写
-        self.assertEqual(self.applied, [])                 # 不重启 Agent
-        self.assertNotIn("still_visible", out)             # 跳过实效自检
+        # 漏网（todesk 配置要藏、此刻在栏上）→ tick 发一次去抖重画收回
+        self.assertEqual(self.applied, [True])
+        self.assertNotIn("still_visible", out)             # 跳过非 soft 实效自检
+        # 反证（防回归每分钟闪）：无漏网时 tick 绝不重画——图标本就不在栏上
+        calls.clear()
+        self.applied.clear()
+        self.online = []                                    # todesk 已藏好 / 没在跑
+        self.ctrl.sync_cc_now(soft=True)
+        self.assertEqual(self.applied, [])                  # 干净 tick 零重画
         # 对照：硬模式（用户点应用）——写盘仍全走 hard=False（只落盘），
         # 藏/放合并后的唯一一次重画靠同步末尾显式 apply_now（一次重启，
         # 不再是两次硬写互翻），并报 still_visible 供自检
         calls.clear()
         self.applied.clear()
+        self.online = [fake(bid="com.acme.todesk", label="ToDesk")]
         self.ctrl.sync_cc_now()
         self.assertTrue(calls)
         self.assertTrue(all(h is False for _, _, h in calls))  # 写盘不各自重启
