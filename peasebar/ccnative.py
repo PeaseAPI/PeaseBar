@@ -17,6 +17,7 @@ cfprefsd，launchd 拉起新实例从磁盘重读，旧缓存不会回写覆盖�
 import os
 import plistlib
 import subprocess
+import threading
 import time
 
 from peasebar import sections
@@ -173,13 +174,18 @@ def match_bid(bid, known):
     return min(hits, key=len)
 
 
-def set_apps_allowed(bids, allowed):
+def set_apps_allowed(bids, allowed, hard=True):
     """把 bids 里各 App 的 isAllowed 改成 allowed，返回实际改动的 bundle id 集合。
 
     只动已有完整记录（带 isAllowed 键）的第三方；PeaseBar 自己与 com.apple.*
-    永不触碰。盘点 bid 与系统记录 bid 允许前缀差异（match_bid）。改完一次性
-    apply_now()（一轮重启，不按 App 杀多次）。返回的是调用方传入的 bid
-    （与配置/侧车同一口径），不是系统记录的落点 bid。
+    永不触碰。盘点 bid 与系统记录 bid 允许前缀差异（match_bid）。返回的是
+    调用方传入的 bid（与配置/侧车同一口径），不是系统记录的落点 bid。
+
+    hard=True（默认）：改完整套 apply_now 立即重画——菜单栏会空一下约 0.3s
+    （MenuBarAgent 是整条菜单栏的渲染宿主，重启即闪断）。
+    hard=False：只写盘 + 清 cfprefsd 缓存（零闪断），**改动不会立刻反映到栏上**，
+    等下一次 hard apply（其它点击/周期核对/schedule_hard_apply 兜底）才生效——
+    用于「点完图标后的收回」：用户注意力已离开菜单栏，闪断合并到不看的时刻。
     """
     want = {b for b in bids if not is_protected(b)}
     if not want:
@@ -223,16 +229,63 @@ def set_apps_allowed(bids, allowed):
             print("[PeaseBar] CC 写后校验失败：重读 trackedApplications 解不出 dict 数组")
     except Exception as exc:  # noqa: BLE001
         print(f"[PeaseBar] CC 写后校验异常：{exc}")
-    apply_now()
+    if hard:
+        apply_now()
+    else:
+        # 软生效：只清偏好缓存（不重启 MenuBarAgent，零闪断）；标记待重画，
+        # 等下一次 hard apply 或 schedule_hard_apply 兜底把它抹平。
+        subprocess.run(["killall", "cfprefsd"], capture_output=True)
+        global _pending_soft
+        _pending_soft = True
     return changed
 
 
+# 软写后待重画标记：True=盘上状态与栏上实况可能不一致，需要一次 hard apply
+_pending_soft = False
+_soft_timer = None
+_soft_lock = threading.Lock()
+
+
 def apply_now():
-    """让改动生效：清 cfprefsd 缓存（launchd 秒拉起）+ 重启 MenuBarAgent 重画。"""
+    """让改动生效：清 cfprefsd 缓存（launchd 秒拉起）+ 重启 MenuBarAgent 重画。
+
+    注意：MenuBarAgent 是整条菜单栏（含 Apple 菜单/应用菜单/右侧图标）的渲染
+    宿主，重启期间全栏清空约 0.3s——这就是用户看到的「菜单栏消失一下」。
+    仅在必须立即反映实况时走这里；可延迟的场景用 set_apps_allowed(hard=False)。
+    """
+    global _pending_soft, _soft_timer
+    with _soft_lock:
+        if _soft_timer is not None:
+            _soft_timer.cancel()
+            _soft_timer = None
+        _pending_soft = False
     for proc in ("cfprefsd", "MenuBarAgent"):
         subprocess.run(["killall", proc], capture_output=True)
     # 给 launchd 拉起与首帧重画一点时间
     time.sleep(0.6)
+
+
+def schedule_hard_apply(delay=15.0):
+    """软写后兜底：delay 秒内若没被别的 hard apply 合并掉，就自己重画一次。
+
+    去抖：多次 schedule 只留最后一个；期间任何 apply_now 会取消定时器（它已
+    把软写一并生效）。到期时若 _pending_soft 已被抹平则零动作，不自找闪断。"""
+    global _soft_timer
+    with _soft_lock:
+        if _soft_timer is not None:
+            _soft_timer.cancel()
+
+        def _fire():
+            global _soft_timer
+            with _soft_lock:
+                _soft_timer = None
+            if _pending_soft:
+                print("[PeaseBar] CC 软写兜底：后台重画一次，抹平待生效的显隐改动")
+                apply_now()
+
+        _soft_timer = threading.Timer(delay, _fire)
+        _soft_timer.daemon = True
+        _soft_timer.start()
 
 
 # ---------------------------------------------------------------------------

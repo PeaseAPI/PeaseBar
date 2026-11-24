@@ -3,6 +3,7 @@
 """ccnative：bid 匹配规则与侧车读写（离线单测，不碰真实 plist/侧车）。"""
 import os
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -195,6 +196,113 @@ class TestCCFormat(unittest.TestCase):
         self._write_outer("垃圾")
         _, recs = ccnative._load()
         self.assertEqual(recs, [])
+
+
+class TestSoftApply(unittest.TestCase):
+    """软生效（hard=False）与兜底重画：收回不闪的通道与去抖合并。
+
+    背景（用户报障 2026-11-24）：hard apply 重启 MenuBarAgent 是整条菜单栏
+    的渲染宿主，重启即全栏清空一下。面板点击后的收回改走软写：只清
+    cfprefsd 缓存零闪断，真正抹平靠下一次 hard apply 或超时兜底。
+    subprocess/Timer/sleep 全桩，不真杀进程不真等定时器线程。"""
+
+    class _FakeTimer:
+        """假 threading.Timer：只记录 start/cancel，到期手动 fire。"""
+
+        def __init__(self, delay, fn):
+            self.delay, self.fn = delay, fn
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+    def setUp(self):
+        self.plist = os.path.join(tempfile.mkdtemp(), "cc.plist")
+        p = mock.patch.object(ccnative, "CC_PLIST", self.plist)
+        p.start()
+        self.addCleanup(p.stop)
+        self.runs = []  # 记录 subprocess.run（killall 清单），不真执行
+        sp = mock.patch.object(ccnative.subprocess, "run",
+                               lambda cmd, **kw: self.runs.append(list(cmd)))
+        sp.start()
+        self.addCleanup(sp.stop)
+        sl = mock.patch.object(ccnative.time, "sleep", lambda _s: None)
+        sl.start()
+        self.addCleanup(sl.stop)
+        self.timers = []
+        tm = mock.patch.object(ccnative.threading, "Timer",
+                               self._mk_timer)
+        tm.start()
+        self.addCleanup(tm.stop)
+        pf = mock.patch.object(ccnative, "_pending_soft", False)
+        pf.start()
+        self.addCleanup(pf.stop)
+        pt = mock.patch.object(ccnative, "_soft_timer", None)
+        pt.start()
+        self.addCleanup(pt.stop)
+        self._write_rec("com.acme.app", True)
+
+    def _mk_timer(self, delay, fn):
+        t = self._FakeTimer(delay, fn)
+        self.timers.append(t)
+        return t
+
+    def _write_rec(self, bid, allowed):
+        import plistlib
+        with open(self.plist, "wb") as f:
+            plistlib.dump({"trackedApplications": plistlib.dumps(
+                [{"bundle": {"_0": bid}, "isAllowed": allowed}],
+                fmt=plistlib.FMT_BINARY)}, f)
+
+    def killed(self):
+        return [c[1] for c in self.runs if c[0] == "killall"]
+
+    def test_软写只清缓存不重启菜单栏(self):
+        got = ccnative.set_apps_allowed({"com.acme.app"}, False, hard=False)
+        self.assertEqual(got, {"com.acme.app"})
+        self.assertEqual(self.killed(), ["cfprefsd"])  # 绝不能碰 MenuBarAgent
+        self.assertTrue(ccnative._pending_soft)
+
+    def test_hard写重启全部并抹平pending(self):
+        ccnative.set_apps_allowed({"com.acme.app"}, False, hard=False)
+        del self.runs[:]
+        ccnative.set_apps_allowed({"com.acme.app"}, True)  # 默认 hard
+        self.assertEqual(self.killed(), ["cfprefsd", "MenuBarAgent"])
+        self.assertFalse(ccnative._pending_soft)  # hard apply 顺带抹平软写
+
+    def test_schedule去抖只留最后一个(self):
+        ccnative.schedule_hard_apply(delay=15.0)
+        ccnative.schedule_hard_apply(delay=15.0)
+        self.assertEqual(len(self.timers), 2)
+        self.assertTrue(self.timers[0].cancelled)   # 前一个被取消
+        self.assertFalse(self.timers[1].cancelled)
+        self.assertTrue(self.timers[1].started)
+
+    def test_apply_now取消兜底定时器(self):
+        ccnative.schedule_hard_apply(delay=15.0)
+        t = self.timers[-1]
+        ccnative.apply_now()
+        self.assertTrue(t.cancelled)  # 硬 apply 已把软写一并生效，不再自闪
+        self.assertFalse(ccnative._pending_soft)
+
+    def test_到期有pending则后台重画(self):
+        ccnative._pending_soft = True
+        ccnative.schedule_hard_apply(delay=0.01)
+        time.sleep(0.3)  # 真等假 timer 不可能自己 fire，手动补一发
+        self.timers[-1].fn()
+        self.assertIn("MenuBarAgent", self.killed())
+        self.assertFalse(ccnative._pending_soft)
+
+    def test_到期pending已被抹平则零动作(self):
+        """期间其它 hard apply 已合并抹平：兜底不得自找闪断。"""
+        ccnative._pending_soft = False
+        ccnative.schedule_hard_apply(delay=15.0)
+        self.timers[-1].fn()  # 模拟到期回调
+        self.assertEqual(self.runs, [])
 
 
 if __name__ == "__main__":

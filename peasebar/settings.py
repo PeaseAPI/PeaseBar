@@ -595,6 +595,15 @@ class SettingsController(NSObject):
                 elif step == "apply":
                     self.onApplyLayout_(None)
                     print("[PeaseBar] 取证：已触发应用改动")
+                elif step.startswith("ccset:"):
+                    # 诊断：强制把一枚 CC 显隐设到 hide/show（绕开设置页，供复现取证）
+                    parts = step.split(":", 2)
+                    bid = parts[1] if len(parts) > 1 else ""
+                    allowed = len(parts) > 2 and parts[2] == "show"
+                    if bid:
+                        changed = ccnative.set_apps_allowed([bid], allowed)
+                        print(f"[PeaseBar] 取证：ccset {bid} allowed={allowed} "
+                              f"changed={changed}")
                 elif step.startswith("setlang:"):
                     code = step.split(":", 1)[1]
                     if i18n.set_lang(code):
@@ -756,7 +765,7 @@ class SettingsController(NSObject):
         self.field_timeout = None  # 切页即失效，_save_timeout 的空判据此生效
         self.popup_icon = None     # 同上：触发图标下拉也随旧内容丢弃
         page = getattr(self, "page", "layout")
-        # 内容高度随分区变；窗高给侧栏 12 行页签兑底（MIN_WIN_H），不够高的页拉到此高
+        # 内容高度随分区变；窗高给侧栏 12 行页签兜底（MIN_WIN_H），不够高的页拉到此高
         height = max(MIN_WIN_H, self._page_height(page, buckets))
 
         container = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, WIN_WIDTH, height))
@@ -1728,32 +1737,46 @@ class SettingsController(NSObject):
             return out
         out["writable"] = True
         try:
+            # 面板正在临时显回的那些 bid：本轮全量对齐不碰它们——撞进
+            # 显回窗口硬收回会多闪一次栏，还把用户的菜单点击窗口抽走了
+            # （2026-11-24 闪断真凶；流程结束后由软写+兜底自然抹平）
+            inflight = set(panel._inflight)  # 入口快照：只用于显回侧粗筛
             # 显回的只限「自己上轮藏过、现在配置改显示」的：用户在系统设置
             # 里手动关掉的（配置是显示）不动，尊重手动选择。
             prev = ccnative.last_hidden()
             to_show = {b for b in prev
-                       if ccnative.match_bid(b, cfg_visible_bids)}
+                       if ccnative.match_bid(b, cfg_visible_bids)} - inflight
             # 盘点到的可见项也补写 true（幂等，防中途被谁动过）
             for m in inventory.list_items()[0]:
                 if m.is_stash_button or ccnative.is_protected(m.owner_bundle_id):
                     continue
                 if sections.section_of(cfg, sections.item_key(m)) == sections.SECTION_VISIBLE:
                     to_show.add(m.owner_bundle_id)
-            out["hide"] = len(ccnative.set_apps_allowed(cfg_hidden_bids, False))
+            out["hide"] = len(ccnative.set_apps_allowed(
+                set(cfg_hidden_bids) - set(panel._inflight), False))
             out["show"] = len(ccnative.set_apps_allowed(to_show, True))
             # 实效自检：写成功≠生效（2026-11-24 事故教训：格式写坏后每次幂等
             # 跳过，图标全在栏上却无人报错）。给 MenuBarAgent 重读留一拍再
             # 盘点栏上实况，配置要藏的 bid 仍在线就重写一轮并如实上报。
+            # protected（PeaseBar 自己/系统项）永不列进自检：它们永远在线
+            # 且盘上写不进，列进来就是每轮空转硬 apply 闪一次栏。
             time.sleep(2.0)
             online_bids = [m.owner_bundle_id
                            for m in inventory.list_items()[0]
                            if not m.is_stash_button]
-            still = [b for b in sorted(cfg_hidden_bids)
-                     if ccnative.match_bid(b, set(online_bids))]
+            # inflight 取实时值而非函数入口快照：同步线程盘点慢，入口时
+            # 面板 trigger 可能还没登记，拿旧快照会把刚显回的图标当漂移
+            # 提前硬收回（真机闪断第二暗窗，2026-11-24）
+            still = [b for b in sorted(set(cfg_hidden_bids) - set(panel._inflight))
+                     if not ccnative.is_protected(b)
+                     and ccnative.match_bid(b, set(online_bids))]
             if still:
                 print(f"[PeaseBar] 实效自检：{len(still)} 个配置隐藏项仍在菜单栏上"
                       f"（{', '.join(still[:4])}...），重写一次")
-                ccnative.set_apps_allowed(set(still), False)
+                if not ccnative.set_apps_allowed(set(still), False):
+                    # 盘上已是 false（软生效残留）：改动没得写≠不用重画，
+                    # 强制 apply_now 把软写抹到栏上，否则图标长期滞留
+                    ccnative.apply_now()
                 out["still_visible"] = still
             # 侧车记「此刻系统藏着的、且是配置让它藏的」全集：配置日后改成
             # 「显示」时同步据此负责显回。
@@ -2786,7 +2809,7 @@ class SettingsController(NSObject):
                 12.0, self, "panelShot2:", None, False)
             NSRunLoop.mainRunLoop().addTimer_forMode_(t4, NSRunLoopCommonModes)
         except Exception as exc:  # noqa: BLE001
-            print(f"[PeaseBar] 面板取证：安排兑底截屏失败：{exc}")
+            print(f"[PeaseBar] 面板取证：安排兜底截屏失败：{exc}")
 
     def panelShot2_(self, timer):
         """主线程回调 4（__PANEL__ 取证）：触发后截屏（原生菜单应已在屏）+ 落最终结果。"""

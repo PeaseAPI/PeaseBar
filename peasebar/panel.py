@@ -99,6 +99,11 @@ def grid_layout(count, image_widths=()):
 
 HIDE_DELAY = 6  # 点按原生隐藏格后，临时显回的图标几秒后收回（菜单点击窗口）
 
+# 正在走「显回→触发→收回」流程的 bid（跨线程只 add/discard，GIL 下安全）：
+# sync_cc_now 的启动/周期同步必须避开这些——撞进显回窗口把它硬收回会重启
+# MenuBarAgent 闪整条栏，还剥夺用户的菜单点击窗口（2026-11-24 闪断真凶之一）。
+_inflight = set()
+
 
 def native_hidden_items(items, cfg):
     """构造「被原生通道藏起、此刻不在盘点里」的弹窗显示区伪项。
@@ -142,6 +147,7 @@ def open_native_hidden_async(bid, on_done=None):
     菜单会被收回，再点一次格子即可）。全程后台线程，异常时也收回图标。
     """
     def run():
+        _inflight.add(bid)
         try:
             ccnative.set_apps_allowed([bid], True)
             time.sleep(1.2)  # MenuBarAgent 重启后 AX 树重建需要时间，先歇再问
@@ -156,22 +162,33 @@ def open_native_hidden_async(bid, on_done=None):
                     break
                 time.sleep(0.3)
             if item is None:
-                ccnative.set_apps_allowed([bid], False)  # 没等到也收回，保持一致
+                # 没等到也收回（软写零闪断，靠兜底/下次点击抹平），保持一致
+                ccnative.set_apps_allowed([bid], False, hard=False)
+                ccnative.schedule_hard_apply()
                 if on_done is not None:
                     on_done("显回菜单栏后没等到它的图标（App 可能没在跑）", False)
                 return
             result = trigger.open_item(item)
-            time.sleep(HIDE_DELAY)  # 菜单还开着就继续点，到点无条件收回
-            ccnative.set_apps_allowed([bid], False)
+            time.sleep(HIDE_DELAY)  # 菜单还开着就继续点，到点收回
+            # 收回走软生效：不重启 MenuBarAgent 就不闪整条菜单栏（用户报障
+            # 2026-11-24：点完图标栏白两下）。图标实际消失由 15s 兜底或下一次
+            # 显回点击的 hard apply 合并完成——闪断挪到用户不看菜单栏的时刻。
+            ccnative.set_apps_allowed([bid], False, hard=False)
+            ccnative.schedule_hard_apply()
             if on_done is not None:
                 on_done(*result)
         except Exception:  # noqa: BLE001
             import traceback
             traceback.print_exc()
             try:
-                ccnative.set_apps_allowed([bid], False)  # 异常也别把图标留在栏上
+                # 异常也别把图标长期留在栏上：软写+兜底，同样不闪断
+                ccnative.set_apps_allowed([bid], False, hard=False)
+                ccnative.schedule_hard_apply()
             except Exception:  # noqa: BLE001
                 pass
+        finally:
+            # 收回已落盘（软/硬都写了 false）才摘牌子；中途 return 的分支也走这里
+            _inflight.discard(bid)
 
     threading.Thread(target=run, daemon=True).start()
 

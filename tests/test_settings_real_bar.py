@@ -17,7 +17,7 @@ import types
 import unittest
 
 from peasebar import ccnative, menubar_drag, sections
-from peasebar import settings
+from peasebar import panel, settings
 
 
 def fake(bid="com.tencent.qq", label="QQ", key_part="", frame=(100.0, 0.0, 24.0, 24.0)):
@@ -228,6 +228,77 @@ class TestInputMenuSync(unittest.TestCase):
         out = self.ctrl.sync_cc_now()
         self.assertNotIn("input_menu", out)
         self.assertEqual(self.calls, [])
+
+
+class TestTriggerConflictSync(unittest.TestCase):
+    """sync_cc_now 全量对齐不得跟面板触发流程打架（2026-11-24 闪断真凶）。
+
+    真机日志铁证：60s tick/启动同步撞进面板「显回→触发」窗口，把临时
+    显回的 bid 硬收回——多闪一次栏还抽走菜单点击窗口；另 PeaseBar 自己
+    配置标隐藏但 protected 永写不进，实效自检每轮空转点名它。
+    修复：全程避开 panel._inflight，自检剔除 protected。"""
+
+    def setUp(self):
+        self.ctrl = settings.SettingsController.alloc().init()
+        self.cfg = {"sections": {"com.acme.todesk|ToDesk": sections.SECTION_HIDDEN,
+                                 "com.pease.peasebar|PeaseBar":
+                                     sections.SECTION_HIDDEN}}
+        self.set_calls = []   # set_apps_allowed(bids, allowed) 记录
+        self.applied = []     # apply_now 触发记录
+        self.online = []      # 模拟盘上栏内实况
+        self._orig = (sections.load_config, ccnative.is_writable,
+                      ccnative.last_hidden, ccnative.record_hidden,
+                      ccnative.set_apps_allowed, ccnative.apply_now,
+                      settings.inventory.list_items, settings.time)
+        sections.load_config = lambda: self.cfg
+        ccnative.is_writable = lambda: True
+        ccnative.last_hidden = lambda: set()
+        ccnative.record_hidden = lambda bids: None
+        ccnative.set_apps_allowed = (
+            lambda bids, allowed, hard=True:
+            self.set_calls.append((frozenset(bids), allowed)) or set())
+        ccnative.apply_now = lambda: self.applied.append(True)
+        settings.inventory.list_items = lambda: (list(self.online), [])
+        settings.time = types.SimpleNamespace(sleep=lambda _s: None)
+        panel._inflight.clear()
+        self.addCleanup(panel._inflight.clear)
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        (sections.load_config, ccnative.is_writable,
+         ccnative.last_hidden, ccnative.record_hidden,
+         ccnative.set_apps_allowed, ccnative.apply_now,
+         settings.inventory.list_items, settings.time) = self._orig
+
+    def _hide_bids(self):
+        # 第一次调用即收回写（out["hide"]）
+        return self.set_calls[0][0]
+
+    def test_inflight显回项不被同步硬收回(self):
+        """todesk 在触发窗口里（inflight）：收回写不碰它，自检也不点名。"""
+        self.online = [fake(bid="com.acme.todesk", label="ToDesk"),
+                       fake(bid="com.pease.peasebar", label="PeaseBar")]
+        panel._inflight.add("com.acme.todesk")
+        out = self.ctrl.sync_cc_now()
+        self.assertNotIn("com.acme.todesk", self._hide_bids())
+        self.assertEqual(self.applied, [])       # 零强制重画：不闪
+        self.assertNotIn("still_visible", out)
+
+    def test_protected永不进实效自检空转(self):
+        """peasebar 配置标隐藏但永远在线且写不进：自检不得点名它；
+        真漂移的 todesk 照常收回（自检补漏硬 apply 是预期行为）。"""
+        self.online = [fake(bid="com.acme.todesk", label="ToDesk"),
+                       fake(bid="com.pease.peasebar", label="PeaseBar")]
+        out = self.ctrl.sync_cc_now()
+        self.assertEqual(out.get("still_visible"), ["com.acme.todesk"])
+        self.assertEqual(len(self.applied), 1)   # 漂移项强制重画一次收回
+
+    def test_无漂移时自检零动作(self):
+        """栏上只剩 protected：幂等，不写不重画（钉住旧空转回归）。"""
+        self.online = [fake(bid="com.pease.peasebar", label="PeaseBar")]
+        out = self.ctrl.sync_cc_now()
+        self.assertNotIn("still_visible", out)
+        self.assertEqual(self.applied, [])
 
 
 if __name__ == "__main__":
