@@ -68,6 +68,19 @@ class TestNativeHiddenItems(unittest.TestCase):
             out = panel.native_hidden_items([], self.CFG)
         self.assertIn("com.example.app", {m.owner_bundle_id for m in out})
 
+    def test_伪项按配置order排序(self):
+        """布局页拖完的顺序要立刻在面板生效（2026-11-25 用户反馈「顺序没变」的
+        真根因：伪项原先按 sections 字典插入序输出，而拖动写的是 order）。"""
+        cfg = {"sections": {"com.example.app|main": sections.SECTION_HIDDEN,
+                            "com.example.gone|main": sections.SECTION_HIDDEN},
+               "order": ["com.example.gone|main", "com.example.app|main"]}
+        with mock.patch.object(ccnative, "hidden_bids_now",
+                               return_value={"com.example.app", "com.example.gone"}), \
+             mock.patch.object(ccnative, "last_hidden", return_value=[]):
+            out = panel.native_hidden_items([], cfg)
+        self.assertEqual([sections.item_key(m) for m in out],
+                         ["com.example.gone|main", "com.example.app|main"])
+
     def test_伪项字段满足渲染与触发口径(self):
         """格子渲染要 label/key_part；触发链路要 owner_bundle_id/frame=None。"""
         out = self._run([], {"com.example.app"})

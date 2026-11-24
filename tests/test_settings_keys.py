@@ -54,6 +54,20 @@ class KeyCase(unittest.TestCase):
     def cfg(self):
         return sections.load_config(self.path)
 
+    def draft(self):
+        """当前草稿（无编辑时等同盘上配置）：暂存+应用模式下编辑先落草稿。"""
+        if self.ctrl._pending_cfg is not None:
+            return self.ctrl._pending_cfg
+        return self.cfg()
+
+    def apply_now(self):
+        """同步跑完「应用改动」：后台生效部分打桩成立即执行，不碰真 AX/拖拽。"""
+        self.ctrl.real_bar = False  # real_bar 关时应用流程不碰 CC/拖拽
+        self.ctrl._reload_items = lambda: None
+        self.ctrl.performSelectorOnMainThread_withObject_waitUntilDone_ = (
+            lambda sel, obj, wait: self.ctrl.applyDone_(obj))
+        self.ctrl.onApplyLayout_(None)
+
     def keys_of(self, sec):
         return [sections.item_key(i) for i in self.ctrl.buckets[sec]]
 
@@ -65,14 +79,17 @@ class KeyCase(unittest.TestCase):
 
 class TestArrowEdit(KeyCase):
     def test_alt_right_moves_within_section(self):
-        """⌥→/⌥←：同区内前后移一格，且真的写进配置（只改高亮不叫编辑）。"""
+        """⌥→/⌥←：同区内前后移一格（暂存+应用模式：先落草稿，应用才写盘）。"""
         self.select("A")
         self.assertTrue(self.ctrl.handleKey_(key_event(KEY_RIGHT, opt=True)))
-        self.assertEqual(self.cfg()["order"], ["b|B", "a|A", "c|C"])
+        self.assertEqual(self.draft()["order"], ["b|B", "a|A", "c|C"])
         self.assertEqual(self.keys_of(sections.SECTION_VISIBLE), ["b|B", "a|A", "c|C"])
         self.assertEqual(self.rebuilt, [True])  # 每次真改动都刷一次界面
+        self.assertEqual(self.cfg()["order"], [])  # 盘上未动：还没点应用
         self.assertTrue(self.ctrl.handleKey_(key_event(KEY_LEFT, opt=True)))
-        self.assertEqual(self.cfg()["order"], ["a|A", "b|B", "c|C"])
+        self.assertEqual(self.draft()["order"], ["a|A", "b|B", "c|C"])
+        self.apply_now()
+        self.assertEqual(self.cfg()["order"], ["a|A", "b|B", "c|C"])  # 应用后落盘
 
     def test_alt_at_border_is_not_an_edit(self):
         """末格再 ⌥→ 不算改动：不写盘、不记撤销点（否则 ⌘Z 会被无效按键填满）。"""
@@ -83,15 +100,15 @@ class TestArrowEdit(KeyCase):
         self.assertEqual(self.cfg()["order"], [])
 
     def test_alt_up_down_changes_section(self):
-        """⌥↓：可见区 → 隐藏区 → 永久隐藏；到底不给动，⌥↑ 原路回来。"""
+        """⌥↓：可见区 → 隐藏区 → 永久隐藏；到底不给动，⌥↑ 原路回来（草稿）。"""
         key = self.select("B")
         self.assertTrue(self.ctrl.handleKey_(key_event(KEY_DOWN, opt=True)))
-        self.assertEqual(self.cfg()["sections"].get(key), sections.SECTION_HIDDEN)
+        self.assertEqual(self.draft()["sections"].get(key), sections.SECTION_HIDDEN)
         self.assertTrue(self.ctrl.handleKey_(key_event(KEY_DOWN, opt=True)))
-        self.assertEqual(self.cfg()["sections"].get(key), sections.SECTION_ALWAYS_HIDDEN)
+        self.assertEqual(self.draft()["sections"].get(key), sections.SECTION_ALWAYS_HIDDEN)
         self.assertFalse(self.ctrl.handleKey_(key_event(KEY_DOWN, opt=True)))
         self.assertTrue(self.ctrl.handleKey_(key_event(KEY_UP, opt=True)))
-        self.assertEqual(self.cfg()["sections"].get(key), sections.SECTION_HIDDEN)
+        self.assertEqual(self.draft()["sections"].get(key), sections.SECTION_HIDDEN)
 
     def test_换区后落在目标区末尾(self):
         """不物化顺序的话，新位置由旧 order 位次决定，跳来跳去没规律。"""
@@ -160,32 +177,35 @@ class TestFocusMove(KeyCase):
 
 class TestCommandKeys(KeyCase):
     def test_cmd_number_moves_to_section(self):
+        """⌘2 移到隐藏区（暂存+应用模式：落草稿待应用）。"""
         key = self.select("A")
         self.assertTrue(self.ctrl.handleKey_(key_event(0, cmd=True, ch="2")))
-        self.assertEqual(self.cfg()["sections"].get(key), sections.SECTION_HIDDEN)
+        self.assertEqual(self.draft()["sections"].get(key), sections.SECTION_HIDDEN)
 
     def test_cmd_without_selection(self):
         self.ctrl.selected_key = None
         self.assertFalse(self.ctrl.handleKey_(key_event(0, cmd=True, ch="3")))
 
     def test_undo_逐步回退(self):
-        """⌘Z 逐步回退顺序与分区改动；栈空时返回 False（让系统响铃）。"""
+        """⌘Z 逐步回退顺序与分区改动（回草稿）；栈空时返回 False（让系统响铃）。"""
         self.select("A")
         self.ctrl.handleKey_(key_event(KEY_RIGHT, opt=True))   # 改动 1：顺序
         self.ctrl.handleKey_(key_event(KEY_DOWN, opt=True))    # 改动 2：换区
         self.assertEqual(len(self.ctrl._undo), 2)
         self.assertTrue(self.ctrl.handleKey_(key_event(0, cmd=True, ch="z")))
-        self.assertIsNone(self.cfg()["sections"].get("a|A"))   # 改动 2 已回退
+        self.assertIsNone(self.draft()["sections"].get("a|A"))   # 改动 2 已回退
         self.assertTrue(self.ctrl.handleKey_(key_event(0, cmd=True, ch="z")))
-        self.assertEqual(self.cfg()["order"], [])              # 改动 1 已回退
+        self.assertEqual(self.draft()["order"], [])              # 改动 1 已回退
         self.assertFalse(self.ctrl.handleKey_(key_event(0, cmd=True, ch="z")))
 
     def test_撤销按钮与快捷键同路(self):
+        """撤销也只回退草稿（应用才落盘）：盘上配置在撤销前后都不动。"""
         self.select("B")
         self.ctrl.handleKey_(key_event(KEY_LEFT, opt=True))
-        before = self.cfg()["order"]
+        before = self.draft()["order"]
         self.ctrl.onUndo()
-        self.assertNotEqual(self.cfg()["order"], before)
+        self.assertNotEqual(self.draft()["order"], before)
+        self.assertEqual(self.cfg()["order"], [])  # 盘上从未动过
 
     def test_撤销栈有上限(self):
         """手滑按到底也不能无限吃内存（栈深 UNDO_LIMIT，超出丢最老的）。"""

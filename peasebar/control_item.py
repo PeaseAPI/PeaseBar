@@ -21,6 +21,7 @@ from Foundation import NSObject, NSMakeRect
 import objc
 import peasebar
 from peasebar import sections
+from peasebar.i18n import t as tr
 
 # 点击分发需要按下即触发（而非抬起），沿用 NSCell 的 sendActionOn_
 try:
@@ -56,26 +57,26 @@ class ControlItem(NSObject):
         return self
 
     def build(self):
-        """创建状态图标与主菜单（中文优先）。"""
+        """创建状态图标与主菜单（文案随语言现取，弹前还会刷一次）。"""
         bar = NSStatusBar.systemStatusBar()
         self.item = bar.statusItemWithLength_(NSVariableStatusItemLength)
         button = self.item.button()
         self.refresh_icon()  # 按配置画触发图标（图标/文字分支在 refresh_icon 里统一）
-        button.setToolTip_("PeaseBar：查看全部菜单栏图标")
+        button.setToolTip_(tr("ci.tip"))
 
         # 主菜单（右键用；左键行为由回调接管）
         self.menu = NSMenu.alloc().initWithTitle_("PeaseBar")
         mi_settings = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "设置…", "openSettings:", "")
+            tr("ci.settings"), "openSettings:", "")
         # 收纳区开关：救援面板瘦身（照 Thaw 只留纯网格）后，按钮移到这里
         mi_stash = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "展开收纳区", "toggleStash:", "")
+            tr("ci.stash"), "toggleStash:", "")
         mi_about = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "关于 PeaseBar", "showAbout:", "")
+            tr("ci.about"), "showAbout:", "")
         mi_perms = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "检查辅助功能权限", "checkPermission:", "")
+            tr("ci.ax"), "checkPermission:", "")
         mi_quit = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "退出 PeaseBar", "terminate:", "q")
+            tr("ci.quit"), "terminate:", "q")
         for mi in (mi_settings, mi_stash, mi_about, mi_perms, mi_quit):
             # 必须 setTarget_：nil-targeted action 沿响应链查找，而 ControlItem
             # 不在响应链里，点击菜单项后 action 会落空（实测 T14 首败根因）
@@ -83,6 +84,9 @@ class ControlItem(NSObject):
             self.menu.addItem_(mi)
         self.menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 2)
         self.mi_stash = mi_stash  # 右键弹前按实时状态刷新标题，留强引用
+        # 菜单项按序存下来：切语言后 refresh_menu_texts 能逐条换新文案
+        self._menu_items = {"settings": mi_settings, "stash": mi_stash,
+                            "about": mi_about, "ax": mi_perms, "quit": mi_quit}
 
         # 按下即回调（左右键都进 on_click，再按事件类型分发）
         button.setTarget_(self)
@@ -144,14 +148,33 @@ class ControlItem(NSObject):
         else:
             print("[PeaseBar] 警告：主点击回调未接线")
 
-    def _popup_menu(self):
-        """右键弹菜单：临时挂 NSMenu 到状态项，借 performClick 触发弹层。
+    def refresh_menu_texts(self):
+        """按当前语言刷新菜单文案（设置窗切语言后菜单不再留旧语言）。"""
+        if getattr(self, "menu", None) is None:
+            return
+        items = getattr(self, "_menu_items", {})
+        for key, title_key in (("settings", "ci.settings"), ("about", "ci.about"),
+                               ("ax", "ci.ax"), ("quit", "ci.quit")):
+            mi = items.get(key)
+            if mi is not None:
+                mi.setTitle_(tr(title_key))
+        self._sync_stash_title()
+        if self.item is not None and self.item.button() is not None:
+            self.item.button().setToolTip_(tr("ci.tip"))
 
-        弹前按实时状态刷新「展开/收起收纳区」标题（一次 AX 往返，只在右键时发生）。"""
+    @objc.python_method
+    def _sync_stash_title(self):
+        """「展开/收起收纳区」按实时状态定标题（一次 AX 往返）。"""
         from peasebar import inventory
         if getattr(self, "mi_stash", None) is not None:
             self.mi_stash.setTitle_(
-                "收起收纳区" if inventory.stash_revealed() else "展开收纳区")
+                tr("ci.unstash") if inventory.stash_revealed() else tr("ci.stash"))
+
+    def _popup_menu(self):
+        """右键弹菜单：临时挂 NSMenu 到状态项，借 performClick 触发弹层。
+
+        弹前先按当前语言刷一遍菜单文案（切语言不重启也即时准）。"""
+        self.refresh_menu_texts()
         self.item.setMenu_(self.menu)
         try:
             self.item.button().performClick_(None)
@@ -179,11 +202,7 @@ class ControlItem(NSObject):
         from AppKit import NSAlert
         alert = NSAlert.alloc().init()
         alert.setMessageText_("PeaseBar")
-        alert.setInformativeText_(
-            "macOS 菜单栏图标管理器\n"
-            "被刘海遮挡、被系统收纳的图标，都能从这里一键找回。\n"
-            f"版本 {peasebar.__version__}（开发态）"
-        )
+        alert.setInformativeText_(tr("ci.about.body", v=peasebar.__version__))
         alert.runModal()
 
     def checkPermission_(self, sender):
@@ -191,7 +210,7 @@ class ControlItem(NSObject):
         print("[PeaseBar] 菜单动作 checkPermission 触发")
         from peasebar.app import ensure_accessibility, _alert
         if ensure_accessibility(interactive=True):
-            _alert("PeaseBar 权限正常", "辅助功能权限已授予，功能完整可用。")
+            _alert(tr("ci.perm.ok.title"), tr("ci.perm.ok.body"))
 
     def terminate_(self, sender):
         """退出应用（交给 NSApp 处理）。"""

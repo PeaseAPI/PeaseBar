@@ -32,6 +32,17 @@ SECTION_LABELS = {
 # 区的上下顺序（⌥↑/⌥↓ 换区、↑/↓ 跳选都按这个序列走）
 SECTION_ORDER = (SECTION_VISIBLE, SECTION_HIDDEN, SECTION_ALWAYS_HIDDEN)
 
+# 区 → i18n 键（2026-11-24 多语言：UI 上的区名一律走 section_label，
+# SECTION_LABELS 保留给日志输出——日志不用翻译，中文一贯到底）
+_SECTION_KEYS = {SECTION_VISIBLE: "sec.visible", SECTION_HIDDEN: "sec.hidden",
+                 SECTION_ALWAYS_HIDDEN: "sec.always"}
+
+
+def section_label(sec):
+    """区的界面显示名（随语言切换）；i18n 延迟导入避免模块级循环依赖。"""
+    from peasebar import i18n
+    return i18n.t(_SECTION_KEYS.get(sec, sec))
+
 # 控制图标预设（菜单栏触发钮可定义，用户定调：比如三个点之类）：
 # (SF Symbol 名, 设置页显示名)；存 key，渲染端找不到符号时退回文字「···」
 CONTROL_ICONS = (
@@ -41,6 +52,17 @@ CONTROL_ICONS = (
     ("command", "命令键"),
     ("square.grid.2x2", "四格"),
 )
+
+# 触发图标预设的界面显示名走 i18n（表里的中文名只当日志/回退用）
+_CONTROL_ICON_KEYS = {"ellipsis.circle.fill": "ci.icon.circle",
+                      "ellipsis": "ci.icon.ellipsis", "eye": "ci.icon.eye",
+                      "command": "ci.icon.command", "square.grid.2x2": "ci.icon.grid"}
+
+
+def control_icon_label(symbol):
+    """触发图标预设的界面显示名（随语言切换）。"""
+    from peasebar import i18n
+    return i18n.t(_CONTROL_ICON_KEYS.get(symbol, symbol))
 
 DEFAULT_CONFIG = {"sections": {}, "order": [], "panel_timeout": 8,
                   "control_icon": CONTROL_ICONS[0][0],
@@ -130,6 +152,9 @@ def load_config(path=None):
     # prefs：只认 dict，逐项原样收进（值类型由 get_pref 的默认值兜底，脏值不至崩）
     if isinstance(data.get("prefs"), dict):
         cfg["prefs"] = dict(data["prefs"])
+    # lang（i18n 界面语言）：合法性由 i18n.current_lang 判，这里只认字符串原样收
+    if isinstance(data.get("lang"), str):
+        cfg["lang"] = data["lang"]
     return cfg
 
 

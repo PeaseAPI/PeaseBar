@@ -57,6 +57,7 @@ import threading
 import time
 
 from peasebar import capture, ccnative, inventory, sections, trigger
+from peasebar.i18n import t as tr
 
 # 面板几何：单张干净网格（Thaw 式），紧凑版参数（用户定调：一排多放几枚、
 # 别稀稀拉拉）——格子只比菜单栏图标本身略大，间隙压到 2pt。
@@ -124,6 +125,11 @@ def native_hidden_items(items, cfg):
             owner_bundle_id=bid, owner_pid=-1, key_part=part,
             stashed=False, notched=False, frame=None, el=None,
             is_stash_button=False, native_hidden=True))
+    # 按配置 order 排：布局页拖完的顺序要立刻在面板生效（2026-11-25 用户反馈
+    # 「顺序没变」的真根因——伪项原先按 sections 字典插入序输出，而拖动写的
+    # 是 order 字段，两边永不相干）。order 里没有的键按原有插入序垫底。
+    order = {k: i for i, k in enumerate(cfg.get("order") or [])}
+    out.sort(key=lambda m: order.get(sections.item_key(m), len(order)))
     return out
 
 
@@ -391,7 +397,7 @@ class RescuePanel(NSObject):
         content.addSubview_(blur)
     
         if not group:
-            empty = NSTextField.labelWithString_("没有隐藏的图标")
+            empty = NSTextField.labelWithString_(tr("panel.empty"))
             empty.setFont_(NSFont.systemFontOfSize_(11))
             empty.setTextColor_(NSColor.secondaryLabelColor())
             empty.setAlignment_(1)  # 居中
@@ -438,14 +444,14 @@ class RescuePanel(NSObject):
         btn.setTag_(index)     # 必须是全量 items 下标（onIconClick_ 按 tag 取）
         btn.setTarget_(self)
         btn.setAction_("onIconClick:")
-        owner = "系统" if item.owner_app == "系统" else item.owner_app
-        tip = f"{item.label}\n{owner}（{item.owner_bundle_id}）\n左键：触发它（弹原生菜单/默认动作）"
+        owner = tr("common.system") if item.owner_app == "系统" else item.owner_app
+        tip = tr("panel.tip.base", label=item.label, owner=owner, bid=item.owner_bundle_id)
         if item.stashed:
-            tip += "\n被系统收纳：坐标不可信，走 AX 直接投递"
+            tip += tr("panel.tip.stashed")
         if item.notched:
-            tip += "\n▨ 被刘海遮挡"
+            tip += tr("panel.tip.notched")
         if getattr(item, "native_hidden", False):
-            tip += "\n原生隐藏：点按会临时显回并触发，稍后自动收回"
+            tip += tr("panel.tip.native")
         btn.setToolTip_(tip)
         btn.setAccessibilityLabel_(item.label)
         # 身份标识用配置键（与设置窗口同一套）：图标名是活文本，不能当身份用

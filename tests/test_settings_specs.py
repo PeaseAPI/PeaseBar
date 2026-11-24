@@ -37,28 +37,28 @@ def _iter_rows(block):
 class TestSidebarStructure(unittest.TestCase):
     def test_pages_are_real_eight(self):
         """只留真实生效的页（外观/工具栏/显示器/模块四页后端从未实现，已摘）。"""
-        keys = [k for k, _l, _s in settings.PAGES]
+        keys = [k for k, _l, _s in settings.pages()]
         self.assertEqual(keys, ["general", "layout", "visibility", "shortcuts",
                                 "profiles", "privacy", "troubleshoot", "about"])
 
     def test_sidebar_groups_cover_every_page(self):
-        listed = [k for _g, keys in settings._SIDEBAR_GROUPS for k in keys]
-        self.assertEqual(sorted(listed), sorted(k for k, _l, _s in settings.PAGES))
+        listed = [k for _g, keys in settings._sidebar_groups() for k in keys]
+        self.assertEqual(sorted(listed), sorted(k for k, _l, _s in settings.pages()))
 
     def test_sidebar_group_labels_chinese(self):
-        labels = [g for g, _k in settings._SIDEBAR_GROUPS]
+        labels = [g for g, _k in settings._sidebar_groups()]
         self.assertEqual(labels, ["", "管理"])
 
     def test_ui_strings_no_english(self):
         """用户定调全中文：页名/副标题/分组标题不得再出现英文文案（品牌名除外）。"""
         import re
         allowed = re.compile(r"^(PeaseBar[\u4e00-\u9fff（）/、， ]*)$")
-        for _k, label, sub in settings.PAGES:
+        for _k, label, sub in settings.pages():
             if not allowed.match(label):
                 self.assertIsNone(re.search(r"[A-Za-z]{2,}", label), f"页名仍有英文：{label}")
             if not allowed.match(sub):
                 self.assertIsNone(re.search(r"[A-Za-z]{2,}", sub), f"副标题仍有英文：{sub}")
-        for g, _keys in settings._SIDEBAR_GROUPS:
+        for g, _keys in settings._sidebar_groups():
             if g:
                 self.assertIsNone(re.search(r"[A-Za-z]{2,}", g), f"分组标题仍有英文：{g}")
 
@@ -68,13 +68,13 @@ class TestPageSpecs(unittest.TestCase):
         self.ctrl = _make_controller()
 
     def test_every_static_page_has_spec(self):
-        for key, _label, _sub in settings.PAGES:
+        for key, _label, _sub in settings.pages():
             if key == "layout":
                 continue
             self.assertTrue(hasattr(self.ctrl, "_spec_" + key), f"缺 _spec_{key}")
 
     def test_specs_return_wellformed_blocks(self):
-        for key, _label, _sub in settings.PAGES:
+        for key, _label, _sub in settings.pages():
             if key == "layout":
                 continue
             blocks = getattr(self.ctrl, "_spec_" + key)()

@@ -88,7 +88,8 @@ from ApplicationServices import AXIsProcessTrusted
 
 import ServiceManagement as SM
 
-from peasebar import capture, ccnative, inventory, layout_table, menubar_drag, panel, sections
+from peasebar import capture, ccnative, i18n, inventory, layout_table, menubar_drag, panel, sections
+from peasebar.i18n import t as tr
 
 # 方向键的 keyCode（AppKit 的 NS*ArrowFunctionKey 取值，写数字谁也看不懂）
 KEY_LEFT, KEY_RIGHT, KEY_DOWN, KEY_UP = 123, 124, 125, 126
@@ -119,29 +120,31 @@ BOTTOM_ROWS = 4
 # 撤销栈深度（一次编辑只存两个小列表，50 步足够找回手滑，也不会吃掉多少内存）
 UNDO_LIMIT = 50
 
-# 区 → 移区菜单/按钮文案（三区语义对齐 Thaw：菜单栏显示 / 弹窗显示 / 永久隐藏）
-_MOVE_TITLES = {
-    sections.SECTION_VISIBLE: "回到菜单栏显示",
-    sections.SECTION_HIDDEN: "移到弹窗显示",
-    sections.SECTION_ALWAYS_HIDDEN: "移到永久隐藏",
-}
+# 区 → 移区菜单/按钮文案（三区语义对齐 Thaw：菜单栏显示 / 弹窗显示 / 永久隐藏）。
+# 2026-11-24 多语言：模块级常量在 import 时求值会冻结语言，文案表一律函数化，
+# 每次构建界面时现取（t() 带进程内语言缓存，开销可忽略）。
+def _move_titles():
+    return {
+        sections.SECTION_VISIBLE: tr("move.visible"),
+        sections.SECTION_HIDDEN: tr("move.hidden"),
+        sections.SECTION_ALWAYS_HIDDEN: tr("move.always"),
+    }
 _SECTION_ORDER = sections.SECTION_ORDER
 _TAG_SECTIONS = {0: sections.SECTION_VISIBLE, 1: sections.SECTION_HIDDEN,
                  2: sections.SECTION_ALWAYS_HIDDEN}
 
-# 侧栏页签（key, 显示名, 副标题）；key 也写进侧栏按钮的 AXIdentifier 供取证认页。
-# 侧栏页签（key, 显示名, 副标题）；key 也写进侧栏按钮的 AXIdentifier 供取证认页。
+# 侧栏页签键（显示名/副标题进 i18n 表，pages() 运行时现取）；key 也写进侧栏
+# 按钮的 AXIdentifier 供取证认页。
 # 只留真实生效的功能页（2026-11-24 收缩：外观/工具栏/显示器/模块四页的后端从未
 # 实现，摆着只会让用户拨了没反应——宁少勿假）；visibility 页改为展示真实
 # 隐藏通道状态与自动核对开关，about 页不再提 Thaw（代码已全部自有，仅仿其 UI 观感）。
-PAGES = (("general", "通用", "开机自启、面板与控制图标"),
-         ("layout", "布局", "菜单栏显示、弹窗显示与永久隐藏"),
-         ("visibility", "显隐规则", "隐藏通道状态与自动核对"),
-         ("shortcuts", "快捷键", "内置键盘快捷方式速查"),
-         ("profiles", "配置管理", "已保存的布局方案"),
-         ("privacy", "隐私", "权限与数据边界"),
-         ("troubleshoot", "疑难解答", "日志、修复与重置"),
-         ("about", "关于", "版本与源码"))
+PAGE_KEYS = ("general", "layout", "visibility", "shortcuts",
+             "profiles", "privacy", "troubleshoot", "about")
+
+
+def pages():
+    """侧栏页签 (key, 显示名, 副标题)：随语言切换现取，不在 import 时冻结。"""
+    return tuple((k, tr(f"page.{k}"), tr(f"page.{k}.sub")) for k in PAGE_KEYS)
 
 # 侧栏 SF Symbol 图标（取不到符号时优雅降级为纯文字）
 _PAGE_ICONS = {"general": "gearshape", "layout": "square.grid.2x2",
@@ -149,19 +152,21 @@ _PAGE_ICONS = {"general": "gearshape", "layout": "square.grid.2x2",
                "profiles": "square.stack.3d.up", "privacy": "lock.shield",
                "troubleshoot": "wrench.and.screwdriver", "about": "info.circle"}
 # 侧栏分组：首组无小标题（_build_sidebar 见空串就不画小标题行），「管理」收工具性页面
-_SIDEBAR_GROUPS = (("", ("general", "layout", "visibility", "shortcuts")),
-                   ("管理", ("profiles", "privacy", "troubleshoot", "about")))
+def _sidebar_groups():
+    return (("", ("general", "layout", "visibility", "shortcuts")),
+            (tr("group.manage"), ("profiles", "privacy", "troubleshoot", "about")))
 
 # 拖拽：按下后移动多少点算「拖」（小于它当点击，T9 手感与系统一致）
 DRAG_SLOP = 6.0
 # 图标条换行时每格占高（格子高 + 行间距）
 BAR_ROW_H = 38 + 4
-# 布局页底部选项开关（存配置，重启后照旧）
-_OPT_SWITCHES = (
-    ("use_captured", "格子用菜单栏真实像素", "开：格子跟栏上一模一样，但会把微信未读数等实时数字拍进格子；默认关，用 App 图标保持干净"),
-    ("bar_wrap", "图标条放不下时换行", "开：整区图标一次看全（区会变高）；关：单行横向滚动"),
-    ("real_bar", "同步到真实菜单栏", "开：换区/改序时用合成 ⌘-拖真的隐显/重排系统图标（仅第三方，苹果系统项自动跳过）"),
-)
+# 布局页底部选项开关（存配置，重启后照旧；文案随语言现取）
+def _opt_switches():
+    return (
+        ("use_captured", tr("opt.use_captured"), tr("opt.use_captured.tip")),
+        ("bar_wrap", tr("opt.bar_wrap"), tr("opt.bar_wrap.tip")),
+        ("real_bar", tr("opt.real_bar"), tr("opt.real_bar.tip")),
+    )
 
 LOG_PATH = os.path.expanduser("~/Library/Logs/PeaseBar.log")
 REPO_URL = "https://github.com/PeaseAPI/PeaseBar"
@@ -204,16 +209,17 @@ def _row_status(title, ok, text, help=None):
     return {"title": title, "help": help, "ctl": ("status", ok, text)}
 
 
-def _row_launch(title="登录时启动 PeaseBar", help=None):
-    return {"title": title, "help": help, "ctl": ("launch",)}
+def _row_launch(title=None, help=None):
+    # 默认标题在调用时现取（写作默认参数会在 import 时冻结语言）
+    return {"title": title or tr("launch.title"), "help": help, "ctl": ("launch",)}
 
 
-def _row_timeout(title="面板自动收回（秒，0=不超时）", help=None):
-    return {"title": title, "help": help, "ctl": ("timeout",)}
+def _row_timeout(title=None, help=None):
+    return {"title": title or tr("timeout.title"), "help": help, "ctl": ("timeout",)}
 
 
-def _row_cicon(title="PeaseBar 图标", help=None):
-    return {"title": title, "help": help, "ctl": ("control_icon",)}
+def _row_cicon(title=None, help=None):
+    return {"title": title or tr("cicon.caption"), "help": help, "ctl": ("control_icon",)}
 
 
 def _block(heading, rows):
@@ -255,7 +261,7 @@ def _sidebar_symbol(name, label):
 def _chevron_symbol():
     """区标题行右侧那个「⌄」（更多排序）：拿不到 SF 符号时退成文字，不阻塞主流程。"""
     sym = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-        "chevron.down", "更多排序")
+        "chevron.down", tr("layout.sort.more"))
     if sym is None:
         return None
     sym.setSize_(NSMakeSize(10, 10))
@@ -271,7 +277,7 @@ def _sort_menu(ctrl, sec):
     menu = NSMenu.alloc().init()
     menu.setAutoenablesItems_(False)
     idx = sections.SECTION_ORDER.index(sec)
-    for kind, name in ((1, "反转本区顺序"), (2, "恢复默认顺序")):
+    for kind, name in ((1, tr("layout.sort.reverse")), (2, tr("layout.sort.resetorder"))):
         mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             name, "onSortMore:", "")
         mi.setTarget_(ctrl)
@@ -280,15 +286,16 @@ def _sort_menu(ctrl, sec):
     return menu
 
 
-# SMAppService 状态码 → (开关是否显示为已开, 给用户的说明)
-_LOGIN_STATUS = {
-    int(SM.SMAppServiceStatusNotRegistered): (False, "未开启：登录后不会自动启动"),
-    int(SM.SMAppServiceStatusEnabled): (True, "已开启：登录时自动启动（系统已登记）"),
-    int(SM.SMAppServiceStatusRequiresApproval): (
-        True, "已登记，但需在「系统设置 → 通用 → 登录项」中允许"),
-    int(SM.SMAppServiceStatusNotFound): (
-        False, "系统未登记本 App 的启动服务（以开发方式运行时属正常现象）"),
-}
+# SMAppService 状态码 → (开关是否显示为已开, 给用户的说明)（文案随语言现取）
+def _login_status():
+    return {
+        int(SM.SMAppServiceStatusNotRegistered): (False, tr("login.off")),
+        int(SM.SMAppServiceStatusEnabled): (True, tr("login.on")),
+        int(SM.SMAppServiceStatusRequiresApproval): (
+            True, tr("login.approval")),
+        int(SM.SMAppServiceStatusNotFound): (
+            False, tr("login.notfound")),
+    }
 
 
 class GridView(NSView):
@@ -520,9 +527,29 @@ class SettingsController(NSObject):
         self.real_bar = True      # 布局页选项：换区/改序镜像到真实菜单栏（合成 ⌘-拖）
         self.buckets = {}     # 最近一次 _rebuild 的分桶结果（键盘编辑读它，不二次盘点）
         self._undo = []       # 撤销栈：每格是 {sections, order} 快照
+        # 布局草稿（暂存+应用模式，2026-11-24 用户定调「编辑完点应用立刻生效」）：
+        # 首次编辑把盘上配置拍成工作副本，之后所有编辑都落在副本上；点「应用改动」
+        # 才写盘并一次性贴回真实菜单栏。None = 没有未应用改动。
+        self._pending_cfg = None
+        self._applying = False  # 应用流程后台部分进行中（防重入 + 按钮转忙）
         self.on_changed = None  # 分区/超时变更后回调（app 用来刷新面板）
         self.on_control_icon_changed = None  # 触发图标预设变更后回调（app 接 ControlItem.refresh_icon）
         return self
+
+    # ---------- 布局草稿（暂存+应用模式，2026-11-24 用户定调） ----------
+
+    @objc.python_method
+    def _layout_cfg(self):
+        """布局编辑的工作配置：有草稿用草稿副本，否则读盘（_rebuild/盘点同源）。"""
+        if getattr(self, "_pending_cfg", None) is not None:
+            return self._pending_cfg
+        return sections.load_config()
+
+    @objc.python_method
+    def _begin_pending(self):
+        """首次编辑把盘上配置拍成草稿副本；之后所有编辑都落在副本上，应用才落盘。"""
+        if getattr(self, "_pending_cfg", None) is None:
+            self._pending_cfg = sections.load_config()
 
     # ---------- 打开与刷新 ----------
 
@@ -538,7 +565,7 @@ class SettingsController(NSObject):
         # 取证钩子：PEASEBAR_OPEN_PAGE=<页键> 直接开到指定页——真机截页时
         # 免去辅助功能权限（CGEvent/AX 点击在沙箱里都会被系统静默丢弃）
         forced = os.environ.get("PEASEBAR_OPEN_PAGE", "")
-        if forced and any(k == forced for k, _l, _s in PAGES):
+        if forced and any(k == forced for k, _l, _s in pages()):
             self.page = forced
         self._rebuild()
         self.window.makeKeyAndOrderFront_(None)
@@ -562,7 +589,7 @@ class SettingsController(NSObject):
         # 暴露它）：补伪项进布局页，否则「弹窗显示」区在设置里是空的，用户想
         # 调整已藏图标（显回/移到永久隐藏）根本找不到入口（与救援面板同口径）
         self.items = self.items + panel.native_hidden_items(
-            self.items, sections.load_config())
+            self.items, self._layout_cfg())  # 草稿在编辑期也跟着布局页显示
         self.images, self.no_permission = capture.capture_icons(self.items)
         # 选中项可能已消失（App 退出），丢掉悬空引用
         if self.selected_key not in self.images:
@@ -584,15 +611,13 @@ class SettingsController(NSObject):
         """
         hints = []
         if self.stashed_count:
-            hints.append(f"有 {self.stashed_count} 项被系统收纳：菜单栏挤不下，"
-                         f"可在右键菜单「展开收纳区」找回，或选中后改为弹窗显示。")
+            hints.append(tr("hint.stashed", n=self.stashed_count))
         if self.notched_count:
-            hints.append(f"有 {self.notched_count} 项被刘海遮挡：够不着，可改为弹窗显示腾位置。")
+            hints.append(tr("hint.notched", n=self.notched_count))
         # 有权限却一张真像素都没截到 = 菜单栏此刻没画出来（全屏 App 遮住）。
         # 不说清楚的话，用户只会看到一屏「不像本人」的 App 图标又找不到原因（T76）。
         if not self.stats["cropped"] and self.stats["permission"] and not self.stats["bar_drawn"]:
-            hints.append("菜单栏当前没画出图标（多半被全屏应用遮住）：格子暂用 App 图标/系统符号，"
-                         "退出全屏后点「重新抓取图标」恢复真实像素。")
+            hints.append(tr("hint.nobar"))
         return hints
 
     # ---------- 窗口骨架 ----------
@@ -612,6 +637,11 @@ class SettingsController(NSObject):
 
     def windowWillClose_(self, notification):
         self._save_timeout()
+        # 有未应用的布局草稿：关窗视为「确认应用」（半路关窗把草稿静默丢掉更伤——
+        # 落盘+后台生效，与点「应用改动」按钮走同一条链路）
+        if getattr(self, "_pending_cfg", None) is not None and not self._applying:
+            print("[PeaseBar] 设置：关窗时有未应用改动，自动应用")
+            self.onApplyLayout_(None)
 
     def _page_height(self, page, buckets):
         """各页内容高度：布局页随分区数变（每区只有一行图标条），静态页定高。"""
@@ -633,7 +663,7 @@ class SettingsController(NSObject):
         每页内容都是手排视图（与 4d 同源），切页/编辑都整窗重画一遍，
         不留旧控件残影，也就不需要页间显隐管理。
         """
-        cfg = sections.load_config()
+        cfg = self._layout_cfg()  # 有布局草稿时按草稿分桶（所见即所得），否则读盘
         buckets = sections.plan_sections(self.items, cfg)
         self.buckets = buckets  # 键盘编辑（⌥方向键/前移后移）就在这份分桶上动手
         # 三个布局选项同步成标记：格子宽/高、取图、真实菜单栏镜像都看它，一处读盘多处用
@@ -664,8 +694,10 @@ class SettingsController(NSObject):
         page_view.setFrameOrigin_(NSMakePoint(SIDEBAR_W, 0))
         container.addSubview_(page_view)
 
-        label = next(l for k, l, _ in PAGES if k == page)
-        self.window.setTitle_(f"PeaseBar 设置 · {label}")  # 前缀「PeaseBar 设置」不变，找窗判据不动
+        label = next(l for k, l, _ in pages() if k == page)
+        # 有未应用草稿时标题挂点提醒（前缀「PeaseBar 设置」不动，找窗判据不变）
+        dirty = " ●" if getattr(self, "_pending_cfg", None) is not None else ""
+        self.window.setTitle_(f"PeaseBar 设置 · {label}{dirty}")  # 前缀「PeaseBar 设置」不变，找窗判据不动
         self.window.setContentSize_(NSMakeSize(WIN_WIDTH, height))
         self.window.setContentView_(container)
         # 重建后旧 firstResponder 随内容视图丢弃：布局页要把焦点抢回页视图，方向键才不落空
@@ -687,9 +719,9 @@ class SettingsController(NSObject):
         side.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
         side.setState_(1)
         container.addSubview_(side)
-        names = {k: name for k, name, _sub in PAGES}
+        names = {k: name for k, name, _sub in pages()}
         y = height - 14
-        for group, keys in _SIDEBAR_GROUPS:
+        for group, keys in _sidebar_groups():
             if group:  # 空串标题的首组不画小标题行（对标 Thaw：顶部页签前无分组名）
                 cap = NSTextField.labelWithString_(group)
                 cap.setFont_(NSFont.systemFontOfSize_(11))
@@ -734,7 +766,7 @@ class SettingsController(NSObject):
         由通用块渲染引擎按 _spec_<page>() 返回的声明式块列表 1:1 排（对标 Thaw 的 ScrollArea）。
         """
         view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, CONTENT_W, height))
-        label, sub = next((l, s) for k, l, s in PAGES if k == page)
+        label, sub = next((l, s) for k, l, s in pages() if k == page)
         t = NSTextField.labelWithString_(label)
         t.setFont_(NSFont.boldSystemFontOfSize_(15))
         t.setFrame_(NSMakeRect(EDGE, height - 34, CONTENT_W - 2 * EDGE, 24))
@@ -768,8 +800,7 @@ class SettingsController(NSObject):
         content.settings_ctrl = self  # 方向键转发给控制器（不起 controller 这个名字，避开与 AppKit 同名属性撞车）
         content.drop_bars = []        # 拖拽落点：[(胶囊在页视图坐标下的矩形, 条内容视图), …]
 
-        title = NSTextField.labelWithString_(
-            "菜单栏布局 · 单击选中，拖动改位置，⌥←/→ 改顺序")
+        title = NSTextField.labelWithString_(tr("layout.title"))
         title.setFont_(NSFont.boldSystemFontOfSize_(13))
         title.setFrame_(NSMakeRect(EDGE, height - HEADER_H, CONTENT_W - 2 * EDGE, ROW_H))
         content.addSubview_(title)
@@ -780,7 +811,7 @@ class SettingsController(NSObject):
             if not group:
                 continue
             label = NSTextField.labelWithString_(
-                f"{sections.SECTION_LABELS[sec]} · {len(group)} 项")
+                tr("layout.count", sec=sections.section_label(sec), n=len(group)))
             label.setFont_(NSFont.boldSystemFontOfSize_(11))
             label.setTextColor_(NSColor.secondaryLabelColor())
             label.setFrame_(NSMakeRect(EDGE, top - SECTION_H,
@@ -790,7 +821,7 @@ class SettingsController(NSObject):
                 # Thaw 每区的「Sort by Name」：点一下把该区按名字典序写进 order（⌘Z 可撤）
                 sb = NSButton.alloc().initWithFrame_(
                     NSMakeRect(CONTENT_W - EDGE - 92, top - SECTION_H + 1, 92, 20))
-                sb.setTitle_("按名称排序")
+                sb.setTitle_(tr("layout.sort.byname"))
                 sb.setBezelStyle_(0)
                 sb.setFont_(NSFont.systemFontOfSize_(10))
                 sb.setTarget_(self)
@@ -805,7 +836,8 @@ class SettingsController(NSObject):
                 mb.setImage_(_chevron_symbol())
                 mb.setImagePosition_(NSImageOnly)
                 mb.setMenu_(_sort_menu(self, sec))
-                mb.setAccessibilityLabel_(f"{sections.SECTION_LABELS[sec]}的更多排序")
+                mb.setAccessibilityLabel_(
+                    tr("layout.sort.more.ax", sec=sections.section_label(sec)))
                 mb.setAccessibilityIdentifier_("sort-menu-" + sec)
                 content.addSubview_(mb)
             top -= SECTION_H
@@ -820,9 +852,7 @@ class SettingsController(NSObject):
 
         # 拖拽提示（对标 Thaw LayoutBarsSection 的 dragHint，翻成中文）：
         # 新界面得告诉用户「能拖」，不然没人知道鼠标按住图标可以动
-        hint = NSTextField.labelWithString_(
-            "把图标在区之间拖动即可换区，条内拖动改顺序；"
-            "也可用 ⌥←/→ 改顺序、⌥↑/↓ 换区，⌘Z 撤销。")
+        hint = NSTextField.labelWithString_(tr("layout.hint.drag"))
         hint.setFont_(NSFont.systemFontOfSize_(11))
         hint.setTextColor_(NSColor.secondaryLabelColor())
         hint.setFrame_(NSMakeRect(EDGE, top - ROW_H, CONTENT_W - 2 * EDGE, ROW_H))
@@ -850,9 +880,10 @@ class SettingsController(NSObject):
 
         # 移区动作：作用于当前选中项（主路径，不依赖菜单跟踪）
         x = EDGE
+        move_titles = _move_titles()
         for idx, sec in enumerate(_SECTION_ORDER):
             btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, top - ROW_H, 116, ROW_H))
-            btn.setTitle_(_MOVE_TITLES[sec])
+            btn.setTitle_(move_titles[sec])
             btn.setBezelStyle_(0)
             btn.setFont_(NSFont.systemFontOfSize_(11))
             btn.setEnabled_(False)
@@ -866,7 +897,7 @@ class SettingsController(NSObject):
 
         # 顺序动作（同区内）+ 撤销：与上面的移区行同构，鼠标也能完成键盘那套
         x = EDGE
-        for label, delta in (("← 前移", -1), ("后移 →", 1)):
+        for label, delta in ((tr("layout.prev"), -1), (tr("layout.next"), 1)):
             btn = NSButton.alloc().initWithFrame_(NSMakeRect(x, top - ROW_H, 90, ROW_H))
             btn.setTitle_(label)
             btn.setBezelStyle_(0)
@@ -879,16 +910,16 @@ class SettingsController(NSObject):
             self.order_buttons.append(btn)
             x += 96
         btn_undo = NSButton.alloc().initWithFrame_(NSMakeRect(x, top - ROW_H, 76, ROW_H))
-        btn_undo.setTitle_("撤销")
+        btn_undo.setTitle_(tr("layout.undo"))
         btn_undo.setBezelStyle_(0)
         btn_undo.setFont_(NSFont.systemFontOfSize_(11))
         btn_undo.setEnabled_(bool(self._undo))
         btn_undo.setTarget_(self)
         btn_undo.setAction_("onUndo")  # onUndo 是零参方法，选择子不带冒号
         content.addSubview_(btn_undo)
-        btn_undo.setToolTip_("回上一步分区/顺序改动（⌘Z）")
+        btn_undo.setToolTip_(tr("layout.undo.tip"))
         self.btn_undo = btn_undo
-        kb = NSTextField.labelWithString_("拖动改位置 · ⌥←/→ 改顺序 · ⌥↑/↓ 换区 · ⌘Z 撤销")
+        kb = NSTextField.labelWithString_(tr("layout.kb"))
         kb.setFont_(NSFont.systemFontOfSize_(10))
         kb.setTextColor_(NSColor.tertiaryLabelColor())
         kb.setAlignment_(2)  # 右对齐
@@ -899,13 +930,13 @@ class SettingsController(NSObject):
 
         # 选项卡片（对标 Thaw 布局页的 Options）：能真的写进配置、影响渲染的开关才进来
         card = self._mk_card(content, top, OPT_CARD_H)
-        cap = NSTextField.labelWithString_("选项")
+        cap = NSTextField.labelWithString_(tr("layout.opt.caption"))
         cap.setFont_(NSFont.boldSystemFontOfSize_(11))
         cap.setTextColor_(NSColor.secondaryLabelColor())
         cap.setFrame_(NSMakeRect(14, OPT_CARD_H - 24, 120, 16))
         card.addSubview_(cap)
         self.opt_switches = []
-        for i, (flag, name, tip) in enumerate(_OPT_SWITCHES):
+        for i, (flag, name, tip) in enumerate(_opt_switches()):
             row_y = OPT_CARD_H - 24 - (i + 1) * 34 + 6
             lab = NSTextField.labelWithString_(name)
             lab.setFont_(NSFont.systemFontOfSize_(12))
@@ -931,12 +962,12 @@ class SettingsController(NSObject):
         # 重置布局（Thaw Reset Layout）：确认后才动，动完留一步可撤销
         btn_reset = NSButton.alloc().initWithFrame_(
             NSMakeRect(EDGE, top - ROW_H, 96, ROW_H))
-        btn_reset.setTitle_("重置布局")
+        btn_reset.setTitle_(tr("layout.reset"))
         btn_reset.setBezelStyle_(0)
         btn_reset.setFont_(NSFont.systemFontOfSize_(11))
         btn_reset.setTarget_(self)
         btn_reset.setAction_("onResetLayout:")
-        btn_reset.setToolTip_("把弹窗显示/永久隐藏的图标全部带回菜单栏，并清空自定义顺序")
+        btn_reset.setToolTip_(tr("layout.reset.tip"))
         content.addSubview_(btn_reset)
 
         # 授权布局表（对标 Thaw「Grant Access to the Menu Bar Layout Table」）：
@@ -948,15 +979,30 @@ class SettingsController(NSObject):
             granted = False
         btn_grant = NSButton.alloc().initWithFrame_(
             NSMakeRect(EDGE + 96 + 8, top - ROW_H, 132, ROW_H))
-        btn_grant.setTitle_("布局表已授权 ✓" if granted else "授权布局表…")
+        btn_grant.setTitle_(tr("layout.grant.ok") if granted else tr("layout.grant"))
         btn_grant.setBezelStyle_(0)
         btn_grant.setFont_(NSFont.systemFontOfSize_(11))
         btn_grant.setTarget_(self)
         btn_grant.setAction_("onGrantLayoutTable:")
-        btn_grant.setToolTip_(
-            "逐枚隐藏改为直写系统菜单栏布局权重表（可逆、不重启、无数量限制）；"
-            "需你亲自选中 group.com.apple.controlcenter.plist 授权这一个文件的访问。")
+        btn_grant.setToolTip_(tr("layout.grant.tip"))
         content.addSubview_(btn_grant)
+
+        # 「应用改动」（暂存+应用模式的核心按钮）：布局页所有编辑都是草稿，
+        # 点这里才写盘并一次性贴回真实菜单栏；有草稿时窗口标题挂点提醒
+        btn_apply = NSButton.alloc().initWithFrame_(
+            NSMakeRect(CONTENT_W - EDGE - 150, top - ROW_H, 150, ROW_H))
+        btn_apply.setTitle_(tr("layout.applying") if getattr(self, "_applying", False)
+                           else tr("layout.apply"))
+        btn_apply.setBezelStyle_(0)
+        btn_apply.setFont_(NSFont.boldSystemFontOfSize_(11))
+        btn_apply.setEnabled_(getattr(self, "_pending_cfg", None) is not None
+                              and not getattr(self, "_applying", False))
+        btn_apply.setTarget_(self)
+        btn_apply.setAction_("onApplyLayout:")
+        btn_apply.setToolTip_(tr("layout.apply.tip"))
+        btn_apply.setAccessibilityIdentifier_("apply-layout")
+        content.addSubview_(btn_apply)
+        self.btn_apply = btn_apply
         return content
 
     def onGrantLayoutTable_(self, sender):
@@ -1100,10 +1146,11 @@ class SettingsController(NSObject):
         btn.setTarget_(self)
         btn.setAction_("onTileClick:")
         btn.setMenu_(self._menu_for(item, sec))
-        owner = "系统" if item.owner_app == "系统" else item.owner_app
-        btn.setToolTip_(f"{item.label}\n{owner}（{item.owner_bundle_id}）\n"
-                        f"当前：{sections.SECTION_LABELS[sec]}")
-        btn.setAccessibilityLabel_(f"{item.label}，{sections.SECTION_LABELS[sec]}")
+        owner = tr("common.system") if item.owner_app == "系统" else item.owner_app
+        btn.setToolTip_(tr("layout.tile.tip", label=item.label, owner=owner,
+                           bid=item.owner_bundle_id, sec=sections.section_label(sec)))
+        btn.setAccessibilityLabel_(
+            tr("layout.tile.ax", label=item.label, sec=sections.section_label(sec)))
         # 身份标识用配置键：图标名常常是活文本（温度、网速、Wi‑Fi 格数），
         # 拿名字当身份会在两次读取之间自己变脸
         btn.setAccessibilityIdentifier_(key)
@@ -1116,7 +1163,7 @@ class SettingsController(NSObject):
         menu.setAutoenablesItems_(False)
         for idx, sec in enumerate(_SECTION_ORDER):
             mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                sections.SECTION_LABELS[sec], "onMoveSection:", str(idx + 1))
+                sections.section_label(sec), "onMoveSection:", str(idx + 1))
             mi.setKeyEquivalentModifierMask_(1 << 20)  # NSEventModifierFlagCommand
             mi.setTarget_(self)  # 显式 target，不依赖响应链（T21）
             mi.setState_(1 if sec == cur_sec else 0)
@@ -1126,7 +1173,7 @@ class SettingsController(NSObject):
         # 同区内前移/后移（用户主诉「编辑前后顺序不順」）：右键哪枚就动哪枚，
         # 不要求先单击选中再按 ⌥方向键——多一条低门槛路径
         menu.addItem_(NSMenuItem.separatorItem())
-        for label, delta in (("前移（⌥←）", -1), ("后移（⌥→）", 1)):
+        for label, delta in ((tr("menu.prev"), -1), (tr("menu.next"), 1)):
             mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 label, "onMenuReorder:", "")
             mi.setTarget_(self)
@@ -1213,11 +1260,15 @@ class SettingsController(NSObject):
 
         与 applyMove_to_ 的分工：那个只把项抻到目标区末尾（按钮/⌥↑↓/⌘123 用），
         拖拽多了「落在哪两格之间」这一维；算完新分桶与原桶完全一致就当没动过，
-        不写盘也不记撤销点（否则原地拖一下就把 ⌘Z 堵了一层）。
+        不记撤销点（否则原地拖一下就把 ⌘Z 堵了一层）。
+
+        暂存+应用模式（2026-11-24）：落位只改草稿副本，不写盘不镜像不刷面板——
+        点「应用改动」才一次性生效。
         """
         if not key or target is None:
             return False
-        cfg = sections.load_config()
+        self._begin_pending()
+        cfg = self._pending_cfg
         buckets = sections.plan_sections(self.items, cfg)
         pos = sections.find_pos(buckets, key)
         item = self._item_by_key(key)
@@ -1236,19 +1287,11 @@ class SettingsController(NSObject):
         self._push_undo(cfg)
         sections.set_section(cfg, key, target)
         sections.store_order(cfg, sections.flatten(new))
-        sections.save_config(cfg)
         self.selected_key = key  # 拖完就是选中，底部提示与按钮立即可用
         self.buckets = new
         self._rebuild()
-        if self.on_changed:
-            self.on_changed()
         print(f"[PeaseBar] 设置：拖动 {key} → {sections.SECTION_LABELS[target]} "
-              f"第 {min(index, len(new[target]))} 格")
-        # 拖拽落位也镜像：同区→改序，跨区→隐显（与按钮/键盘同一套真实菜单栏链路）
-        if target != src_sec:
-            self._mirror_section_move(key, target)
-        else:
-            self._mirror_section_reorder(target, key)
+              f"第 {min(index, len(new[target]))} 格（暂存，待应用）")
         return True
 
     # ---------- 布局页选项（真实像素优先 / 图标条换行） ----------
@@ -1259,26 +1302,25 @@ class SettingsController(NSObject):
         return bool(getattr(self, flag, True))
 
     def onOptionSwitch_(self, sender):
-        """选项开关：写盘后整窗重建（换行会改窗高，真实像素会改格子里的图）。"""
+        """布局选项开关：只改草稿副本（同样待「应用改动」才落盘生效）；
+        换行/真实像素会改窗高与格子里的图，重建整窗让草稿所见即所得。"""
         flag = str(sender.representedObject())
         on = sender.state() == 1
-        cfg = sections.load_config()
-        cfg[flag] = on
-        sections.save_config(cfg)
+        self._begin_pending()
+        self._pending_cfg[flag] = on
         if flag == "use_captured" and on and not self.images:
             self._reload_items()  # 开关拉回真实像素但手上没货：补一次取图
-        print(f"[PeaseBar] 设置：选项 {flag} = {on}")
+        print(f"[PeaseBar] 设置：选项 {flag} = {on}（暂存，待应用）")
         self._rebuild()
-        if self.on_changed:
-            self.on_changed()
 
     def onSortMore_(self, sender):
-        """排序菜单项：反转本区 / 恢复默认顺序（都走 order 写入，⌘Z 可撤）。"""
+        """排序菜单项：反转本区 / 恢复默认顺序（都走 order 写入草稿，⌘Z 可撤）。"""
         sec = _TAG_SECTIONS.get(sender.tag() // 10)
         kind = sender.tag() % 10
         if sec is None:
             return
-        cfg = sections.load_config()
+        self._begin_pending()
+        cfg = self._pending_cfg
         buckets = sections.plan_sections(self.items, cfg)
         group = buckets[sec]
         if len(group) < 2:
@@ -1291,11 +1333,10 @@ class SettingsController(NSObject):
             cfg["order"] = [k for k in cfg.get("order") or [] if k not in keys]
             buckets = sections.plan_sections(self.items, cfg)
         sections.store_order(cfg, sections.flatten(buckets))
-        sections.save_config(cfg)
         self.buckets = buckets
         self._rebuild()
-        if self.on_changed:
-            self.on_changed()
+        print(f"[PeaseBar] 设置：{sections.SECTION_LABELS[sec]} "
+              f"{'反转' if kind == 1 else '恢复默认'}（暂存，待应用）")
 
     def onMoveButton_(self, sender):
         """底部「移到 X 区」按钮：作用于当前选中项。"""
@@ -1308,8 +1349,8 @@ class SettingsController(NSObject):
         self.reorderSelected_by_(self.selected_key, sender.tag())
 
     def onUndo(self):
-        """撤销按钮（零参 action）：回上一步分区/顺序改动。"""
-        self._undo_step()
+        """撤销按钮（零参 action）：回上一步分区/顺序改动（返回是否真撤了）。"""
+        return self._undo_step()
 
     def onMoveSection_(self, sender):
         """右键菜单项：移到 sender 标记的区（菜单项自带目标键）。"""
@@ -1342,27 +1383,134 @@ class SettingsController(NSObject):
         self._commit_order_note(buckets, f"按名称排序：{sections.SECTION_LABELS[sec]}")
 
     def onResetLayout_(self, sender):
-        """重置布局：先弹确认再动；压了撤销点，重置完还能 ⌘Z 撤回来。"""
+        """重置布局：先弹确认再动草稿；应用前不落盘不拖拽（暂存+应用模式）。"""
         alert = NSAlert.alloc().init()
-        alert.setMessageText_("重置布局？")
-        alert.setInformativeText_("把弹窗显示/永久隐藏的图标全部带回菜单栏，并清空自定义顺序。"
-                                  "此步可用 ⌘Z 撤销。")
-        alert.addButtonWithTitle_("重置")
-        alert.addButtonWithTitle_("取消")
+        alert.setMessageText_(tr("layout.reset.title"))
+        alert.setInformativeText_(tr("layout.reset.body"))
+        alert.addButtonWithTitle_(tr("layout.reset.btn"))
+        alert.addButtonWithTitle_(tr("common.cancel"))
         if int(alert.runModal()) != int(NSAlertFirstButtonReturn):
             print("[PeaseBar] 设置：重置布局被取消")
             return
-        cfg = sections.load_config()
+        self._begin_pending()
+        cfg = self._pending_cfg
         self._push_undo(cfg)
         sections.reset_layout(cfg)
-        sections.save_config(cfg)
-        print("[PeaseBar] 设置：重置布局（全部回菜单栏，顺序清空）")
+        print("[PeaseBar] 设置：重置布局（全部回菜单栏，顺序清空；暂存，待应用）")
+        self._rebuild()
+
+    def onApplyLayout_(self, sender):
+        """「应用改动」：暂存的布局草稿一次写盘并立刻生效。
+
+        生效三件事都在后台线程做（CC 全量对齐含 2s 实效自检、系统收纳区放出、
+        「菜单栏显示」区整区顺序对齐——合成 ⌘-拖很慢，不能卡主线程）；期间
+        应用按钮转忙防重入；完成后回主线程重盘点、重建界面、刷新面板。
+        应用前的盘上配置压进撤销栈：应用错了还能 ⌘Z 回滚（回滚同样只是草稿，
+        再点应用才落盘）。
+        """
+        if getattr(self, "_pending_cfg", None) is None or getattr(self, "_applying", False):
+            return
+        self._undo.append(sections.snapshot(sections.load_config()))
+        if len(self._undo) > UNDO_LIMIT:
+            del self._undo[0]
+        sections.save_config(self._pending_cfg)
+        self._pending_cfg = None
+        self._applying = True
+        print("[PeaseBar] 设置：应用改动（草稿已落盘，真实菜单栏对齐中…）")
+        import threading
+
+        def _run():
+            summary = {}
+            try:
+                if self.opt("real_bar"):
+                    summary["cc"] = self.sync_cc_now()
+                    try:
+                        self._reveal_all_stashed()
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[PeaseBar] 应用：收纳区放出失败：{exc}")
+                    try:
+                        self._align_section_order()
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[PeaseBar] 应用：顺序对齐失败：{exc}")
+            except Exception as exc:  # noqa: BLE001
+                summary["error"] = str(exc)
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "applyDone:", summary, False)
+
+        threading.Thread(target=_run, daemon=True).start()
+        self._rebuild()  # 立即按盘上配置重画：按钮转忙、标题去点
+        if self.on_changed:
+            self.on_changed()
+
+    def applyDone_(self, summary):
+        """应用流程的后台部分跑完：回主线程收尾（重盘点/重建/刷新面板）。"""
+        self._applying = False
+        cc = summary.get("cc") or {}
+        if cc.get("writable") and (cc.get("hide") or cc.get("show")):
+            print(f"[PeaseBar] 应用：真实菜单栏收 {cc.get('hide', 0)} 枚 / 显 "
+                  f"{cc.get('show', 0)} 枚")
+        if cc.get("still_visible"):
+            print(f"[PeaseBar] 应用：实效自检重写 {len(cc['still_visible'])} 枚")
+        if cc.get("error"):
+            print(f"[PeaseBar] 应用：CC 对齐异常：{cc['error']}")
+        if summary.get("error"):
+            print(f"[PeaseBar] 应用：异常：{summary['error']}")
+        self._reload_items()
         self._rebuild()
         if self.on_changed:
             self.on_changed()
-        # 重置也镜像到真实菜单栏：把系统收着的第三方图标全部拖回可见段
-        if self.opt("real_bar"):
-            self._reveal_all_stashed()
+        print("[PeaseBar] 设置：应用改动完成")
+
+    @objc.python_method
+    def _align_section_order(self):
+        """应用时把「菜单栏显示」区整区目标顺序一次对齐到真实菜单栏。
+
+        按目标序逐项拖到左邻右边；每步拖完刷一遍实时坐标再动下一项（合成
+        ⌘-拖会重排菜单栏，旧坐标会拖空）。实况已是目标序就不折腾——合成拖拽
+        哪怕幂等也会让图标抖一下。系统项拖不动，但永远占着前排，正好当锚。
+        """
+        if not self.opt("real_bar"):
+            return
+        group = self.buckets.get(sections.SECTION_VISIBLE) or []
+        if len(group) < 2:
+            return
+        import time
+        try:
+            fresh = [sections.item_key(m) for m in inventory.list_items()[0]
+                     if not m.is_stash_button]
+            pos = {k: i for i, k in enumerate(fresh)}
+            seq = [pos[k] for k in (sections.item_key(it) for it in group) if k in pos]
+            if seq == sorted(seq):
+                return  # 实况相对序已等于目标序：无需动手
+        except Exception:  # noqa: BLE001
+            pass
+        # CC 刚显回的项可能还没进盘点缓存：补一次全量盘点再动手
+        try:
+            all_items, _ = inventory.list_items()
+            have = {sections.item_key(m) for m in self.items}
+            for m in all_items:
+                if not m.is_stash_button and sections.item_key(m) not in have:
+                    self.items.append(m)
+        except Exception:  # noqa: BLE001
+            pass
+        self._resync_frames()
+        prev = None
+        moved = 0
+        for it in group:
+            src = self._item_by_key(sections.item_key(it))
+            if prev is not None and src is not None and menubar_drag.movable(src):
+                anchor = self._item_by_key(sections.item_key(prev))
+                if anchor is not None:
+                    try:
+                        if menubar_drag.reorder(src, anchor, after=True):
+                            moved += 1
+                            time.sleep(0.35)  # 给系统一拍重排，下一项的坐标才新
+                            self._resync_frames()
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[PeaseBar] 应用：顺序对齐失败（{it.label}）：{exc}")
+            prev = it
+        if moved:
+            print(f"[PeaseBar] 应用：「菜单栏显示」区顺序对齐 {moved} 项")
 
     @objc.python_method
     def _reveal_all_stashed(self):
@@ -2676,11 +2824,16 @@ class SettingsController(NSObject):
             ok, err = (res if isinstance(res, tuple) else (res, None))
             if not ok:
                 sender.setState_(0 if want_on else 1)  # 没成就把开关拨回去
-                desc = err.localizedDescription() if err is not None else "未知原因"
-                self.lbl_launch_status.setStringValue_(f"系统拒绝了这次修改：{desc}")
+                desc = err.localizedDescription() if err is not None else str(res)
+                # 错误文案存标记而不只靠文本前缀判：切语言后前缀判据会失灵
+                self._launch_error = tr("launch.deny", reason=desc)
+                self.lbl_launch_status.setStringValue_(self._launch_error)
+            else:
+                self._launch_error = None
         except Exception as exc:  # noqa: BLE001 — 如实上屏，不假装成功
             sender.setState_(0 if want_on else 1)
-            self.lbl_launch_status.setStringValue_(f"调用失败：{exc}")
+            self._launch_error = tr("launch.fail", err=exc)
+            self.lbl_launch_status.setStringValue_(self._launch_error)
         self._sync_launch_state()
         print(f"[PeaseBar] 设置：开机自启切换 {'开' if want_on else '关'}，"
               f"回读状态={self._launch_status()}")
@@ -2694,14 +2847,13 @@ class SettingsController(NSObject):
 
     def _sync_launch_state(self):
         st = self._launch_status()
-        on, text = _LOGIN_STATUS.get(st, (False, "读不到系统状态"))
+        on, text = _login_status().get(st, (False, tr("login.unknown")))
         if getattr(self, "chk_launch", None) is not None:
             self.chk_launch.setState_(1 if on else 0)
-        # 错误文案优先：刚失败过就别用状态码把失败信息盖掉
-        if getattr(self, "lbl_launch_status", None) is not None and st is not None:
-            cur = self.lbl_launch_status.stringValue() or ""
-            if not cur.startswith(("系统拒绝", "调用失败")):
-                self.lbl_launch_status.setStringValue_(text)
+        # 错误文案优先：刚失败过就别用状态码把失败信息盖掉（靠标记判，不靠文案前缀）
+        if (getattr(self, "lbl_launch_status", None) is not None and st is not None
+                and getattr(self, "_launch_error", None) is None):
+            self.lbl_launch_status.setStringValue_(text)
 
     # ---------- 静态页 builder（通用/快捷键/疑难解答/关于） ----------
 
@@ -2901,7 +3053,10 @@ class SettingsController(NSObject):
             pop = NSPopUpButton.alloc().initWithFrame_pullsDown_(
                 NSMakeRect(right_x, band_y, ctl_w, 24), False)
             vals = ctl[2]  # [(value,label),...]
-            cur = self._cfg_get(cfg, ctl[1])
+            if ctl[1] == "lang":
+                cur = i18n.current_lang()  # 语言存顶层配置，不走 prefs 袋
+            else:
+                cur = self._cfg_get(cfg, ctl[1])
             for v, name in vals:
                 pop.addItemWithTitle_(name)
             idx = next((i for i, (v, _) in enumerate(vals) if v == cur), 0)
@@ -3016,8 +3171,8 @@ class SettingsController(NSObject):
         elif kind == "control_icon":
             pop = NSPopUpButton.alloc().initWithFrame_pullsDown_(
                 NSMakeRect(right_x, band_y, ctl_w, 24), False)
-            for _sym, name in sections.CONTROL_ICONS:
-                pop.addItemWithTitle_(name)
+            for sym, _name in sections.CONTROL_ICONS:
+                pop.addItemWithTitle_(sections.control_icon_label(sym))
             curic = next((i for i, (k, _) in enumerate(sections.CONTROL_ICONS)
                           if k == cfg.get("control_icon")), 0)
             pop.selectItemAtIndex_(curic)
@@ -3140,9 +3295,17 @@ class SettingsController(NSObject):
 
     def onPrefPopup_(self, sender):
         meta = sender.representedObject()
+        key = str(meta["key"])
         values = list(meta["values"])
         i = int(sender.indexOfSelectedItem())
-        self._persist(str(meta["key"]), values[i] if 0 <= i < len(values) else values[0])
+        val = values[i] if 0 <= i < len(values) else values[0]
+        if key == "lang":
+            # 界面语言：写顶层配置 + 失效词条缓存，整窗重建立即换语言
+            if i18n.set_lang(val):
+                print(f"[PeaseBar] 设置：界面语言切换为 {val}")
+            self._rebuild()
+            return
+        self._persist(key, val)
 
     def onPrefSegmented_(self, sender):
         meta = sender.representedObject()
@@ -3179,14 +3342,16 @@ class SettingsController(NSObject):
         # 精简模式/Dock 图标/语言/主题/收起 App 菜单等无后端的开关已摘除
         # ——宁少勿假，拨了没反应的开关比没有更伤体验。
         return [
-            _block("应用", [
-                _row_launch(help="开机后自动运行 PeaseBar（SMAppService，以系统回读为准）。"),
-                _row_timeout(help="面板失去焦点或超过该秒数自动收回；0 = 不超时。"),
-                _row_switch("show_help_text", "显示设置描述",
-                            help="在每个设置项正下方说明它的作用（就是这一行文字）。"),
+            _block(tr("spec.general.app"), [
+                _row_launch(help=tr("launch.help")),
+                _row_timeout(help=tr("timeout.help")),
+                _row_switch("show_help_text", tr("showhelp.title"),
+                            help=tr("showhelp.help")),
+                _row_popup("lang", tr("lang.title"), i18n.lang_names(),
+                           help=tr("lang.help")),
             ]),
-            _block("PeaseBar 图标", [
-                _row_cicon(help="选择在菜单栏显示的控制图标；点击它呼出面板，右键打开设置。"),
+            _block(tr("cicon.caption"), [
+                _row_cicon(help=tr("cicon.help")),
             ]),
         ]
 
@@ -3199,21 +3364,21 @@ class SettingsController(NSObject):
         writable = ccnative.is_writable()
         n_side = len(ccnative.last_hidden())
         return [
-            _para("PeaseBar 隐藏图标的机制：把你标为「弹窗显示/永久隐藏」的 App 写进"
-                  "系统「菜单栏」设置里对应的允许开关（ControlCenter 存储），再让系统"
-                  "菜单栏进程重读生效——全程在你 Mac 上完成，App 本体照常运行。"),
-            _block("隐藏通道", [
-                _row_status("按 App 显隐开关", writable, "可用" if writable else "不可用",
-                            help="第三方 App 图标的显隐都走这个系统开关；不可用时显隐会失效。"),
-                _row_status("辅助功能", ax_ok, "已授权" if ax_ok else "未授权",
-                            help="盘点菜单栏项目及其位置的必要权限。"),
-                _row_status("侧车记录", True, f"{n_side} 枚由 PeaseBar 隐藏中",
-                            help="PeaseBar 藏过的 App 记在这本账上；配置改回「菜单栏显示」时按它显回。"),
+            _para(tr("vis.intro")),
+            _block(tr("vis.channel"), [
+                _row_status(tr("vis.cc.title"), writable,
+                            tr("vis.ok") if writable else tr("vis.bad"),
+                            help=tr("vis.cc.help")),
+                _row_status(tr("vis.ax.title"), ax_ok,
+                            tr("vis.ok2") if ax_ok else tr("vis.bad2"),
+                            help=tr("vis.ax.help")),
+                _row_status(tr("vis.sidecar.title"), True,
+                            tr("vis.sidecar.status", n=n_side),
+                            help=tr("vis.sidecar.help")),
             ]),
-            _block("自动核对", [
-                _row_switch("cc_tick_enabled", "每分钟自动核对显隐",
-                            help="App 断线重连或系统漂移会让隐藏悄悄失效；开着就每分钟自动对齐你的分区"
-                                 "——无漂移时零动作，菜单栏不闪。"),
+            _block(tr("vis.tick"), [
+                _row_switch("cc_tick_enabled", tr("vis.tick.row"),
+                            help=tr("vis.tick.help")),
             ]),
         ]
 
@@ -3223,13 +3388,14 @@ class SettingsController(NSObject):
     @objc.python_method
     def _spec_shortcuts(self):
         active = self._subtab("shortcuts")
-        tabs = ["显隐规则", "菜单栏项目", "布局", "PeaseBar 工具栏"]
+        tabs = [tr("sc.tab.0"), tr("sc.tab.1"), tr("sc.tab.2"), tr("sc.tab.3")]
         blocks = [_tabbar("shortcuts", tabs)]
         rows_map = {
-            0: [("显示或隐藏隐藏项", "⌥⌘B"), ("交换显示与隐藏项", ""), ("切换“再次隐藏”", ""),
+            0: [(tr("sc.showhide"), "⌥⌘B"), ("交换显示与隐藏项", ""), ("切换“再次隐藏”", ""),
                 ("切换禅模式", ""), ("隐藏或显示 App 菜单", ""), ("显示菜单栏", "")],
             1: [("下一个项目", ""), ("上一个项目", ""), ("触发选中项", ""), ("重命名选中项", "")],
-            2: [("移到上一区", "⌥↑"), ("移到下一区", "⌥↓"), ("前移", "⌥←"), ("后移", "⌥→"), ("撤销", "⌘Z")],
+            2: [(tr("sc.moveto.up"), "⌥↑"), (tr("sc.moveto.down"), "⌥↓"),
+                (tr("sc.prev"), "⌥←"), (tr("sc.next"), "⌥→"), (tr("sc.undo"), "⌘Z")],
             3: [("打开工具栏", ""), ("关闭工具栏", "")],
         }
         # 纯速查展示：不放「录制」假按钮（自定义快捷键无后端，宁少勿假）；
@@ -3239,26 +3405,25 @@ class SettingsController(NSObject):
                 for label, combo in rows_map.get(active, [])
                 if combo]  # 没内置键位的项不列（列了就是摆设）
         blocks.append(_block(tabs[active], rows))
-        blocks.append(_para("PeaseBar 当前内置：⌥⌘B 开关救援面板 · ⌥⌘S 打开设置窗 · "
-                            "布局页 ⌥↑↓←→ 改区/改序、⌘Z 撤销 · 格子右键菜单同样能换区与前移后移。"))
+        blocks.append(_para(tr("sc.built")))
         return blocks
 
     @objc.python_method
     def _spec_profiles(self):
         cfg = sections.load_config()
         profs = self._cfg_get(cfg, "profiles") or []
-        blocks = [{"heading": "已保存的配置", "rows": [
-            {"title": "还没有配置", "help": "在下方给当前设置起个名字，点“保存当前配置”存为一个配置。", "ctl": None},
+        blocks = [{"heading": tr("prof.saved"), "rows": [
+            {"title": tr("prof.empty"), "help": tr("prof.empty.help"), "ctl": None},
         ]}] if not profs else []
-        prof_rows = [{"title": str(p.get("name", f"配置 {i + 1}")), "help": None,
-                      "ctl": ("buttons", [("应用", "onApplyProfile:", 70, {"idx": i}),
-                                          ("删除", "onDeleteProfile:", 64, {"idx": i})])}
+        prof_rows = [{"title": str(p.get("name", tr("prof.n", n=i + 1))), "help": None,
+                      "ctl": ("buttons", [(tr("prof.apply"), "onApplyProfile:", 70, {"idx": i}),
+                                          (tr("prof.delete"), "onDeleteProfile:", 64, {"idx": i})])}
                      for i, p in enumerate(profs)]
         if prof_rows:
-            blocks.append({"heading": "已保存的配置", "rows": prof_rows})
-        blocks.append(_block("新建配置", [
-            _row_text("new_profile_name", "新建配置名称", "例如：工作 / 会议"),
-            _row_buttons("", [("保存当前配置", "onSaveProfile:", 120)]),
+            blocks.append({"heading": tr("prof.saved"), "rows": prof_rows})
+        blocks.append(_block(tr("prof.new"), [
+            _row_text("new_profile_name", tr("prof.name"), tr("prof.name.ph")),
+            _row_buttons("", [(tr("prof.save"), "onSaveProfile:", 120)]),
         ]))
         return blocks
 
@@ -3267,53 +3432,54 @@ class SettingsController(NSObject):
         ax_ok = bool(AXIsProcessTrusted())
         rec_ok = bool(capture.has_screen_permission())
         return [
-            _para("数据不出你的 Mac：PeaseBar 不收集任何分析或使用数据，"
-                  "也没有任何网络请求——隐藏、显隐与配置全部本地完成。"),
-            _block("权限", [
-                _row_status("辅助功能", ax_ok, "已授权" if ax_ok else "未授权",
-                            help="检测 Mac 上菜单栏项目及其位置；移动项目以重排或隐藏；代表你点击项目。"),
-                _row_status("菜单栏布局表", True, "已授权",
-                            help="更新 macOS 保存的菜单栏布局，这是它把项目放进各区与顺序的方式。"),
-                _row_status("屏幕录制", rec_ok, "已授权" if rec_ok else "可选",
-                            help="显示菜单栏项目的实时预览、取样颜色、并通过视觉识别查找项目。"),
-                _row_buttons("", [("打开系统设置", "onOpenAXSettings:", 120)]),
+            _para(tr("priv.intro")),
+            _block(tr("priv.perm"), [
+                _row_status(tr("priv.ax.title"), ax_ok,
+                            tr("vis.ok2") if ax_ok else tr("vis.bad2"),
+                            help=tr("priv.ax.help")),
+                _row_status(tr("priv.table.title"), True, tr("vis.ok2"),
+                            help=tr("priv.table.help")),
+                _row_status(tr("priv.screen.title"), rec_ok,
+                            tr("vis.ok2") if rec_ok else tr("priv.opt"),
+                            help=tr("priv.screen.help")),
+                _row_buttons("", [(tr("common.open_settings"), "onOpenAXSettings:", 120)]),
             ]),
-            _block("PeaseBar 可以看到", [
-                _row_buttons("", [("立即抓取", "onRecapture:", 100)]),
+            _block(tr("priv.can"), [
+                _row_buttons("", [(tr("priv.grab"), "onRecapture:", 100)]),
             ]),
         ]
 
     @objc.python_method
     def _spec_troubleshoot(self):
         active = self._subtab("troubleshoot")
-        tabs = ["诊断", "修复", "重置"]
+        tabs = [tr("trb.tab.0"), tr("trb.tab.1"), tr("trb.tab.2")]
         blocks = [_tabbar("troubleshoot", tabs)]
         if active == 0:
             blocks += [
-                _block("诊断", [
-                    _row_switch("detailed_logging", "详细日志",
-                                help="为排障写详细日志到 ~/Library/Logs/PeaseBar/；用完请关闭以免无谓写盘。崩溃报告始终会保存。"),
+                _block(tr("trb.diag"), [
+                    _row_switch("detailed_logging", tr("trb.log.title"),
+                                help=tr("trb.log.help")),
                 ]),
-                _block("问题报告材料", [
-                    {"title": "日志", "help": "导出会把日志与抓取样本打包成一个附件文件。",
-                     "ctl": ("buttons", [("在 Finder 中显示日志", "onOpenLog:", 150)])},
-                    {"title": "项目列表", "help": f"PeaseBar 能看到的每个菜单栏项目（当前 {len(self.items)} 项）。",
-                     "ctl": ("buttons", [("重新抓取图标", "onRecapture:", 120)])},
+                _block(tr("trb.report"), [
+                    {"title": tr("trb.log.row"), "help": tr("trb.log.row.help"),
+                     "ctl": ("buttons", [(tr("trb.log.finder"), "onOpenLog:", 150)])},
+                    {"title": tr("trb.items"), "help": tr("trb.items.help", n=len(self.items)),
+                     "ctl": ("buttons", [(tr("common.recapture"), "onRecapture:", 120)])},
                 ]),
             ]
         elif active == 1:
             blocks += [
-                _block("修复", [
-                    _row_buttons("权限", [("打开辅助功能设置", "onOpenAXSettings:", 150),
-                                     ("请求屏幕录制权限", "onRequestPermission:", 150)]),
-                    _row_buttons("图标", [("重新抓取图标", "onRecapture:", 120)]),
+                _block(tr("trb.fix"), [
+                    _row_buttons(tr("trb.perm"), [(tr("common.ax_settings"), "onOpenAXSettings:", 150),
+                                     (tr("trb.screen"), "onRequestPermission:", 150)]),
+                    _row_buttons(tr("trb.icon"), [(tr("common.recapture"), "onRecapture:", 120)]),
                 ]),
             ]
         else:
             blocks += [
-                _block("重置", [
-                    {"title": "重置菜单栏布局", "help": "把除 PeaseBar 图标外的每个可移动项目移回选定区，就像全新安装；此步可用 ⌘Z 撤销。",
-                     "ctl": ("buttons", [("重置布局…", "onResetLayout:", 110)])},
+                _block(tr("trb.reset"), [
+                    {"title": tr("trb.reset.title"), "help": tr("trb.reset.help"),
+                     "ctl": ("buttons", [(tr("trb.reset.btn"), "onResetLayout:", 110)])},
                 ]),
             ]
         return blocks
@@ -3323,15 +3489,15 @@ class SettingsController(NSObject):
         from peasebar import __version__
         return [
             {"heading": "PeaseBar", "rows": [
-                {"title": f"版本 {__version__}",
-                 "help": "macOS 菜单栏图标管理工具：把装不下的图标收进弹窗，随时取用。",
+                {"title": tr("about.version", v=__version__),
+                 "help": tr("about.desc"),
                  "ctl": None},
             ]},
-            _block("源码", [
-                _row_buttons("", [("复制版本信息", "onCopyVersion:", 120),
-                              ("打开源码仓库", "onOpenRepo:", 120)]),
+            _block(tr("about.src"), [
+                _row_buttons("", [(tr("about.copy"), "onCopyVersion:", 120),
+                              (tr("about.repo"), "onOpenRepo:", 120)]),
             ]),
-            _para("Copyright © 2026 Pease。"),
+            _para(tr("about.copyright")),
         ]
 
     # ---------- 新增 action：配置管理、间距、诚实占位 ----------
@@ -3398,7 +3564,7 @@ class SettingsController(NSObject):
         pb.writeObjects_([text])
         lab = getattr(self, "lbl_about_status", None)
         if lab is not None:
-            lab.setStringValue_(f"已复制：{text}")
+            lab.setStringValue_(tr("about.copied", text=text))
         print(f"[PeaseBar] 设置：已复制版本信息——{text}")
 
     def onOpenRepo_(self, sender):
@@ -3479,37 +3645,36 @@ class SettingsController(NSObject):
             del self._undo[0]
 
     def _undo_step(self):
-        """弹快照回盘并重建；栈空时返回 False（让 ⌘Z 响铃，不静默默响）。"""
+        """弹快照回草稿并重建；栈空时返回 False（让 ⌘Z 响铃，不静默默响）。
+
+        撤销也只回退草稿副本（暂存+应用模式）：应用前的撤销把界面退回去；
+        应用后撤销则把盘上配置拍成新草稿退回去——两者都要再点「应用改动」
+        才真正落盘生效。"""
         if not self._undo:
             return False
         snap = self._undo.pop()
-        cfg = sections.load_config()
-        sections.restore_snapshot(cfg, snap)
-        sections.save_config(cfg)
-        print("[PeaseBar] 设置：撤销一步")
+        self._begin_pending()
+        sections.restore_snapshot(self._pending_cfg, snap)
+        print("[PeaseBar] 设置：撤销一步（草稿，待应用）")
         self._rebuild()
-        if self.on_changed:
-            self.on_changed()
         return True
 
     def _commit_order_note(self, buckets, note):
-        """把一次编辑（分桶结果）物化成显式顺序写盘，再重建界面。"""
-        cfg = sections.load_config()
+        """把一次编辑（分桶结果）物化成显式顺序写入草稿，再重建界面（不落盘）。"""
+        self._begin_pending()
+        cfg = self._pending_cfg
         self._push_undo(cfg)
         sections.store_order(cfg, sections.flatten(buckets))
-        sections.save_config(cfg)
-        print(f"[PeaseBar] 设置：{note}")
+        print(f"[PeaseBar] 设置：{note}（暂存，待应用）")
         self.buckets = buckets  # 先同步状态再重建：持续 ⌥→ 时第二下才不会拿着旧分桶算
         self._rebuild()
-        if self.on_changed:
-            self.on_changed()
 
     def reorderSelected_by_(self, key, delta):
         """同区内前移/后移一格。返回是否真动了（动不了不记撤销点）。
 
         重排本体在 `sections.reorder_bucket`（纯函数、单测直接测它），
-        这里负责「取位置→写盘→刷界面」，再在 real_bar 开时把「菜单栏显示」区的
-        新顺序镜像回真实菜单栏（合成 ⌘-拖，Phase 10；弹窗/永久隐藏区不动）。
+        这里负责「取位置→写草稿→刷界面」；真实菜单栏的顺序/显隐统一改在
+        点「应用改动」时一次对齐（暂存+应用模式，2026-11-24）。
         """
         if not key or not delta:
             return False
@@ -3525,8 +3690,6 @@ class SettingsController(NSObject):
         total = len(buckets[sec])
         self._commit_order_note(buckets,
                                 f"顺序：{key} → {sections.SECTION_LABELS[sec]} 第 {n}/{total} 格")
-        # 同区改序后镜像到真实菜单栏（仅「菜单栏显示」区会真动，其余区静默）
-        self._mirror_section_reorder(sec, key)
         return True
 
     def _move_selected_section(self, delta):
@@ -3554,19 +3717,24 @@ class SettingsController(NSObject):
         return sections.find_pos(self.buckets, self.selected_key)
 
     def applyMove_to_(self, key, target):
-        """写配置 + 刷新（按钮、右键菜单、⌥↑↓、⌘1/2/3 共用的唯一入口）。
+        """写草稿 + 刷新（按钮、右键菜单、⌥↑↓、⌘1/2/3 共用的唯一入口）。
 
         命名注意（PyObjC 的选择子映射，规则来自 objc._transform.default_selector）：
         方法名只带**一个**下划线时会被当成选择子（尾部的 `_` 换成 `:`，
         只有前导 `_` 则当零参选择子），参数对不上就在建类时报 BadPrototypeError
         （启动即死）。所以：带参方法要么写成 `xxx_y_`（冒号数 = 参数数），
         要么名字里至少放两个下划线（`_commit_order_note` 这种就根本不导出）。
+
+        暂存+应用模式：只改草稿副本不落盘；换区的真实菜单栏镜像统一改到
+        「应用改动」里一次做完（sync_cc_now + 收纳区放出 + 顺序对齐）。
         """
         if not key or target is None:
             return
-        cfg = sections.load_config()
-        if sections.section_of(cfg, key) == target:
-            return  # 原地不动不算改动：不记撤销点，免得 ⌘Z 看起来失灵
+        # 原地不动不算改动：不记撤销点也不开草稿（免得 ⌘Z 看起来失灵、标题白挂点）
+        if sections.section_of(self._layout_cfg(), key) == target:
+            return
+        self._begin_pending()
+        cfg = self._pending_cfg
         self._push_undo(cfg)
         sections.set_section(cfg, key, target)
         # 换区后抻到目标区末尾：不重排的话新位置由旧 order 位次决定，跳来跳去没规律
@@ -3576,15 +3744,10 @@ class SettingsController(NSObject):
             rest = [it for it in buckets[target] if sections.item_key(it) != key]
             buckets[target] = rest + [item]
         sections.store_order(cfg, sections.flatten(buckets))
-        sections.save_config(cfg)
         print(f"[PeaseBar] 设置：{key}（{item.label if item else '?'}）→ "
-              f"{sections.SECTION_LABELS[target]}")
+              f"{sections.SECTION_LABELS[target]}（暂存，待应用）")
         self.buckets = buckets
         self._rebuild()
-        if self.on_changed:
-            self.on_changed()
-        # 写盘刷完界面，再把「换区」镜像到真实菜单栏（real_bar 关时静默跳过）
-        self._mirror_section_move(key, target)
 
     @objc.python_method
     def _mirror_section_move(self, key, target):
@@ -3666,12 +3829,13 @@ class SettingsController(NSObject):
         # 选中项可能在两次刷新之间退场（App 退出）：拿不到落位就不当作选中，
         # 否则下一行解包 pos 会直接抛（提示行比格子重要，不能让它弄崩设置窗）
         if item is None or pos is None:
-            text = "未选择图标 · 单击图标选中，也可右键直接弹移区菜单"
+            text = tr("layout.sel.none")
         else:
-            owner = "系统" if item.owner_app == "系统" else item.owner_app
+            owner = tr("common.system") if item.owner_app == "系统" else item.owner_app
             sec, idx = pos
-            text = (f"已选：{item.label}（{owner}）· 当前："
-                    f"{sections.SECTION_LABELS[sec]} 第 {idx + 1}/{len(self.buckets[sec])} 格")
+            text = tr("layout.sel.item", label=item.label, owner=owner,
+                      sec=sections.section_label(sec), idx=idx + 1,
+                      total=len(self.buckets[sec]))
         if getattr(self, "lbl_selection", None) is not None:
             self.lbl_selection.setStringValue_(text)
         for btn in getattr(self, "move_buttons", []):
@@ -3686,6 +3850,13 @@ class SettingsController(NSObject):
             btn.setEnabled_(able)
         if getattr(self, "btn_undo", None) is not None:
             self.btn_undo.setEnabled_(bool(self._undo))
+        # 应用按钮：有草稿才可点；应用流程后台进行中转忙（标题也换成「应用中…」）
+        if getattr(self, "btn_apply", None) is not None:
+            applying = getattr(self, "_applying", False)
+            self.btn_apply.setTitle_(
+                tr("layout.applying") if applying else tr("layout.apply"))
+            self.btn_apply.setEnabled_(
+                getattr(self, "_pending_cfg", None) is not None and not applying)
         self._grab_keys()
 
     def _grab_keys(self):
@@ -3748,6 +3919,10 @@ class SettingsController(NSObject):
         value = max(0, value)
         cfg = sections.load_config()
         cfg["panel_timeout"] = value
+        if getattr(self, "_pending_cfg", None) is not None:
+            # 草稿是整份配置副本：应用时会整份写盘，这里的改动先同步进草稿
+            # 才不会被「应用改动」冲掉
+            self._pending_cfg["panel_timeout"] = value
         sections.save_config(cfg)
         print(f"[PeaseBar] 面板自动收回设为 {value}s")
         if self.on_changed:

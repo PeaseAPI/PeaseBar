@@ -23,6 +23,7 @@ from AppKit import (
 from Foundation import (NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer, NSURL)
 
 from peasebar import __version__, hotkeys, sections
+from peasebar.i18n import t as tr
 from peasebar.control_item import ControlItem
 
 # 单实例哨兵端口（仅本机回环，无安全边界，只用于判重）
@@ -67,14 +68,10 @@ def ensure_accessibility(interactive=False):
         print(f"[PeaseBar] 触发辅助功能授权提示失败：{exc}")
     if interactive:
         alert = NSAlert.alloc().init()
-        alert.setMessageText_("需要辅助功能权限")
-        alert.setInformativeText_(
-            "PeaseBar 需要读取菜单栏图标（辅助功能权限）才能工作。\n"
-            "请在「系统设置 → 隐私与安全性 → 辅助功能」中允许 PeaseBar（或运行它的终端），\n"
-            "然后重新启动 PeaseBar。"
-        )
-        alert.addButtonWithTitle_("打开系统设置")
-        alert.addButtonWithTitle_("稍后再说")
+        alert.setMessageText_(tr("app.ax.title"))
+        alert.setInformativeText_(tr("app.ax.body"))
+        alert.addButtonWithTitle_(tr("common.open_settings"))
+        alert.addButtonWithTitle_(tr("app.ax.later"))
         choice = alert.runModal()
         if choice == 1000:  # 第一个按钮
             url = NSURL.URLWithString_(
