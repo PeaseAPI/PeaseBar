@@ -617,6 +617,37 @@ class SettingsController(NSObject):
                     if rescue is not None:
                         rescue.show()
                         print("[PeaseBar] 取证：已弹救援面板")
+                elif step.startswith("trigger"):
+                    # 取证：点面板格同款链路（原生隐藏格走显回→触发→收回）；
+                    # trigger:<子串> 按 bid/应用名筛选，默认第一格
+                    app = NSApplication.sharedApplication()
+                    rescue = getattr(app.delegate(), "rescue", None)
+                    items = list(getattr(rescue, "items", []) or [])
+                    if not items:
+                        print("[PeaseBar] 取证：trigger 跳过（面板网格没货，先跑 panel）")
+                        continue
+                    it = items[0]
+                    if ":" in step:
+                        needle = step.split(":", 1)[1].lower()
+                        items2 = [m for m in items
+                                  if needle in str(m.owner_bundle_id).lower()
+                                  or needle in str(m.owner_app).lower()]
+                        if not items2:
+                            print(f"[PeaseBar] 取证：trigger 没匹配到 {needle!r}")
+                            continue
+                        it = items2[0]
+
+                    def _done(how, seen, _it=it):
+                        print(f"[PeaseBar] 取证：触发 {_it.owner_app}/{_it.label}"
+                              f"（原生隐藏={getattr(_it, 'native_hidden', False)}）："
+                              f"{how}，反应={'有' if seen else '无'}")
+
+                    if getattr(it, "native_hidden", False):
+                        from peasebar.panel import open_native_hidden_async
+                        open_native_hidden_async(it.owner_bundle_id, _done)
+                    else:
+                        from peasebar import trigger
+                        trigger.open_item_async(it, _done)
             except Exception as exc:  # noqa: BLE001  钩子失败只记录，不弄崩真机
                 print(f"[PeaseBar] 取证：步骤 {step!r} 异常：{exc}")
 
