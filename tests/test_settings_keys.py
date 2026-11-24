@@ -216,45 +216,79 @@ class TestCommandKeys(KeyCase):
 
 
 class TestRowCheck(KeyCase):
-    """单列清单行首复选框（2026-11-24 对标竞品）：勾选态驱动显隐，
-    走 applyMove_to_ 同一条链 —— 进草稿不落盘、⌘Z 可撤、应用才生效。"""
+    """单列清单行尾「显示/隐藏」两列选择框（2026-11-24 用户二改定调）：
+    点哪个框就归哪个区，走 applyMove_to_ 同一条链 —— 进草稿不落盘、
+    ⌘Z 可撤、应用才生效；互斥拨正不依赖 AppKit 重建。"""
+
+    def setUp(self):
+        super().setUp()
+        # rows 本由 _rebuild 初始化，但脚手架把 _rebuild 桩掉了，补一个空字典
+        self.ctrl.rows = {}
 
     class _Sender:
-        """假 NSButton：控制器只读 representedObject()/state() 两样。"""
+        """假选择框 NSButton：representedObject = 目标区 + 换行 + 配置键。"""
 
-        def __init__(self, key, state):
-            self._key, self._state = key, state
+        def __init__(self, target, key):
+            self._obj = target + "\n" + key
 
         def representedObject(self):
-            return self._key
+            return self._obj
 
-        def state(self):
-            return self._state
+    def _fake_row(self):
+        """造一行只有两个假框的行：用来验点已勾框时会被拨回正确态。"""
+        boxes = {}
+        row = types.SimpleNamespace()
+        for name in ("show_box", "hide_box"):
+            box = types.SimpleNamespace(state=lambda: 0)
+            box.setState_ = lambda v, _n=name: boxes.__setitem__(_n, v)
+            setattr(row, name, box)
+        return row, boxes
 
-    def test_取消勾选收进弹窗进草稿(self):
-        self.ctrl.onRowCheck_(self._Sender("a|A", 0))
+    def test_点隐藏收进弹窗进草稿(self):
+        self.ctrl.onRowChoose_(self._Sender(sections.SECTION_HIDDEN, "a|A"))
         self.assertEqual(self.draft()["sections"].get("a|A"), sections.SECTION_HIDDEN)
         self.assertEqual(self.cfg()["sections"].get("a|A"), None)  # 盘上未动
         self.assertEqual(self.rebuilt, [True])  # 改一次刷一次
 
-    def test_再勾选移回菜单栏显示(self):
-        self.ctrl.onRowCheck_(self._Sender("a|A", 0))   # 先收进弹窗
-        self.ctrl.onRowCheck_(self._Sender("a|A", 1))   # 再勾回来
+    def test_再点显示移回菜单栏(self):
+        self.ctrl.onRowChoose_(self._Sender(sections.SECTION_HIDDEN, "a|A"))  # 先收进弹窗
+        self.ctrl.onRowChoose_(self._Sender(sections.SECTION_VISIBLE, "a|A"))  # 再点回来
         self.assertEqual(sections.section_of(self.draft(), "a|A"),
                          sections.SECTION_VISIBLE)
         # 两次都是真改动：撤销栈里应有两个快照（⌘Z 能逐步回退）
         self.assertEqual(len(self.ctrl._undo), 2)
 
-    def test_勾选态与现状一致不算改动(self):
-        """a 本来就在可见区，再勾一次=没改：不开草稿、不记撤销点。"""
-        self.ctrl.onRowCheck_(self._Sender("a|A", 1))
+    def test_点已勾着的框不算改动且拨回原态(self):
+        """a 本来就在可见区，再点「显示」=没改：不开草稿、不记撤销点，
+        但 NSButton 点击会自翻转 state，handler 末尾要把它拨回去。"""
+        row, boxes = self._fake_row()
+        self.ctrl.rows["a|A"] = row
+        self.ctrl.onRowChoose_(self._Sender(sections.SECTION_VISIBLE, "a|A"))
         self.assertIsNone(self.ctrl._pending_cfg)
         self.assertEqual(self.ctrl._undo, [])
         self.assertEqual(self.rebuilt, [])
+        self.assertEqual(boxes["show_box"], 1)   # 勾着的拨回勾着
+        self.assertEqual(boxes["hide_box"], 0)   # 另一列保持不勾
+
+    def test_互斥_真改区后两框态拨正(self):
+        """可见区行点「隐藏」：整表会重建，但旧行上的框也要先拨对
+        （防重建前那一帧出现两框同勾的假态）。"""
+        row, boxes = self._fake_row()
+        self.ctrl.rows["a|A"] = row
+        self.ctrl.onRowChoose_(self._Sender(sections.SECTION_HIDDEN, "a|A"))
+        self.assertEqual(boxes["show_box"], 0)
+        self.assertEqual(boxes["hide_box"], 1)
+
+    def test_野representedObject直接忽略(self):
+        for bad in ("no-newline", "always_hidden\na|A", "\na|A"):
+            sender = types.SimpleNamespace(representedObject=lambda b=bad: b)
+            self.ctrl.onRowChoose_(sender)
+        self.assertIsNone(self.ctrl._pending_cfg)
+        self.assertEqual(self.rebuilt, [])
 
     def test_应用后落盘(self):
-        """草稿链不变：勾选改动要等「应用改动」才写盘。"""
-        self.ctrl.onRowCheck_(self._Sender("b|B", 0))
+        """草稿链不变：点框改动要等「应用改动」才写盘。"""
+        self.ctrl.onRowChoose_(self._Sender(sections.SECTION_HIDDEN, "b|B"))
         self.assertEqual(self.cfg()["sections"].get("b|B"), None)
         self.apply_now()
         self.assertEqual(self.cfg()["sections"].get("b|B"), sections.SECTION_HIDDEN)

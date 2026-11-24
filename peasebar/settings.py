@@ -17,8 +17,9 @@
 （T41：action 进去了、菜单却没出现在屏幕上），而按钮路径 100% 可控可测；
 右键菜单改用 `setMenu:`（T27：NSView 带菜单时系统自己弹），不再手写跟踪循环。
 
-拖拽（Phase 9 补上；2026-11-24 对标竞品改成单列清单）：每个图标竖排一行
-（行首复选框管「显示在菜单栏 / 收进弹窗」，行内图标+名字+归属），按住行拖
+拖拽（Phase 9 补上；2026-11-24 对标竞品改成单列清单，同日用户定调二改）：
+每个图标竖排一行（行尾「显示/隐藏」两列选择框管显隐——点哪个归哪个区，
+显示区在上、隐藏自动沉底，行序即菜单栏先后；最上面的先显示），按住行拖
 6pt 起一次拖拽会话：清单内上下拖动改顺序，拖进别的区行段即换区（与键盘
 ⌥←/→、⌥↑/↓、底部按钮、右键菜单共用同一套写入链与撤销栈）。为什么自己写
 mouseDown 跟踪：NSButton 的 mouseDown 会进 cell 自己的跟踪循环，view 的
@@ -109,13 +110,15 @@ ROW_H = 24
 SECTION_H = 20
 HEADER_H = 34
 GAP = 12
-# 布局页单列清单（2026-11-24 对标竞品改版：每个图标竖排一行，行首复选框管显隐，
-# 整行拖动排序/换区）：行高、胶囊上下留白、一屏最多行数（超出滚动，窗高可控）
+# 布局页单列清单（2026-11-24 对标竞品改版；同日用户定调二改：行尾「显示/隐藏」
+# 两列选择框替掉行首单勾选框，显示区在上、隐藏自动沉底，行序=菜单栏先后）：
+# 行高、胶囊上下留白、一屏最多行数（超出滚动，窗高可控）
 LIST_ROW_H = 40
 LIST_PAD_Y = 6
 LIST_MAX_ROWS = 8
-LIST_CHECK_X = 12    # 行首复选框 x
-LIST_ICON_X = 46     # 图标格子 x（给复选框留位）
+LIST_ICON_X = 14     # 图标格子 x（行首勾选框退役，图标靠左）
+LIST_SHOW_DX = 260   # 「显示」选择框距行右边
+LIST_HIDE_DX = 212   # 「隐藏」选择框距行右边
 # 选项卡片高（标题行 24 + 三行开关各 34，再留点底）
 OPT_CARD_H = 142
 # 布局页底部固定行数：选中提示 + 移区按钮 + 顺序按钮 + 重置行
@@ -1231,6 +1234,15 @@ class SettingsController(NSObject):
             label.setTextColor_(NSColor.secondaryLabelColor())
             label.setFrame_(NSMakeRect(12, y + 2, bar_w - 130, SECTION_H - 4))
             doc.addSubview_(label)
+            # 两列选择框的列标题（跟着每区标题行走，滚动时永远对齐行里的框）
+            for _htext, _hdx in ((tr("layout.list.col.show"), LIST_SHOW_DX),
+                                 (tr("layout.list.col.hide"), LIST_HIDE_DX)):
+                hlab = NSTextField.labelWithString_(_htext)
+                hlab.setFont_(NSFont.systemFontOfSize_(10))
+                hlab.setTextColor_(NSColor.tertiaryLabelColor())
+                hlab.setAlignment_(1)  # 居中
+                hlab.setFrame_(NSMakeRect(bar_w - _hdx - 14, y + 5, 52, 14))
+                doc.addSubview_(hlab)
             if len(group) > 1:
                 # 每区的「Sort by Name」：点一下把该区按名字典序写进 order（⌘Z 可撤）
                 sb = NSButton.alloc().initWithFrame_(
@@ -1269,32 +1281,21 @@ class SettingsController(NSObject):
 
     @objc.python_method
     def _build_list_row(self, doc, item, sec, y, w):
-        """清单的一行：[复选框][图标][名字][归属/永久隐藏徽标]。
+        """清单的一行：[图标][名字][显示选择框][隐藏选择框][归属/永久隐藏徽标]。
 
-        复选框 = 「显示在菜单栏」（VISIBLE）；取消勾选即收进弹窗（HIDDEN）；
-        「永久隐藏」仍由移区菜单/按钮（⌘3）进入，行尾徽标说明它（免得用户
-        当它是普通隐藏项）。整行是拖拽源（RowView）；图标格子仍注册进
-        self.tiles：拖拽校验、AX 身份、反查 item 全部沿用旧资产，取证脚本
-        的 AXIdentifier=配置键 判据不变。
+        行尾两列选择框（2026-11-24 用户定调）：点「显示」=菜单栏显示，
+        点「隐藏」=收进弹窗，行自动沉到对应区段（显示在上、隐藏在下）；
+        显示区里的行序就是真实菜单栏的先后（最上面的先显示）。「永久隐藏」
+        区行两框都不勾，仍可点框捞回，行尾徽标说明它（免得用户当它是普通
+        隐藏项）。整行是拖拽源（RowView）；图标格子仍注册进 self.tiles：
+        拖拽校验、AX 身份、反查 item 全部沿用旧资产，取证脚本的
+        AXIdentifier=配置键 判据不变。
         """
         row = RowView.alloc().initWithFrame_(NSMakeRect(0, y, w, LIST_ROW_H))
         row.settings_ctrl = self
         row.setWantsLayer_(True)
         row.layer().setCornerRadius_(6.0)
         key = sections.item_key(item)
-        cb = NSButton.alloc().initWithFrame_(
-            NSMakeRect(LIST_CHECK_X, (LIST_ROW_H - 18) / 2.0, 24, 18))
-        cb.setButtonType_(3)  # NSButtonTypeSwitch：标准复选框
-        cb.setTitle_("")
-        cb.setState_(1 if sec == sections.SECTION_VISIBLE else 0)
-        cb.setTarget_(self)
-        cb.setAction_("onRowCheck:")
-        cb.setRepresentedObject_(key)
-        cb.setAccessibilityLabel_(tr("layout.list.check.ax"))
-        cb.setAccessibilityIdentifier_("check-" + key)
-        cb.setToolTip_(tr("layout.list.check.tip",
-                          sec=sections.section_label(sec)))
-        row.addSubview_(cb)
         tile = self._make_tile(item, sec, LIST_ICON_X,
                                (LIST_ROW_H - TILE_H) / 2.0, TILE_W)
         row.addSubview_(tile)
@@ -1305,6 +1306,10 @@ class SettingsController(NSObject):
                                   (LIST_ROW_H - 18) / 2.0, 230, 18))
         name.cell().setLineBreakMode_(NSLineBreakByTruncatingTail)
         row.addSubview_(name)
+        row.show_box = self._build_choose_box(row, key, sections.SECTION_VISIBLE,
+                                              sec, w - LIST_SHOW_DX)
+        row.hide_box = self._build_choose_box(row, key, sections.SECTION_HIDDEN,
+                                              sec, w - LIST_HIDE_DX)
         owner = tr("common.system") if item.owner_app == "系统" else item.owner_app
         tail = (sections.section_label(sec)
                 if sec == sections.SECTION_ALWAYS_HIDDEN else owner) or ""
@@ -1312,13 +1317,34 @@ class SettingsController(NSObject):
         lab.setFont_(NSFont.systemFontOfSize_(11))
         lab.setTextColor_(NSColor.tertiaryLabelColor())
         lab.setAlignment_(2)  # 右对齐
-        lab.setFrame_(NSMakeRect(w - 220, (LIST_ROW_H - 16) / 2.0, 206, 16))
+        lab.setFrame_(NSMakeRect(w - 180, (LIST_ROW_H - 16) / 2.0, 166, 16))
         lab.cell().setLineBreakMode_(NSLineBreakByTruncatingTail)
         row.addSubview_(lab)
         row.setMenu_(self._menu_for(item, sec))
         doc.addSubview_(row)  # 行必须挂进文档视图才可见（首版漏了：清单只剩标题行）
         self.rows[key] = row
         return row
+
+    @objc.python_method
+    def _build_choose_box(self, row, key, target, sec, x):
+        """行尾两列互斥选择框之一（NSButton 复选框型，互斥由 onRowChoose_ 保证）：
+        勾着的那框=当前区；点另一框即换区。取证标识 check-show-/check-hide-<配置键>。"""
+        show = target == sections.SECTION_VISIBLE
+        b = NSButton.alloc().initWithFrame_(
+            NSMakeRect(x, (LIST_ROW_H - 18) / 2.0, 24, 18))
+        b.setButtonType_(3)  # NSButtonTypeSwitch：标准复选框
+        b.setTitle_("")
+        b.setState_(1 if sec == target else 0)
+        b.setTarget_(self)
+        b.setAction_("onRowChoose:")
+        b.setRepresentedObject_(target + "\n" + key)
+        b.setAccessibilityLabel_(tr("layout.list.col.show" if show
+                                    else "layout.list.col.hide"))
+        b.setAccessibilityIdentifier_("check-%s-%s" % ("show" if show else "hide", key))
+        b.setToolTip_(tr("layout.list.choose.tip",
+                        sec=sections.section_label(target)))
+        row.addSubview_(b)
+        return b
 
     @objc.python_method
     def _tile_image_key(self, key):
@@ -1432,16 +1458,27 @@ class SettingsController(NSObject):
         """鼠标左键在格子上松手（没拖起来）：与 action 同一条选中路。"""
         self.onTileClick_(tile)
 
-    def onRowCheck_(self, sender):
-        """行首复选框（对标竞品交互）：勾上=移回「菜单栏显示」，
-        取消=收进「弹窗显示」。与移区按钮/⌘1/2/3 同一条写入链（applyMove_to_）：
-        进草稿不落盘，点「应用改动」才真动菜单栏；⌘Z 可回退。
-        不可控项（系统藏不住、此刻真在栏上）取消勾选会被实况门控拉回可见区——
+    def onRowChoose_(self, sender):
+        """行尾「显示/隐藏」选择框（2026-11-24 用户定调）：点哪个框就归哪个区，
+        清单自动重排成显示在上、隐藏在下。与移区按钮/⌘1/2/3 同一条写入链
+        （applyMove_to_）：进草稿不落盘，点「应用改动」才真动菜单栏；⌘Z 可回退。
+        不可控项（系统藏不住、此刻真在栏上）点「隐藏」会被实况门控拉回显示区——
         那是诚实行为，行旁的提示行已说明原因（hint.unmanageable）。"""
-        key = str(sender.representedObject() or "")
-        target = (sections.SECTION_VISIBLE if sender.state() == 1
-                  else sections.SECTION_HIDDEN)
+        raw = str(sender.representedObject() or "").split("\n", 1)
+        if len(raw) != 2 or raw[0] not in (sections.SECTION_VISIBLE,
+                                           sections.SECTION_HIDDEN):
+            return
+        target, key = raw
         self.applyMove_to_(key, target)
+        # 点已勾着的框不算改动、不触发重建，但框自己的态已被点击翻转：
+        # 按当前区把两个框拨回正确位置（真改过区则整表已重建，旧行已退役）
+        row = self.rows.get(key)
+        if row is not None:
+            cur = sections.section_of(self._layout_cfg(), key)
+            for b, t in ((getattr(row, "show_box", None), sections.SECTION_VISIBLE),
+                         (getattr(row, "hide_box", None), sections.SECTION_HIDDEN)):
+                if b is not None:
+                    b.setState_(1 if cur == t else 0)
 
     # ---------- 拖拽（源与落点共用一套写入链） ----------
 

@@ -112,12 +112,14 @@ _STRINGS = {
         "page.about": "关于", "page.about.sub": "版本与源码",
         "group.manage": "管理",
         # ---- 布局页 ----
-        "layout.title": "菜单栏布局 · 勾选=显示在菜单栏，取消=收进弹窗；上下拖动排序",
+        "layout.title": "菜单栏布局 · 行尾「显示/隐藏」两列选择框；上下拖动排序，最上面的先显示",
         "layout.count": "{sec} · {n} 项",
-        "layout.hint.drag": "行首勾选框控制显隐：勾上显示在菜单栏，取消收进弹窗；按住行上下拖动改顺序，拖进别的区段即换区；真实菜单栏上可按住 ⌘ 直接拖动图标排序或拖走；"
-                            "也可 ⌥←/→ 改顺序、⌥↑/↓ 换区，⌘Z 撤销。",
-        "layout.list.check.ax": "显示在菜单栏",
-        "layout.list.check.tip": "当前：{sec}；勾选=显示在菜单栏，取消=收进弹窗",
+        "layout.hint.drag": "行尾有「显示」「隐藏」两列选择框：点哪个就归哪个区，隐藏项自动沉到底部区段；"
+                            "行序即菜单栏先后，最上面的先显示，按住行上下拖动改顺序；"
+                            "真实菜单栏上可按住 ⌘ 直接拖动图标排序或拖走；也可 ⌥←/→ 改顺序、⌥↑/↓ 换区，⌘Z 撤销。",
+        "layout.list.col.show": "显示",
+        "layout.list.col.hide": "隐藏",
+        "layout.list.choose.tip": "移到{sec}",
         "layout.sort.byname": "按名称排序",
         "layout.sort.more": "更多排序",
         "layout.sort.more.ax": "{sec}的更多排序",
@@ -303,12 +305,14 @@ _STRINGS = {
         "page.troubleshoot": "疑難排解", "page.troubleshoot.sub": "記錄、修復與重置",
         "page.about": "關於", "page.about.sub": "版本與原始碼",
         "group.manage": "管理",
-        "layout.title": "選單列版面 · 勾選=顯示在選單列，取消=收入彈出窗；上下拖曳排序",
+        "layout.title": "選單列版面 · 列尾「顯示/隱藏」兩欄核取方塊；上下拖曳排序，最上面的先顯示",
         "layout.count": "{sec} · {n} 項",
-        "layout.hint.drag": "行首核取方塊控制顯示/隱藏：勾選顯示在選單列，取消收入彈出窗；按住列上下拖曳改順序，拖進其他區段即換區；真實選單列上可按住 ⌘ 直接拖曳圖示排序或拖走；"
-                            "也可 ⌥←/→ 改順序、⌥↑/↓ 換區，⌘Z 復原。",
-        "layout.list.check.ax": "顯示在選單列",
-        "layout.list.check.tip": "目前：{sec}；勾選=顯示在選單列，取消=收入彈出窗",
+        "layout.hint.drag": "列尾有「顯示」「隱藏」兩欄核取方塊：點哪個就歸哪個區段，隱藏項自動沉到下方區段；"
+                            "列序即選單列先後，最上面的先顯示，按住列上下拖曳改順序；"
+                            "真實選單列上可按住 ⌘ 直接拖曳圖示排序或拖走；也可 ⌥←/→ 改順序、⌥↑/↓ 換區，⌘Z 復原。",
+        "layout.list.col.show": "顯示",
+        "layout.list.col.hide": "隱藏",
+        "layout.list.choose.tip": "移到{sec}",
         "layout.sort.byname": "按名稱排序",
         "layout.sort.more": "更多排序",
         "layout.sort.more.ax": "{sec} 的更多排序",
@@ -485,14 +489,15 @@ _STRINGS = {
         "page.troubleshoot": "Troubleshooting", "page.troubleshoot.sub": "Logs, repairs & reset",
         "page.about": "About", "page.about.sub": "Version & source code",
         "group.manage": "Manage",
-        "layout.title": "Menu Bar Layout · Check to show, uncheck to hide into the popup; drag rows to reorder",
+        "layout.title": "Menu Bar Layout · \"Show/Hide\" checkboxes per row; drag to reorder, top shows first",
         "layout.count": "{sec} · {n} items",
-        "layout.hint.drag": "The checkbox shows or hides each icon: checked stays in the menu bar, unchecked moves into the popup. "
-                            "Drag a row up or down to reorder, or into another section to move it; "
-                            "on the real menu bar, hold ⌘ and drag icons directly. "
+        "layout.hint.drag": "Each row ends with a \"Show\" and a \"Hide\" checkbox: click one to move the icon there, hidden items sink to the bottom sections. "
+                            "Row order is menu bar order — the top row shows first; drag a row up or down to reorder. "
+                            "On the real menu bar, hold ⌘ and drag icons directly. "
                             "⌥←/→ reorders, ⌥↑/↓ changes sections, ⌘Z undoes.",
-        "layout.list.check.ax": "Show in menu bar",
-        "layout.list.check.tip": "Currently: {sec}; checked = shown in the menu bar, unchecked = hidden into the popup",
+        "layout.list.col.show": "Show",
+        "layout.list.col.hide": "Hide",
+        "layout.list.choose.tip": "Move to {sec}",
         "layout.sort.byname": "Sort by Name",
         "layout.sort.more": "More Sorting",
         "layout.sort.more.ax": "More sorting for {sec}",
@@ -672,14 +677,15 @@ _STRINGS = {
         "page.troubleshoot": "Устранение неполадок", "page.troubleshoot.sub": "Журналы, исправления, сброс",
         "page.about": "О программе", "page.about.sub": "Версия и исходный код",
         "group.manage": "Управление",
-        "layout.title": "Раскладка строки меню · флажок — показывать, без — в всплывающее окно; перетаскивание — порядок",
+        "layout.title": "Раскладка строки меню · флажки «Показать/Скрыть» в конце строки; перетаскивание — порядок, верхняя — первой",
         "layout.count": "{sec} · {n} шт.",
-        "layout.hint.drag": "Флажок показывает или прячет значок: с флажком — в строке меню, без — во всплывающем окне. "
-                            "Перетаскивайте строку для порядка или в другую секцию для переноса; "
-                            "на реальной строке меню зажмите ⌘ и перетаскивайте значки прямо там. "
+        "layout.hint.drag": "В конце каждой строки — флажки «Показать» и «Скрыть»: нажмите нужный, чтобы переместить; скрытые значки автоматически уходят в нижние секции. "
+                            "Порядок строк = порядок в строке меню: верхняя строка показывается первой; перетаскивайте строку для порядка. "
+                            "На реальной строке меню зажмите ⌘ и перетаскивайте значки прямо там. "
                             "⌥←/→ — порядок, ⌥↑/↓ — секция, ⌘Z — отмена.",
-        "layout.list.check.ax": "Показывать в строке меню",
-        "layout.list.check.tip": "Сейчас: {sec}; с флажком — в строке меню, без — во всплывающем окне",
+        "layout.list.col.show": "Показать",
+        "layout.list.col.hide": "Скрыть",
+        "layout.list.choose.tip": "Переместить в «{sec}»",
         "layout.sort.byname": "По имени",
         "layout.sort.more": "Ещё сортировка",
         "layout.sort.more.ax": "Ещё сортировки: {sec}",
@@ -857,14 +863,15 @@ _STRINGS = {
         "page.troubleshoot": "Dépannage", "page.troubleshoot.sub": "Journaux, réparations, réinit.",
         "page.about": "À propos", "page.about.sub": "Version et code source",
         "group.manage": "Gestion",
-        "layout.title": "Disposition · Cocher = afficher, décocher = ranger dans la fenêtre ; glisser pour réordonner",
+        "layout.title": "Disposition · Cases « Afficher/Masquer » en fin de ligne ; glisser pour réordonner, la première s'affiche d'abord",
         "layout.count": "{sec} · {n} éléments",
-        "layout.hint.drag": "La case affiche ou masque l'icône : cochée = dans la barre des menus, décochée = dans la fenêtre surgissante. "
-                            "Faites glisser une ligne pour réordonner ou vers une autre section pour la déplacer ; "
-                            "dans la vraie barre, maintenez ⌘ pour déplacer les icônes directement. "
+        "layout.hint.drag": "Chaque ligne se termine par les cases « Afficher » et « Masquer » : cliquez pour déplacer l'icône, les masquées descendent automatiquement dans les sections du bas. "
+                            "L'ordre des lignes = l'ordre dans la barre : la première ligne s'affiche en premier ; glissez une ligne pour la réordonner. "
+                            "Dans la vraie barre, maintenez ⌘ pour déplacer les icônes directement. "
                             "⌥←/→ réordonne, ⌥↑/↓ change de section, ⌘Z annule.",
-        "layout.list.check.ax": "Afficher dans la barre des menus",
-        "layout.list.check.tip": "Actuellement : {sec} ; cochée = affichée dans la barre, décochée = masquée dans la fenêtre",
+        "layout.list.col.show": "Afficher",
+        "layout.list.col.hide": "Masquer",
+        "layout.list.choose.tip": "Déplacer vers {sec}",
         "layout.sort.byname": "Trier par nom",
         "layout.sort.more": "Plus de tri",
         "layout.sort.more.ax": "Plus de tri pour {sec}",
@@ -1041,14 +1048,15 @@ _STRINGS = {
         "page.troubleshoot": "Fehlerbehebung", "page.troubleshoot.sub": "Logs, Reparaturen, Rücksetzen",
         "page.about": "Über", "page.about.sub": "Version & Quellcode",
         "group.manage": "Verwalten",
-        "layout.title": "Menüleisten-Layout · Häkchen = anzeigen, ohne = ins Popup; Zeilen ziehen zum Sortieren",
+        "layout.title": "Menüleisten-Layout · Ankreuzfelder „Anzeigen/Ausblenden“ am Zeilenende; Ziehen zum Sortieren, oberste zuerst",
         "layout.count": "{sec} · {n} Einträge",
-        "layout.hint.drag": "Das Ankreuzfeld zeigt oder verbirgt das Symbol: mit Häkchen in der Menüleiste, ohne im Popup. "
-                            "Zeile zum Umsortieren oder in einen anderen Bereich ziehen; "
-                            "in der echten Menüleiste ⌘ halten und Symbole direkt ziehen. "
+        "layout.hint.drag": "Jede Zeile endet mit den Feldern „Anzeigen“ und „Ausblenden“: Klick verschiebt dorthin, ausgeblendete Symbole wandern automatisch in die unteren Bereiche. "
+                            "Zeilenreihenfolge = Reihenfolge in der Menüleiste — die oberste Zeile erscheint zuerst; Zeile zum Umsortieren ziehen. "
+                            "In der echten Menüleiste ⌘ halten und Symbole direkt ziehen. "
                             "⌥←/→ sortiert, ⌥↑/↓ wechselt den Bereich, ⌘Z widerruft.",
-        "layout.list.check.ax": "In Menüleiste anzeigen",
-        "layout.list.check.tip": "Aktuell: {sec}; mit Häkchen = in der Menüleiste, ohne = im Popup",
+        "layout.list.col.show": "Anzeigen",
+        "layout.list.col.hide": "Ausblenden",
+        "layout.list.choose.tip": "Nach {sec} verschieben",
         "layout.sort.byname": "Nach Name sortieren",
         "layout.sort.more": "Mehr Sortierung",
         "layout.sort.more.ax": "Mehr Sortierung für {sec}",
